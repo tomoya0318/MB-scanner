@@ -1,5 +1,5 @@
 import { checkEquivalence } from "../equivalence-checker";
-import type { EquivalenceCheckResult, EquivalenceInput } from "../shared/equivalence-contracts";
+import type { EquivalenceCheckResult, EquivalenceInput } from "../contracts/equivalence-contracts";
 
 const EXIT_EQUAL = 0;
 const EXIT_NOT_EQUAL = 1;

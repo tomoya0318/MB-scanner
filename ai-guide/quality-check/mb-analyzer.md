@@ -79,7 +79,7 @@ if (import.meta.vitest) {
 tests/
 ├── fixtures/                     # [テスト対象外] 2 箇所以上で共有するデータ・builder・lifecycle fixture
 │   └── *.ts
-├── shared/                       # [unit] 末端層の型定義テスト (src/shared/ のミラー)
+├── contracts/                    # [unit] 末端層の型定義テスト (src/contracts/ のミラー)
 │   ├── equivalence-contracts.test.ts
 │   └── pruning-contracts.test.ts
 ├── equivalence-checker/          # [unit] src/ 構造をミラー
@@ -164,7 +164,7 @@ tests/
 
 | 却下した候補 | 却下理由 |
 |---|---|
-| `tests/shared/` | `src/shared/` のミラー (末端層の型テスト) と役割がぶつかる |
+| `tests/shared/` | `src/contracts/` のミラー (末端層の型テスト) と役割がぶつかる |
 | `tests/__fixtures__/` | Jest 由来の double-underscore 慣習は本 repo で採用していない |
 | `tests/factories/` | 関数 builder に寄せた命名としては正確だが、vitest 公式が `test.extend` の生成物を "fixture" と呼ぶため、将来 lifecycle fixture を追加した際に `fixtures/` / `factories/` が並立してしまう |
 
@@ -182,7 +182,7 @@ vitest 公式用語に寄せ、**静的データ・pure factory・`test.extend` 
 
 | ゾーン | 基準 | 理由 |
 |---|---|---|
-| `src/shared/` | **100%** | Python 側との JSON 契約の末端層。ここの漏れは両言語の仕様ずれにつながる |
+| `src/contracts/` | **100%** | Python 側との JSON 契約の末端層。ここの漏れは両言語の仕様ずれにつながる |
 | `src/equivalence-checker/oracles/` | **100%** | 各 oracle が仕様の判定ロジックそのもの。未到達分岐は誤判定と等価 |
 | `src/equivalence-checker/verdict.ts` | **100%** | 全 oracle 結果の合成ロジック。優先順位分岐を全て網羅 |
 | `src/equivalence-checker/sandbox/` | 主要パス + エラー分岐 | `vm.Script` の例外、タイムアウト、シリアライズ失敗の分岐は必須。ホスト環境差分が出る部分は妥協可 |

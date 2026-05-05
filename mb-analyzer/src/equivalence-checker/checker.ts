@@ -3,7 +3,7 @@ import {
   type EquivalenceCheckResult,
   type EquivalenceInput,
   type OracleObservation,
-} from "../shared/equivalence-contracts";
+} from "../contracts/equivalence-contracts";
 import { executeSandboxed } from "./sandbox/executor";
 import { checkArgumentMutation } from "./oracles/argument-mutation";
 import { checkException } from "./oracles/exception";

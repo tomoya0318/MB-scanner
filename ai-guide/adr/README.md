@@ -67,7 +67,7 @@ export function collectSubtreeHashes(file: File): Set<string> { ... }
 | [0001](0001-pruning-ast-traversal.md) | pruning の AST 走査に VISITOR_KEYS 再帰を採用 | accepted | `mb-analyzer/src/pruning/` |
 | [0002](0002-babel-topdown-subtree-hash.md) | AST 差分判定に Babel + top-down subtree hash を自作 | accepted | `mb-analyzer/src/pruning/` |
 | [0003](0003-bottom-up-mapping-deferred.md) | bottom-up mapping を第 2 段階以降に遅延 | accepted | `mb-analyzer/src/pruning/` |
-| [0004](0004-pruning-setup-single.md) | PruningInput.setup を単数 string にする | accepted | `mb-analyzer/src/shared/pruning-contracts.ts`, `mb_scanner/domain/entities/pruning.py` |
+| [0004](0004-pruning-setup-single.md) | PruningInput.setup を単数 string にする | accepted | `mb-analyzer/src/contracts/pruning-contracts.ts`, `mb_scanner/domain/entities/pruning.py` |
 | [0005](0005-grammar-derived-blacklist.md) | pruning 候補 blacklist を `@babel/types` の文法メタデータから自動導出する | accepted | `mb-analyzer/src/pruning/rules/blacklist.ts` |
 | [0006](0006-grammar-derived-whitelist.md) | pruning 候補 whitelist を `@babel/types` の文法 alias から自動導出する | accepted | `mb-analyzer/src/pruning/rules/whitelist.ts` |
 | [0007](0007-in-source-testing-internal-helpers.md) | 内部ヘルパとモジュール内共有ヘルパは in-source testing、公開 API は `tests/` ツリーで分離する | accepted | `mb-analyzer/` |

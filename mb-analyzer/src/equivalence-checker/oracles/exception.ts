@@ -1,4 +1,4 @@
-import { ORACLE, ORACLE_VERDICT, type OracleObservation } from "../../shared/equivalence-contracts";
+import { ORACLE, ORACLE_VERDICT, type OracleObservation } from "../../contracts/equivalence-contracts";
 import type { ExceptionCapture, ExecutionCapture } from "../sandbox/executor";
 
 /**
