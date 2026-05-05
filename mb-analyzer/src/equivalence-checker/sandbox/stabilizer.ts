@@ -62,8 +62,14 @@ function createConsoleHook(sink: ConsoleCall[]): Record<ConsoleMethod, (...args:
 
 // global proxy で fall-through すべき ECMAScript 標準 builtins。
 // Math / Date は frozen 化するため baseline 側で上書きする。
+// 意図的に除外:
+//   - `Function`: `Function("…")()` 経由で別 realm のコンパイラに任意コード実行を許してしまうため
+//     stub fallback (no-op) に潰す。
+//   - `globalThis`: 別 realm の global を指すと sandbox 内 `globalThis.x = …` が executor の
+//     `new_globals` 追跡から漏れるため、vm context 本来の global に解決させる (= 未列挙)。
+//   - `eval`: そもそも sandbox 上では direct eval も意味がないし、間接 eval の host realm 漏れも防ぐ。
 const BUILTIN_GLOBALS: ReadonlySet<string> = new Set([
-  "Object", "Function", "Array", "Number", "Boolean", "String", "Symbol", "BigInt",
+  "Object", "Array", "Number", "Boolean", "String", "Symbol", "BigInt",
   "RegExp", "JSON",
   "Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError",
   "EvalError", "URIError", "AggregateError",
@@ -75,14 +81,17 @@ const BUILTIN_GLOBALS: ReadonlySet<string> = new Set([
   "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array",
   "parseInt", "parseFloat", "isNaN", "isFinite",
   "encodeURI", "decodeURI", "encodeURIComponent", "decodeURIComponent",
-  "NaN", "Infinity", "undefined", "globalThis", "Atomics",
+  "NaN", "Infinity", "undefined", "Atomics",
   "escape", "unescape",
 ]);
 
-// 別 realm から builtin の実体を取得して固定化する。各 stabilized context で
-// 同じ pool を共有しても、builtin は frozen に近い値なので汚染は発生しない。
-// realm が分離されているため `[1,2] instanceof Array` は false になる cross-realm
-// の精度欠落があるが、両 sandbox で同じ realm を使うので等価判定は機能する。
+// 別 realm から builtin の実体を取得し、prototype チェーン全体を deep freeze して
+// 全 stabilized context で共有する。`checkEquivalence` は `Promise.all` で slow/fast を
+// 並列実行するため、共有 pool 経由で `Object.prototype.poisoned = …` のような汚染が
+// もう片方や次 item に漏れると等価判定の独立性が壊れる。freeze で書き込みを禁じれば
+// pool は実質的に immutable になるので共有してよい。
+// realm が分離されているため `[1,2] instanceof Array` は false になる cross-realm の
+// 精度欠落があるが、両 sandbox で同じ realm を使うので等価判定は機能する。
 let cachedBuiltinPool: Readonly<Record<string, unknown>> | null = null;
 function loadBuiltinPool(): Readonly<Record<string, unknown>> {
   if (cachedBuiltinPool !== null) return cachedBuiltinPool;
@@ -90,13 +99,33 @@ function loadBuiltinPool(): Readonly<Record<string, unknown>> {
   const pool: Record<string, unknown> = {};
   for (const name of BUILTIN_GLOBALS) {
     try {
-      pool[name] = vm.runInContext(name, realm) as unknown;
+      const value = vm.runInContext(name, realm) as unknown;
+      freezeBuiltin(value);
+      pool[name] = value;
     } catch {
       // 実行環境にない builtin は skip
     }
   }
-  cachedBuiltinPool = pool;
-  return pool;
+  cachedBuiltinPool = Object.freeze(pool);
+  return cachedBuiltinPool;
+}
+
+// builtin とその prototype チェーンを再帰的に freeze する。コンストラクタ自身 / その
+// `prototype` / さらに親 prototype まで辿ることで、`Array.prototype.push = …` のような
+// 直接書き換えと、`obj.__proto__.foo = …` 経由の汚染をどちらも遮断する。
+// 既訪問オブジェクトを WeakSet で記録して循環 (Function.prototype 等) を防ぐ。
+const frozenBuiltins = new WeakSet<object>();
+function freezeBuiltin(value: unknown): void {
+  if (value === null) return;
+  if (typeof value !== "object" && typeof value !== "function") return;
+  const obj = value;
+  if (frozenBuiltins.has(obj)) return;
+  frozenBuiltins.add(obj);
+  Object.freeze(obj);
+  const proto = Object.getPrototypeOf(obj) as unknown;
+  freezeBuiltin(proto);
+  const ownProto = (obj as { prototype?: unknown }).prototype;
+  if (ownProto !== undefined) freezeBuiltin(ownProto);
 }
 
 const STUB_BRAND: unique symbol = Symbol.for("equivalence-checker.undefined-stub");
@@ -146,10 +175,14 @@ function makeUndefinedStub(name: string): UndefinedStub {
   });
 }
 
-// global object 用の proxy。builtin (Object/Array/...) は別 realm 経由で本物に解決し、
-// それ以外で sandbox にも無いキーは stub に化けさせる。`vm.createContext(proxy)` の
-// 戻り値が proxy 自身になるので、Object.keys(context) は target の own keys を返す
-// (executor の new_globals 検出が引き続き機能する)。
+// global object 用の proxy。解決順は:
+//   1. `globalThis` → proxy 自身 (vm context 本来の global)。別 realm に逃がすと
+//      `globalThis.x = …` が new_globals 追跡から漏れる。
+//   2. sandbox baseline (console/Math/Date/timer 系) と body 由来の代入 → そのまま返す。
+//   3. builtin pool (Object/Array/...) → 別 realm の本物 (deep freeze 済み)。
+//   4. どれにも無い identifier → universal stub (ReferenceError 回避)。
+// `vm.createContext(proxy)` の戻り値が proxy 自身になるので、Object.keys(context) は
+// target の own keys を返す (executor の new_globals 検出が引き続き機能する)。
 function installStubFallback(
   sandbox: Record<string, unknown>,
   builtins: Readonly<Record<string, unknown>>,
@@ -157,9 +190,10 @@ function installStubFallback(
   return new Proxy(sandbox, {
     has(target, prop) {
       if (typeof prop === "symbol") return Reflect.has(target, prop);
-      // すべての string 名前解決を proxy 経由に流すことで未定義 identifier も
-      // ReferenceError ではなく get trap → stub に変換する
-      return prop in target || Object.hasOwn(builtins, prop) || true;
+      // 未定義 identifier も「存在する」と返して get trap → stub に流す。
+      // ReferenceError を投げない代わりに stub fallback で吸収する設計上、
+      // string 名は無条件に true で良い。
+      return true;
     },
     get(target, prop, receiver) {
       // symbol アクセス (Symbol.iterator など) は target/builtin に固有の意味があるので
@@ -167,6 +201,10 @@ function installStubFallback(
       if (typeof prop === "symbol") {
         return (Reflect.get(target, prop, receiver) ?? undefined) as unknown;
       }
+      // `globalThis` は vm context の global (= 本 proxy) を返す。
+      // 別 realm の globalThis を返してしまうと sandbox 内 `globalThis.x = …` が
+      // 別 realm の global に書き込まれ、executor の `new_globals` 追跡から漏れる。
+      if (prop === "globalThis") return receiver as unknown;
       if (prop in target) return target[prop];
       if (Object.hasOwn(builtins, prop)) return builtins[prop];
       return makeUndefinedStub(prop);

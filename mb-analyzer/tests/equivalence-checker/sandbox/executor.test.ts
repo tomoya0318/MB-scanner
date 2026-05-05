@@ -7,7 +7,7 @@
  *   - timeout: 無限ループで timed_out=true + exception 捕捉
  *   - console: log/error 等が console_log に順序通りに蓄積
  *   - 引数変異 (O2): setup 由来の配列・オブジェクトの pre/post snapshot、プリミティブは除外
- *   - 新規 global (O4): body で代入された key だけが new_globals、setup 由来は除外
+ *   - 新規 global (O4): body で代入された key だけが new_globals、setup 由来は除外、`globalThis.x = …` も追跡される
  *   - Promise: resolve は return_value、reject は exception、async IIFE も await 済み
  *   - 決定性: stabilizer により Math.random / Date.now が同一 setup/body で再現
  */
@@ -111,6 +111,15 @@ describe("executeSandboxed: 新規 global (O4)", () => {
   it("setup 由来の key は new_globals に含まれない", async () => {
     const res = await run("1", "var setupVar = 5;");
     expect(res.new_globals).not.toContain("setupVar");
+  });
+
+  it("globalThis 経由の代入も new_globals として観測される", async () => {
+    // `globalThis` が別 realm の global を指してしまうと sandbox 内の
+    // `globalThis.foo = 1` が外部 realm に書かれて new_globals 追跡から漏れる。
+    // 本 sandbox の global proxy を指していれば foo は sandbox global に乗る。
+    const res = await run("globalThis.foo = 1; foo");
+    expect(res.return_value).toBe("1");
+    expect(res.new_globals).toContain("foo");
   });
 });
 

@@ -6,8 +6,10 @@
  *   - Date.now / new Date() / performance.now はすべて FROZEN_EPOCH_MS を返す
  *   - setTimeout / setInterval の callback は呼ばれない (timer 実行禁止)
  *   - process / require / eval / Function などの host 逃げ道は stub に化けて no-op に潰れる
+ *   - `Function("…")()` は別 realm の本物 Function に解決せず stub を返す (任意コード実行を遮断)
  *   - 任意の未定義 identifier は Proxy stub に解決され、`.prop` / `()` / `new` を全部吸収
  *   - ECMAScript 標準 builtins (Object/Array/Math/JSON 等) は stub に化けない
+ *   - 複数 sandbox 間で builtin prototype の汚染 (Object.prototype.poisoned 等) がリークしない
  *   - console.log/error/warn/info/debug は consoleCalls に method+args で蓄積
  *   - baselineKeys に stabilizer 注入済み key が含まれ、new_globals 差分計算の基準点になる
  */
@@ -94,6 +96,33 @@ describe("createStabilizedContext", () => {
       context,
     ) as number;
     expect(safeEval).toBe(0);
+
+    // Function が builtin fall-through 経由で別 realm の本物 Function に解決していないことを
+    // 直接検証: 本物なら `Function("return 42")()` は number 42 を返す。stub なら stub (function)
+    // が返る。ここを number にしない (= 真の Function 経路を塞ぐ) のが今回の security 契約。
+    const fnCallResult = vm.runInContext(`typeof Function("return 42")()`, context) as string;
+    expect(fnCallResult).toBe("function");
+  });
+
+  it("複数 sandbox 間で builtin prototype が汚染リークしない", () => {
+    // sandbox A で Object.prototype に書き込もうとした後、別 sandbox B で観測する。
+    // builtin pool が共有されていても凍結されていれば書き込みは silently 失敗 (or throw) し、
+    // どちらにせよ sandbox B から poisoned が見えてはいけない。
+    const a = createStabilizedContext();
+    vm.runInContext(
+      `
+      try { Object.prototype.poisoned = 1; } catch (_) { /* frozen なら throw もありうる */ }
+      try { Array.prototype.poisoned = 1; } catch (_) {}
+      `,
+      a.context,
+    );
+
+    const b = createStabilizedContext();
+    const leaked = vm.runInContext(
+      `[({}).poisoned, [].poisoned]`,
+      b.context,
+    ) as unknown[];
+    expect(leaked).toEqual([undefined, undefined]);
   });
 
   it("未定義 identifier は ReferenceError を起こさず stub に化ける", () => {
