@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { deriveOverallVerdict } from "../../src/equivalence-checker/verdict";
-import { ORACLE, ORACLE_VERDICT, type OracleObservation } from "../../src/shared/equivalence-contracts";
+import { ORACLE, ORACLE_VERDICT, type OracleObservation } from "../../src/contracts/equivalence-contracts";
 
 function obs(verdict: OracleObservation["verdict"]): OracleObservation {
   return { oracle: ORACLE.RETURN_VALUE, verdict };

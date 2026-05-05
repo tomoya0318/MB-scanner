@@ -3,7 +3,7 @@ import {
   type EquivalenceCheckResult,
   type EquivalenceInput,
   type OracleObservation,
-} from "../shared/equivalence-contracts";
+} from "../contracts/equivalence-contracts";
 import { executeSandboxed } from "./sandbox/executor";
 import { checkArgumentMutation } from "./oracles/argument-mutation";
 import { checkException } from "./oracles/exception";
@@ -42,13 +42,29 @@ export async function checkEquivalence(
       effective_timeout_ms: timeout_ms,
     };
   } catch (e) {
-    // setup 自体の実行エラーや予期しない executor 例外は全体 error に畳み込む
-    const message = e instanceof Error ? e.message : "unexpected non-Error thrown";
+    // setup 自体の実行エラーや予期しない executor 例外は全体 error に畳み込む。
+    // `vm.runInContext` で throw された Error は VM context (別 realm) で生成されるため
+    // outer realm の `instanceof Error` が false になる (Node.js の vm モジュール固有の挙動)。
+    // duck typing で `.message` / `.constructor.name` を拾うことで cross-realm Error も
+    // 本来のメッセージとして報告できる。
     return {
       verdict: VERDICT.ERROR,
       observations: [],
-      error_message: message,
+      error_message: extractErrorMessage(e),
       effective_timeout_ms: timeout_ms,
     };
   }
+}
+
+function extractErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "object" && e !== null) {
+    const obj = e as { message?: unknown; constructor?: { name?: unknown } };
+    const ctorName = typeof obj.constructor?.name === "string" ? obj.constructor.name : null;
+    if (typeof obj.message === "string") {
+      return ctorName !== null && ctorName !== "Object" ? `${ctorName}: ${obj.message}` : obj.message;
+    }
+  }
+  if (typeof e === "string") return e;
+  return `unexpected throw: ${String(e)}`;
 }

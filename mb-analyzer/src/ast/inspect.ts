@@ -1,10 +1,11 @@
-import type { File, Node, VariableDeclaration } from "@babel/types";
+import type { File, Node } from "@babel/types";
 
 import { tryGenerateNode } from "./parser";
 import { walkNodes } from "./walk";
 
 /**
  * AST 上のノード集計・元コード抽出など、副作用なしの read-only 検査ユーティリティ。
+ * 機能間で共有 (preprocessing の `countNodes` 重複もここで解消)。
  */
 
 /**
@@ -30,7 +31,7 @@ export function nodeSize(node: Node): number {
 
 /**
  * 候補ノードの元スニペットを再構成する。start/end が取れれば元コードから切り出し、
- * 取れなければ generate で近似。第 2 段階で参照するのは「何を置換したか」の情報。
+ * 取れなければ generate で近似。pruning の placeholder original_snippet などで使う。
  */
 export function snippetOfNode(node: Node, sourceCode: string): string {
   const start = node.start;
@@ -50,13 +51,11 @@ if (import.meta.vitest) {
   describe("countNodes (in-source)", () => {
     it("空 File は最低限の構造ノード (File / Program) を数える", () => {
       const file = parse("");
-      // File + Program で 2
       expect(countNodes(file)).toBe(2);
     });
 
     it("単純な statement のノード数を数える", () => {
       const file = parse("const x = 1;");
-      // File / Program / VariableDeclaration / VariableDeclarator / Identifier / NumericLiteral
       expect(countNodes(file)).toBe(6);
     });
 
@@ -69,7 +68,6 @@ if (import.meta.vitest) {
     it("入れ子は再帰的に数える", () => {
       const flat = parse("a + b;");
       const nested = parse("a + b + c + d;");
-      // BinaryExpression が 1 つ増えるごとにノードが追加される
       expect(countNodes(nested)).toBeGreaterThan(countNodes(flat));
     });
   });
@@ -86,21 +84,20 @@ if (import.meta.vitest) {
     it("内側ノードでも正確に切り出す", () => {
       const code = "const x = arr[0]; use(x);";
       const file = parse(code);
-      const decl = file.program.body[0] as VariableDeclaration;
+      const decl = file.program.body[0];
+      if (decl?.type !== "VariableDeclaration") throw new Error("unexpected");
       const init = decl.declarations[0]?.init;
       expect(init?.type).toBe("MemberExpression");
       expect(snippetOfNode(init as Node, code)).toBe("arr[0]");
     });
 
     it("start/end が無いノードは generate で近似する", () => {
-      // 手動構築したノードは start/end を持たない
       const node = numericLiteral(42);
       const snippet = snippetOfNode(node, "");
       expect(snippet).toBe("42");
     });
 
     it("generate も失敗するような不完全ノードは空文字を返す (defensive)", () => {
-      // type だけ持つ broken ノード
       const broken = { type: "NotARealType" } as unknown as Node;
       expect(snippetOfNode(broken, "")).toBe("");
     });

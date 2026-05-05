@@ -21,7 +21,7 @@ import {
   type OracleObservation,
   type OracleVerdict,
   type Verdict,
-} from "../../src/shared/equivalence-contracts";
+} from "../../src/contracts/equivalence-contracts";
 
 describe("VERDICT", () => {
   it("Python 側 Verdict StrEnum と同じ文字列値を持つ", () => {
