@@ -1,7 +1,8 @@
-"""等価性検証 CLI コマンド
+"""Pruning CLI コマンド
 
-- ``mbs check-equivalence``: 1 トリプル検証。終了コード equal=0 / not_equal=1 / error=2。
-- ``mbs check-equivalence-batch``: JSONL 入力による複数トリプルの一括検証。Python 側 ThreadPoolExecutor で並列化する。
+- ``mbs prune``: 1 トリプル pruning。終了コード pruned=0 / initial_mismatch=1 / error=2。
+- ``mbs prune-batch``: JSONL 入力による複数トリプルの一括 pruning。Python 側
+  ThreadPoolExecutor で並列化する (TS 側は 1 subprocess = 逐次)。
 
 Node ランナー (``mb-analyzer/dist/cli.js``) を subprocess 経由で呼び出す
 Gateway を use case に注入し、結果を JSON / JSONL で返す。
@@ -20,25 +21,35 @@ from pydantic import ValidationError
 import typer
 
 from mb_scanner.adapters.cli._utils import resolve_workers
-from mb_scanner.adapters.gateways.equivalence import NodeRunnerEquivalenceGateway
-from mb_scanner.domain.entities.equivalence import (
-    DEFAULT_TIMEOUT_MS,
-    EquivalenceCheckResult,
-    EquivalenceInput,
-    Verdict,
+from mb_scanner.adapters.gateways.pruning import (
+    INTERNAL_KEY_PREFIX,
+    NodeRunnerPrunerGateway,
 )
-from mb_scanner.domain.ports.equivalence_checker import EquivalenceCheckerPort
+from mb_scanner.domain.entities.pruning import (
+    PruningInput,
+    PruningResult,
+    PruningVerdict,
+)
+from mb_scanner.domain.ports.pruner import PrunerPort
 from mb_scanner.infrastructure.config import settings
-from mb_scanner.use_cases.equivalence_verification import EquivalenceVerificationUseCase
+from mb_scanner.use_cases.pruning import PruningUseCase
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-equivalence_app = typer.Typer(help="Equivalence verification commands")
+pruning_app = typer.Typer(help="Pruning commands")
 
-EXIT_EQUAL = 0
-EXIT_NOT_EQUAL = 1
+# CLI 補完用の実用デフォルト。``entities.pruning`` の ``DEFAULT_*`` は engine 暴走防止の
+# 上限値 (`5_000ms × 1_000` = 1 トリプル worst case 約 83 分) で、実用デフォルトとしては
+# 大きすぎる。Selakovic は 10^2 オーダで収束する想定 (entities/pruning.py のコメント参照)
+# のため、暫定で狭めに設定し、timeout エラーが多発するようなら緩める運用。
+# TODO: Selakovic 実測後に再調整
+CLI_DEFAULT_TIMEOUT_MS = 2_000
+CLI_DEFAULT_MAX_ITERATIONS = 200
+
+EXIT_PRUNED = 0
+EXIT_INITIAL_MISMATCH = 1
 EXIT_ERROR = 2
 
 EXIT_BATCH_OK = 0
@@ -50,11 +61,11 @@ EXIT_BATCH_ERROR = 2
 # ---------------------------------------------------------------------------
 
 
-def _verdict_to_exit_code(verdict: Verdict) -> int:
-    if verdict is Verdict.EQUAL:
-        return EXIT_EQUAL
-    if verdict is Verdict.NOT_EQUAL:
-        return EXIT_NOT_EQUAL
+def _verdict_to_exit_code(verdict: PruningVerdict) -> int:
+    if verdict is PruningVerdict.PRUNED:
+        return EXIT_PRUNED
+    if verdict is PruningVerdict.INITIAL_MISMATCH:
+        return EXIT_INITIAL_MISMATCH
     return EXIT_ERROR
 
 
@@ -65,7 +76,8 @@ def _build_input(
     slow: str | None,
     fast: str | None,
     timeout_ms: int,
-) -> EquivalenceInput:
+    max_iterations: int,
+) -> PruningInput:
     if input_path is not None:
         raw = json.loads(input_path.read_text())
         if not isinstance(raw, dict):
@@ -79,21 +91,23 @@ def _build_input(
         if fast is not None:
             payload["fast"] = fast
         payload.setdefault("timeout_ms", timeout_ms)
-        return EquivalenceInput.model_validate(payload)
+        payload.setdefault("max_iterations", max_iterations)
+        return PruningInput.model_validate(payload)
 
     if slow is None or fast is None:
         raise typer.BadParameter(
             "Either --input FILE or both --slow and --fast must be provided.",
         )
-    return EquivalenceInput(
+    return PruningInput(
         setup=setup or "",
         slow=slow,
         fast=fast,
         timeout_ms=timeout_ms,
+        max_iterations=max_iterations,
     )
 
 
-def _write_output(result: EquivalenceCheckResult, output_path: Path | None) -> None:
+def _write_output(result: PruningResult, output_path: Path | None) -> None:
     text = result.model_dump_json(indent=2)
     if output_path is None:
         typer.echo(text)
@@ -101,16 +115,22 @@ def _write_output(result: EquivalenceCheckResult, output_path: Path | None) -> N
     output_path.write_text(text + "\n")
 
 
-def _load_batch_inputs(input_path: Path, default_timeout_ms: int) -> list[EquivalenceInput]:
-    """JSONL ファイルから ``EquivalenceInput`` リストを構築する
+def _load_batch_inputs(
+    input_path: Path,
+    *,
+    default_timeout_ms: int,
+    default_max_iterations: int,
+) -> list[PruningInput]:
+    """JSONL ファイルから ``PruningInput`` リストを構築する
 
-    timeout_ms の解決規約:
-        - JSONL 行に timeout_ms **あり** → その値を優先
-        - JSONL 行に timeout_ms **なし** → ``default_timeout_ms`` (CLI デフォルト) で補う
+    timeout_ms / max_iterations の解決規約:
+        - JSONL 行に値あり → その値を優先
+        - JSONL 行に値なし → 引数の default で補う
 
     id が欠落している場合は ``line-NNNN`` で自動補完する (Gateway でのマッピング用)。
+    Gateway の予約 prefix と衝突する id は事前条件違反として ``BadParameter`` にする。
     """
-    inputs: list[EquivalenceInput] = []
+    inputs: list[PruningInput] = []
     text = input_path.read_text()
     for idx, raw_line in enumerate(text.splitlines()):
         line = raw_line.strip()
@@ -127,22 +147,30 @@ def _load_batch_inputs(input_path: Path, default_timeout_ms: int) -> list[Equiva
 
         line_payload = cast("dict[str, Any]", payload)
         line_payload.setdefault("timeout_ms", default_timeout_ms)
+        line_payload.setdefault("max_iterations", default_max_iterations)
         line_payload.setdefault("id", f"line-{idx + 1:04d}")
 
         try:
-            inputs.append(EquivalenceInput.model_validate(line_payload))
+            parsed_input = PruningInput.model_validate(line_payload)
         except ValidationError as e:
             raise typer.BadParameter(f"{input_path}:{idx + 1}: invalid input: {e}") from e
+
+        if parsed_input.id is not None and parsed_input.id.startswith(INTERNAL_KEY_PREFIX):
+            raise typer.BadParameter(
+                f"{input_path}:{idx + 1}: id {parsed_input.id!r} collides with internal "
+                f"reserved prefix {INTERNAL_KEY_PREFIX!r}",
+            )
+        inputs.append(parsed_input)
 
     return inputs
 
 
-def _chunked(items: Sequence[EquivalenceInput], batch_size: int) -> Iterator[list[EquivalenceInput]]:
+def _chunked(items: Sequence[PruningInput], batch_size: int) -> Iterator[list[PruningInput]]:
     for start in range(0, len(items), batch_size):
         yield list(items[start : start + batch_size])
 
 
-def _write_batch_output(results: Sequence[EquivalenceCheckResult], output_path: Path | None) -> None:
+def _write_batch_output(results: Sequence[PruningResult], output_path: Path | None) -> None:
     lines = [result.model_dump_json() for result in results]
     text = "\n".join(lines) + ("\n" if lines else "")
     if output_path is None:
@@ -152,36 +180,36 @@ def _write_batch_output(results: Sequence[EquivalenceCheckResult], output_path: 
     output_path.write_text(text)
 
 
-def _summarize(results: Sequence[EquivalenceCheckResult]) -> str:
-    counts: Counter[Verdict] = Counter(r.verdict for r in results)
+def _summarize(results: Sequence[PruningResult]) -> str:
+    counts: Counter[PruningVerdict] = Counter(r.verdict for r in results)
     return (
         f"[summary] total={len(results)} "
-        f"equal={counts.get(Verdict.EQUAL, 0)} "
-        f"not_equal={counts.get(Verdict.NOT_EQUAL, 0)} "
-        f"error={counts.get(Verdict.ERROR, 0)}"
+        f"pruned={counts.get(PruningVerdict.PRUNED, 0)} "
+        f"initial_mismatch={counts.get(PruningVerdict.INITIAL_MISMATCH, 0)} "
+        f"error={counts.get(PruningVerdict.ERROR, 0)}"
     )
 
 
 def _run_batch(
-    checker: EquivalenceCheckerPort,
-    inputs: Sequence[EquivalenceInput],
+    pruner: PrunerPort,
+    inputs: Sequence[PruningInput],
     *,
     workers: int,
     batch_size: int,
-) -> list[EquivalenceCheckResult]:
+) -> list[PruningResult]:
     """ThreadPoolExecutor で inputs を分割並列実行して結果を入力順で返す"""
     if len(inputs) == 0:
         return []
 
-    use_case = EquivalenceVerificationUseCase(checker)
+    use_case = PruningUseCase(pruner)
     batches = list(_chunked(inputs, batch_size))
     total_batches = len(batches)
 
     # batch index → 結果
-    batch_results: dict[int, list[EquivalenceCheckResult]] = {}
+    batch_results: dict[int, list[PruningResult]] = {}
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = {executor.submit(use_case.verify_batch, batch): batch_idx for batch_idx, batch in enumerate(batches)}
+        futures = {executor.submit(use_case.prune_batch, batch): batch_idx for batch_idx, batch in enumerate(batches)}
         # 完了順に回収する。挿入順で iterate すると先頭 future が遅い場合に他の完了分で
         # ブロックしてしまい、並列性と進捗表示の両方が損なわれる。
         for done_count, future in enumerate(as_completed(futures), start=1):
@@ -190,7 +218,7 @@ def _run_batch(
             sys.stderr.write(f"[progress] {done_count}/{total_batches} batches done\n")
             sys.stderr.flush()
 
-    out: list[EquivalenceCheckResult] = []
+    out: list[PruningResult] = []
     for idx in range(total_batches):
         out.extend(batch_results[idx])
     return out
@@ -201,14 +229,14 @@ def _run_batch(
 # ---------------------------------------------------------------------------
 
 
-@equivalence_app.command("check-equivalence")
-def check_equivalence(
+@pruning_app.command("prune")
+def prune(
     input_path: Annotated[
         Path | None,
         typer.Option(
             "--input",
             "-i",
-            help='入力 JSON ファイル (`{"setup","slow","fast","timeout_ms"}`)',
+            help='入力 JSON ファイル (`{"setup","slow","fast","timeout_ms","max_iterations"}`)',
         ),
     ] = None,
     setup: Annotated[str | None, typer.Option("--setup", help="setup コード断片")] = None,
@@ -217,15 +245,19 @@ def check_equivalence(
     timeout_ms: Annotated[
         int,
         typer.Option("--timeout-ms", help="sandbox 内部タイムアウト (ms)"),
-    ] = DEFAULT_TIMEOUT_MS,
+    ] = CLI_DEFAULT_TIMEOUT_MS,
+    max_iterations: Annotated[
+        int,
+        typer.Option("--max-iterations", help="pruning ループの最大反復回数"),
+    ] = CLI_DEFAULT_MAX_ITERATIONS,
     output_path: Annotated[
         Path | None,
         typer.Option("--output", "-o", help="結果 JSON を書き出すファイル（未指定で stdout）"),
     ] = None,
 ) -> None:
-    """1 トリプル (setup, slow, fast) を Node ランナーで検証し、結果を JSON で出力する。
+    """1 トリプル (setup, slow, fast) を Node ランナーで pruning し、結果を JSON で出力する。
 
-    終了コード: equal=0 / not_equal=1 / error=2
+    終了コード: pruned=0 / initial_mismatch=1 / error=2
     """
     try:
         input_model = _build_input(
@@ -234,23 +266,27 @@ def check_equivalence(
             slow=slow,
             fast=fast,
             timeout_ms=timeout_ms,
+            max_iterations=max_iterations,
         )
+    except FileNotFoundError as e:
+        typer.echo(f"Input file not found: {e}", err=True)
+        raise typer.Exit(EXIT_ERROR) from e
     except (json.JSONDecodeError, ValueError) as e:
         typer.echo(f"Invalid input: {e}", err=True)
         raise typer.Exit(EXIT_ERROR) from e
 
-    gateway = NodeRunnerEquivalenceGateway(
+    gateway = NodeRunnerPrunerGateway(
         cli_path=settings.effective_mb_analyzer_cli_path,
         node_bin=settings.mb_analyzer_node_bin,
     )
-    use_case = EquivalenceVerificationUseCase(gateway)
-    result = use_case.verify(input_model)
+    use_case = PruningUseCase(gateway)
+    result = use_case.prune(input_model)
     _write_output(result, output_path)
     sys.exit(_verdict_to_exit_code(result.verdict))
 
 
-@equivalence_app.command("check-equivalence-batch")
-def check_equivalence_batch(
+@pruning_app.command("prune-batch")
+def prune_batch(
     input_path: Annotated[
         Path,
         typer.Option(
@@ -284,9 +320,16 @@ def check_equivalence_batch(
             "--timeout-ms",
             help="sandbox 内部タイムアウト (ms)。JSONL 行に timeout_ms が無い場合の補完値",
         ),
-    ] = DEFAULT_TIMEOUT_MS,
+    ] = CLI_DEFAULT_TIMEOUT_MS,
+    max_iterations: Annotated[
+        int,
+        typer.Option(
+            "--max-iterations",
+            help="pruning ループ最大反復回数。JSONL 行に max_iterations が無い場合の補完値",
+        ),
+    ] = CLI_DEFAULT_MAX_ITERATIONS,
 ) -> None:
-    """JSONL 入力から複数トリプルを並列検証し、結果を JSONL で出力する。
+    """JSONL 入力から複数トリプルを並列 pruning し、結果を JSONL で出力する。
 
     nohup 実行を前提にした非対話 CLI で、進捗は stderr に簡潔に出力する。
     終了コード: 正常 0 / I/O・バリデーション失敗 2。
@@ -298,7 +341,11 @@ def check_equivalence_batch(
         raise typer.Exit(EXIT_BATCH_ERROR) from e
 
     try:
-        inputs = _load_batch_inputs(input_path, default_timeout_ms=timeout_ms)
+        inputs = _load_batch_inputs(
+            input_path,
+            default_timeout_ms=timeout_ms,
+            default_max_iterations=max_iterations,
+        )
     except typer.BadParameter as e:
         typer.echo(f"Invalid input: {e}", err=True)
         raise typer.Exit(EXIT_BATCH_ERROR) from e
@@ -314,7 +361,7 @@ def check_equivalence_batch(
 
     effective_batch_size = batch_size if batch_size > 0 else max(10, math.ceil(len(inputs) / actual_workers))
 
-    gateway = NodeRunnerEquivalenceGateway(
+    gateway = NodeRunnerPrunerGateway(
         cli_path=settings.effective_mb_analyzer_cli_path,
         node_bin=settings.mb_analyzer_node_bin,
     )

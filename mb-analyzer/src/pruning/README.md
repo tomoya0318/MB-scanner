@@ -6,7 +6,7 @@
 
 公開 API は `index.ts` の re-export (`prune` 関数 + 型定義) のみ。型は `mb-analyzer/src/shared/pruning-contracts.ts` で定義され、Python 側 (`mb_scanner/domain/entities/pruning.py`) と JSON シリアライゼーション互換を保つ。
 
-現時点で `mb-analyzer/src/cli/` 配下にあるのは `check-equivalence` CLI のみで、**pruning 用 CLI は未実装** (PR #3 `feat/hydra-pruning-cli` で追加予定)。将来 pruning CLI を追加する場合は、本モジュールの export を JSON でラップして stdin/stdout を中継する薄い層とする想定。**入出力データの意味論はここ (本 README) を一次ソースとし、CLI 側 README には CLI 固有の引数 / stderr 規約 / 終了コードのみ書く**方針。
+CLI ラッパは `mb-analyzer/src/cli/prune.ts` (`prune` / `prune-batch` サブコマンド) で、本モジュールの `prune()` を JSON でラップして stdin/stdout を中継する薄い層になっている。Python 側 `mb_scanner/adapters/cli/pruning.py` (`mbs prune` / `mbs prune-batch`) が subprocess 経由でこの CLI を起動する。**入出力データの意味論はここ (本 README) を一次ソースとし、CLI 側には CLI 固有の引数 / stderr 規約 / 終了コードのみ書く**方針。
 
 ### `PruningInput`
 

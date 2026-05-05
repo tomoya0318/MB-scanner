@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 import { runCheckEquivalence, runCheckEquivalenceBatch } from "./check-equivalence";
+import { runPrune, runPruneBatch } from "./prune";
 
 const SUBCOMMANDS = {
   "check-equivalence": runCheckEquivalence,
   "check-equivalence-batch": runCheckEquivalenceBatch,
+  prune: runPrune,
+  "prune-batch": runPruneBatch,
 } as const;
 
 async function main(): Promise<number> {

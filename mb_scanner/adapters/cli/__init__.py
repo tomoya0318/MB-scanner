@@ -8,6 +8,7 @@ from mb_scanner.adapters.cli.count_lines import count_lines_app
 from mb_scanner.adapters.cli.equivalence import equivalence_app
 from mb_scanner.adapters.cli.github import github_app
 from mb_scanner.adapters.cli.migrate import migrate_app
+from mb_scanner.adapters.cli.pruning import pruning_app
 from mb_scanner.adapters.cli.search import search_app
 from mb_scanner.adapters.cli.visualize import visualize_app
 
@@ -31,6 +32,10 @@ app.add_typer(benchmark_app, name="benchmark")
 # 新 check-equivalence サブコマンド (Node ランナー経由)
 app.registered_commands.extend(equivalence_app.registered_commands)
 app.registered_groups.extend(equivalence_app.registered_groups)
+
+# pruning サブコマンド (Node ランナー経由、PR #3)
+app.registered_commands.extend(pruning_app.registered_commands)
+app.registered_groups.extend(pruning_app.registered_groups)
 
 
 def main() -> None:
