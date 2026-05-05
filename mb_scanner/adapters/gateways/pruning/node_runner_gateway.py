@@ -26,7 +26,7 @@ _BATCH_TIMEOUT_BUFFER_SEC = 30.0
 # バッチ呼び出しごとに生成する内部キーのプレフィックス。equivalence 側
 # (``__mb_batch_idx__``) と分離して、両モジュールを 1 process で混在させる将来
 # 拡張時の区別不能を防ぐ。
-_INTERNAL_KEY_PREFIX = "__mb_prune_batch_idx__"
+INTERNAL_KEY_PREFIX = "__mb_prune_batch_idx__"
 
 
 class NodeRunnerPrunerGateway:
@@ -128,10 +128,10 @@ class NodeRunnerPrunerGateway:
             original_id = item.id
             if item.id is not None:
                 # ユーザー提供の id が予約プレフィックスと衝突していないか早期検出。
-                if item.id.startswith(_INTERNAL_KEY_PREFIX):
+                if item.id.startswith(INTERNAL_KEY_PREFIX):
                     raise ValueError(
                         f"Input id {item.id!r} collides with internal reserved prefix "
-                        f"{_INTERNAL_KEY_PREFIX!r}. Use a different id scheme.",
+                        f"{INTERNAL_KEY_PREFIX!r}. Use a different id scheme.",
                     )
                 key = item.id
                 sent_item = item
@@ -220,7 +220,7 @@ def _cli_not_found_message(cli_path: Path) -> str:
 
 
 def _batch_key(invocation_salt: str, idx: int) -> str:
-    return f"{_INTERNAL_KEY_PREFIX}{invocation_salt}_{idx}"
+    return f"{INTERNAL_KEY_PREFIX}{invocation_salt}_{idx}"
 
 
 def _single_subprocess_timeout(item: PruningInput, margin_sec: float) -> float:

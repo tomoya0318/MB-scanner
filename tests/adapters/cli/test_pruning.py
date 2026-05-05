@@ -10,6 +10,7 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from mb_scanner.adapters.cli import app
+from mb_scanner.adapters.gateways.pruning import INTERNAL_KEY_PREFIX
 from mb_scanner.domain.entities.pruning import (
     PruningInput,
     PruningResult,
@@ -351,3 +352,25 @@ class TestPruneBatchCLI:
             )
         assert res.exit_code == 0, res.stdout + res.stderr
         assert [item.id for item in captured] == ["line-0001", "line-0002"]
+
+    def test_reserved_prefix_id_collision_exits_2(self, tmp_path: Path) -> None:
+        """Gateway 内部の予約 prefix と衝突する id は Gateway を呼ばずに exit 2 で拒否する。
+
+        従来は ``_run_batch`` 内で ``ValueError`` が ``future.result()`` を抜けて
+        unhandled traceback で CLI が落ちていた事故防止。
+        """
+        input_path = self._write_jsonl(
+            tmp_path,
+            [
+                {"id": "ok", "slow": "1", "fast": "1"},
+                {"id": f"{INTERNAL_KEY_PREFIX}foo", "slow": "1", "fast": "1"},
+            ],
+        )
+        with patch(GATEWAY_CLS) as gw_cls:
+            res = self.runner.invoke(
+                app,
+                ["prune-batch", "--input", str(input_path)],
+            )
+        assert res.exit_code == 2
+        # Gateway は呼ばれずに拒否される
+        gw_cls.return_value.prune_batch.assert_not_called()

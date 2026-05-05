@@ -31,12 +31,23 @@ from mb_scanner.domain.ports.equivalence_checker import EquivalenceCheckerPort
 from mb_scanner.infrastructure.config import settings
 from mb_scanner.use_cases.equivalence_verification import EquivalenceVerificationUseCase
 
-equivalence_app = typer.Typer(help="Equivalence verification commands")
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
 
+equivalence_app = typer.Typer(help="Equivalence verification commands")
 
 EXIT_EQUAL = 0
 EXIT_NOT_EQUAL = 1
 EXIT_ERROR = 2
+
+EXIT_BATCH_OK = 0
+EXIT_BATCH_ERROR = 2
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 def _verdict_to_exit_code(verdict: Verdict) -> int:
@@ -88,62 +99,6 @@ def _write_output(result: EquivalenceCheckResult, output_path: Path | None) -> N
         typer.echo(text)
         return
     output_path.write_text(text + "\n")
-
-
-@equivalence_app.command("check-equivalence")
-def check_equivalence(
-    input_path: Annotated[
-        Path | None,
-        typer.Option(
-            "--input",
-            "-i",
-            help='入力 JSON ファイル (`{"setup","slow","fast","timeout_ms"}`)',
-        ),
-    ] = None,
-    setup: Annotated[str | None, typer.Option("--setup", help="setup コード断片")] = None,
-    slow: Annotated[str | None, typer.Option("--slow", help="slow コード断片")] = None,
-    fast: Annotated[str | None, typer.Option("--fast", help="fast コード断片")] = None,
-    timeout_ms: Annotated[
-        int,
-        typer.Option("--timeout-ms", help="sandbox 内部タイムアウト (ms)"),
-    ] = DEFAULT_TIMEOUT_MS,
-    output_path: Annotated[
-        Path | None,
-        typer.Option("--output", "-o", help="結果 JSON を書き出すファイル（未指定で stdout）"),
-    ] = None,
-) -> None:
-    """1 トリプル (setup, slow, fast) を Node ランナーで検証し、結果を JSON で出力する。
-
-    終了コード: equal=0 / not_equal=1 / error=2
-    """
-    try:
-        input_model = _build_input(
-            input_path=input_path,
-            setup=setup,
-            slow=slow,
-            fast=fast,
-            timeout_ms=timeout_ms,
-        )
-    except (json.JSONDecodeError, ValueError) as e:
-        typer.echo(f"Invalid input: {e}", err=True)
-        raise typer.Exit(EXIT_ERROR) from e
-
-    gateway = NodeRunnerEquivalenceGateway(
-        cli_path=settings.effective_mb_analyzer_cli_path,
-        node_bin=settings.mb_analyzer_node_bin,
-    )
-    use_case = EquivalenceVerificationUseCase(gateway)
-    result = use_case.verify(input_model)
-    _write_output(result, output_path)
-    sys.exit(_verdict_to_exit_code(result.verdict))
-
-
-# ---------------------------------------------------------------------------
-# Batch API
-# ---------------------------------------------------------------------------
-
-EXIT_BATCH_OK = 0
-EXIT_BATCH_ERROR = 2
 
 
 def _load_batch_inputs(input_path: Path, default_timeout_ms: int) -> list[EquivalenceInput]:
@@ -239,6 +194,59 @@ def _run_batch(
     for idx in range(total_batches):
         out.extend(batch_results[idx])
     return out
+
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+
+@equivalence_app.command("check-equivalence")
+def check_equivalence(
+    input_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--input",
+            "-i",
+            help='入力 JSON ファイル (`{"setup","slow","fast","timeout_ms"}`)',
+        ),
+    ] = None,
+    setup: Annotated[str | None, typer.Option("--setup", help="setup コード断片")] = None,
+    slow: Annotated[str | None, typer.Option("--slow", help="slow コード断片")] = None,
+    fast: Annotated[str | None, typer.Option("--fast", help="fast コード断片")] = None,
+    timeout_ms: Annotated[
+        int,
+        typer.Option("--timeout-ms", help="sandbox 内部タイムアウト (ms)"),
+    ] = DEFAULT_TIMEOUT_MS,
+    output_path: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="結果 JSON を書き出すファイル（未指定で stdout）"),
+    ] = None,
+) -> None:
+    """1 トリプル (setup, slow, fast) を Node ランナーで検証し、結果を JSON で出力する。
+
+    終了コード: equal=0 / not_equal=1 / error=2
+    """
+    try:
+        input_model = _build_input(
+            input_path=input_path,
+            setup=setup,
+            slow=slow,
+            fast=fast,
+            timeout_ms=timeout_ms,
+        )
+    except (json.JSONDecodeError, ValueError) as e:
+        typer.echo(f"Invalid input: {e}", err=True)
+        raise typer.Exit(EXIT_ERROR) from e
+
+    gateway = NodeRunnerEquivalenceGateway(
+        cli_path=settings.effective_mb_analyzer_cli_path,
+        node_bin=settings.mb_analyzer_node_bin,
+    )
+    use_case = EquivalenceVerificationUseCase(gateway)
+    result = use_case.verify(input_model)
+    _write_output(result, output_path)
+    sys.exit(_verdict_to_exit_code(result.verdict))
 
 
 @equivalence_app.command("check-equivalence-batch")

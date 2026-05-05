@@ -21,7 +21,10 @@ from pydantic import ValidationError
 import typer
 
 from mb_scanner.adapters.cli._utils import resolve_workers
-from mb_scanner.adapters.gateways.pruning import NodeRunnerPrunerGateway
+from mb_scanner.adapters.gateways.pruning import (
+    INTERNAL_KEY_PREFIX,
+    NodeRunnerPrunerGateway,
+)
 from mb_scanner.domain.entities.pruning import (
     PruningInput,
     PruningResult,
@@ -31,8 +34,11 @@ from mb_scanner.domain.ports.pruner import PrunerPort
 from mb_scanner.infrastructure.config import settings
 from mb_scanner.use_cases.pruning import PruningUseCase
 
-pruning_app = typer.Typer(help="Pruning commands")
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
 
+pruning_app = typer.Typer(help="Pruning commands")
 
 # CLI 補完用の実用デフォルト。``entities.pruning`` の ``DEFAULT_*`` は engine 暴走防止の
 # 上限値 (`5_000ms × 1_000` = 1 トリプル worst case 約 83 分) で、実用デフォルトとしては
@@ -42,10 +48,17 @@ pruning_app = typer.Typer(help="Pruning commands")
 CLI_DEFAULT_TIMEOUT_MS = 2_000
 CLI_DEFAULT_MAX_ITERATIONS = 200
 
-
 EXIT_PRUNED = 0
 EXIT_INITIAL_MISMATCH = 1
 EXIT_ERROR = 2
+
+EXIT_BATCH_OK = 0
+EXIT_BATCH_ERROR = 2
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 def _verdict_to_exit_code(verdict: PruningVerdict) -> int:
@@ -102,70 +115,6 @@ def _write_output(result: PruningResult, output_path: Path | None) -> None:
     output_path.write_text(text + "\n")
 
 
-@pruning_app.command("prune")
-def prune(
-    input_path: Annotated[
-        Path | None,
-        typer.Option(
-            "--input",
-            "-i",
-            help='入力 JSON ファイル (`{"setup","slow","fast","timeout_ms","max_iterations"}`)',
-        ),
-    ] = None,
-    setup: Annotated[str | None, typer.Option("--setup", help="setup コード断片")] = None,
-    slow: Annotated[str | None, typer.Option("--slow", help="slow コード断片")] = None,
-    fast: Annotated[str | None, typer.Option("--fast", help="fast コード断片")] = None,
-    timeout_ms: Annotated[
-        int,
-        typer.Option("--timeout-ms", help="sandbox 内部タイムアウト (ms)"),
-    ] = CLI_DEFAULT_TIMEOUT_MS,
-    max_iterations: Annotated[
-        int,
-        typer.Option("--max-iterations", help="pruning ループの最大反復回数"),
-    ] = CLI_DEFAULT_MAX_ITERATIONS,
-    output_path: Annotated[
-        Path | None,
-        typer.Option("--output", "-o", help="結果 JSON を書き出すファイル（未指定で stdout）"),
-    ] = None,
-) -> None:
-    """1 トリプル (setup, slow, fast) を Node ランナーで pruning し、結果を JSON で出力する。
-
-    終了コード: pruned=0 / initial_mismatch=1 / error=2
-    """
-    try:
-        input_model = _build_input(
-            input_path=input_path,
-            setup=setup,
-            slow=slow,
-            fast=fast,
-            timeout_ms=timeout_ms,
-            max_iterations=max_iterations,
-        )
-    except FileNotFoundError as e:
-        typer.echo(f"Input file not found: {e}", err=True)
-        raise typer.Exit(EXIT_ERROR) from e
-    except (json.JSONDecodeError, ValueError) as e:
-        typer.echo(f"Invalid input: {e}", err=True)
-        raise typer.Exit(EXIT_ERROR) from e
-
-    gateway = NodeRunnerPrunerGateway(
-        cli_path=settings.effective_mb_analyzer_cli_path,
-        node_bin=settings.mb_analyzer_node_bin,
-    )
-    use_case = PruningUseCase(gateway)
-    result = use_case.prune(input_model)
-    _write_output(result, output_path)
-    sys.exit(_verdict_to_exit_code(result.verdict))
-
-
-# ---------------------------------------------------------------------------
-# Batch API
-# ---------------------------------------------------------------------------
-
-EXIT_BATCH_OK = 0
-EXIT_BATCH_ERROR = 2
-
-
 def _load_batch_inputs(
     input_path: Path,
     *,
@@ -179,6 +128,7 @@ def _load_batch_inputs(
         - JSONL 行に値なし → 引数の default で補う
 
     id が欠落している場合は ``line-NNNN`` で自動補完する (Gateway でのマッピング用)。
+    Gateway の予約 prefix と衝突する id は事前条件違反として ``BadParameter`` にする。
     """
     inputs: list[PruningInput] = []
     text = input_path.read_text()
@@ -201,9 +151,16 @@ def _load_batch_inputs(
         line_payload.setdefault("id", f"line-{idx + 1:04d}")
 
         try:
-            inputs.append(PruningInput.model_validate(line_payload))
+            parsed_input = PruningInput.model_validate(line_payload)
         except ValidationError as e:
             raise typer.BadParameter(f"{input_path}:{idx + 1}: invalid input: {e}") from e
+
+        if parsed_input.id is not None and parsed_input.id.startswith(INTERNAL_KEY_PREFIX):
+            raise typer.BadParameter(
+                f"{input_path}:{idx + 1}: id {parsed_input.id!r} collides with internal "
+                f"reserved prefix {INTERNAL_KEY_PREFIX!r}",
+            )
+        inputs.append(parsed_input)
 
     return inputs
 
@@ -265,6 +222,67 @@ def _run_batch(
     for idx in range(total_batches):
         out.extend(batch_results[idx])
     return out
+
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+
+@pruning_app.command("prune")
+def prune(
+    input_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--input",
+            "-i",
+            help='入力 JSON ファイル (`{"setup","slow","fast","timeout_ms","max_iterations"}`)',
+        ),
+    ] = None,
+    setup: Annotated[str | None, typer.Option("--setup", help="setup コード断片")] = None,
+    slow: Annotated[str | None, typer.Option("--slow", help="slow コード断片")] = None,
+    fast: Annotated[str | None, typer.Option("--fast", help="fast コード断片")] = None,
+    timeout_ms: Annotated[
+        int,
+        typer.Option("--timeout-ms", help="sandbox 内部タイムアウト (ms)"),
+    ] = CLI_DEFAULT_TIMEOUT_MS,
+    max_iterations: Annotated[
+        int,
+        typer.Option("--max-iterations", help="pruning ループの最大反復回数"),
+    ] = CLI_DEFAULT_MAX_ITERATIONS,
+    output_path: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="結果 JSON を書き出すファイル（未指定で stdout）"),
+    ] = None,
+) -> None:
+    """1 トリプル (setup, slow, fast) を Node ランナーで pruning し、結果を JSON で出力する。
+
+    終了コード: pruned=0 / initial_mismatch=1 / error=2
+    """
+    try:
+        input_model = _build_input(
+            input_path=input_path,
+            setup=setup,
+            slow=slow,
+            fast=fast,
+            timeout_ms=timeout_ms,
+            max_iterations=max_iterations,
+        )
+    except FileNotFoundError as e:
+        typer.echo(f"Input file not found: {e}", err=True)
+        raise typer.Exit(EXIT_ERROR) from e
+    except (json.JSONDecodeError, ValueError) as e:
+        typer.echo(f"Invalid input: {e}", err=True)
+        raise typer.Exit(EXIT_ERROR) from e
+
+    gateway = NodeRunnerPrunerGateway(
+        cli_path=settings.effective_mb_analyzer_cli_path,
+        node_bin=settings.mb_analyzer_node_bin,
+    )
+    use_case = PruningUseCase(gateway)
+    result = use_case.prune(input_model)
+    _write_output(result, output_path)
+    sys.exit(_verdict_to_exit_code(result.verdict))
 
 
 @pruning_app.command("prune-batch")
