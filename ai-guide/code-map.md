@@ -21,6 +21,15 @@ ai-guide 全体での位置づけと他軸との住み分けは [`doc-strategy/i
   - [再列挙とクロスパス重複](#再列挙とクロスパス重複)
   - [pruning の正確性 — 多層防御](#pruning-の正確性--多層防御)
   - [文法由来 blacklist の網羅性](#文法由来-blacklist-の網羅性)
+- [Selakovic 前処理器](#selakovic-前処理器)
+  - [責務分担と層構造](#責務分担と層構造)
+  - [抽出アルゴリズム (論文非依存)](#抽出アルゴリズム-論文非依存)
+  - [enclosure 候補型の 3 段優先順位](#enclosure-候補型の-3-段優先順位)
+  - [1 入力 → N 結果モデル](#1-入力--n-結果モデル)
+  - [setup 構築規約](#setup-構築規約)
+  - [clientServer フォールバック](#clientserver-フォールバック)
+  - [除外理由の意味論](#除外理由の意味論)
+  - [既知の運用上の落とし穴 (Node CLI の stdout flush)](#既知の運用上の落とし穴-node-cli-の-stdout-flush)
 
 （sandbox パイプライン / verdict 合成 / Python↔Node JSON 往復 の詳細は今後追加予定）
 
@@ -364,3 +373,212 @@ L1 blacklist は `@babel/types` の `NODE_FIELDS[parent][key].validate` introspe
 
 - pruning 候補除外は「**効率最適化**」として位置づけ、unsoundness の議論とは独立に扱う ([`current-research.md` §Unsoundness の緩和](current-research.md#第-1-段階-実行ベース-hydra-式-pruning) の 3 点目)
 - blacklist は Selakovic dataset に依存せず `@babel/types` の文法メタデータから mechanically 導出される、と明言できる (dataset leak 回避)
+
+---
+
+## Selakovic 前処理器
+
+実装は `mb-analyzer/src/preprocessing/` (TS 抽出ロジック) + `mb_scanner/{domain,use_cases,adapters}/preprocessing/` (Python ラッパー)。Selakovic 2016 dataset の 1 issue を `(setup, slow, fast)` トリプルに変換するパイプラインの最前段。
+
+論文非依存性が研究主張の核なので、本前処理器は **Selakovic 論文 §6 (10 パターン) / §7 (5 種 precondition T/NF/P/TF/V) を一切参照しない**。データセットの物理ファイル構造のみに依存して AST diff から minimal differential extraction する。
+
+### 責務分担と層構造
+
+```
+TS 側 (mb-analyzer/src/)                    Python 側 (mb_scanner/)
+┌──────────────────────────────┐           ┌─────────────────────────────────┐
+│ ast/                         │           │ adapters/cli/preprocessing.py   │
+│   parser.ts / walk.ts /      │           │  (mbs preprocess-selakovic[-batch])│
+│   subtree-hash.ts /          │           │           │                     │
+│   inspect.ts                 │           │           ↓                     │
+│ (汎用 AST 基盤、末端層)        │           │ use_cases/preprocessing/         │
+│                              │           │   selakovic.py (UseCase)         │
+│ preprocessing/common/        │           │           │                     │
+│   ast-diff.ts                │           │           ↓                     │
+│   enclosure.ts               │           │ adapters/gateways/preprocessing/ │
+│   setup-cleanup.ts           │           │   selakovic/                     │
+│ (ドメイン非依存)               │           │     dataset_scanner.py (列挙)    │
+│                              │           │     node_runner_gateway.py      │
+│ preprocessing/selakovic/     │           │  (subprocess + JSONL parse)     │
+│   layout.ts / client.ts /    │           └─────────────┬───────────────────┘
+│   server.ts / index.ts       │  ←── stdin/stdout JSONL ─┘
+│ (Selakovic 固有 = ドメイン)    │
+│                              │
+│ cli/preprocess-selakovic.ts  │ ←── stdin (1 入力 / JSONL バッチ)
+│ (Node CLI エントリ)            │ ←── stdout (1 入力 → N 結果 JSONL)
+└──────────────────────────────┘
+```
+
+**TS = AST 解析責務、Python = データセット列挙 + 並列化 + DB / JSONL I/O 責務** で切り分け。並列化は `ThreadPoolExecutor` で chunk 単位の subprocess を多重化する pruning と同パターン。
+
+### 抽出アルゴリズム (論文非依存)
+
+`extract(input)` は以下 5 ステップ:
+
+1. **Layout 判定**: `v_*.html` / `<libname>_*/` (ディレクトリ) / `<libname>_*.js` (単一ファイル) の物理構造で 3 系統を判定 (詳細は [`clientServer フォールバック`](#clientserver-フォールバック))。内容構造規則 (`f1` / `init`/`setupTest`/`test`) には依存しない
+2. **AST parse**: client は HTML 内 inline `<script>` を、server (multi-file) は `<libname>_*/` 配下の各 .js を、server (single-file) は `<libname>_*.js` 1 ファイルを Babel で parse
+3. **Top-level statement の AST hash matching**: before/after の `Program.body` 各 statement について `canonicalHash` を計算し、greedy にハッシュ一致 pair を **matched (= 不変)** としてマーク。残りを **unmatched-before / unmatched-after** に分類
+4. **Candidate enumeration**: unmatched-before と unmatched-after を順序対応で組合せ (`min(|U_b|, |U_a|)` ペア)。各ペアで `findChangedNodes` (top-down 最深 unmapped) → `findMinimalEnclosure` (3 段優先順位の候補型 LCA) を順に適用して、enclosure に到達できた組合せを candidate に加える
+5. **結果出力**: candidate ごとに 1 つの `PreprocessingResult` を出力 (1 入力 → N 結果)
+
+Step 3 の hash matching は GumTree top-down の簡略版。これにより before/after で statement 数が違うケース (デバッグ行追加・削除等) でも不変 statement を正しく除外して真の変更点だけを candidate にできる。
+
+### enclosure 候補型の 3 段優先順位
+
+`findMinimalEnclosure` (`preprocessing/common/enclosure.ts`) は changed_nodes の LCA から root に向かって 3 段の優先順位で候補型を探す:
+
+| 段 | 候補型 | 想定する変更パターン | 例 |
+|---|---|---|---|
+| **1** | **関数/メソッド系**: FunctionDeclaration / FunctionExpression / ArrowFunctionExpression / ClassMethod / ObjectMethod | 関数 body 内の局所的最適化 | `var f1 = function () { ❶ };` |
+| **2** | **ブロック系**: BlockStatement | 関数/メソッドではないがブロック内に閉じた変更 (if/for body 等) | `if (cond) { ❶ }` |
+| **3 (改良 3)** | **Top-level statement 系**: VariableDeclaration / FunctionDeclaration / ClassDeclaration / ExpressionStatement | 関数全体の refactor、`module.exports = ...` 形式の代入式変更 | `module.exports = function (...) { ...大量変更... };` |
+
+段 1, 2 は「**変更を内包する最も内側の構文単位**」を取る本来の minimal enclosure。段 3 は「LCA が関数/Block より外まで上昇するケース」(= 関数 body 全面 refactor / 代入式の右辺 refactor) を救済する fallback で、Selakovic の library 全面修正 (EJS の parse、Backbone の model 系) で頻出する。
+
+段 3 採用時は slow/fast に top-level statement 全体が入るため、後段 pruning でその statement 全体の最小化が走る。**論文非依存性**: 候補型の追加は ECMAScript 文法レベルの一般概念のみで、Selakovic Table 4 / precondition には依存しない。threats to validity に「関数全体置換のような大規模 refactor は top-level statement 単位で抽出する」と明記する。
+
+### 1 入力 → N 結果モデル
+
+Selakovic データセットには **同一 PR に複数の独立した最適化が同居するケース**がある (例: socket.io 573 では `encodePacket` の switch case 順序入れ替え + `decodePacket` の if/else→switch 書き換えが同一 commit に含まれる)。
+
+これに対応するため、`extract()` の戻り値を **`list[PreprocessingResult]`** に拡張:
+
+| candidates 数 | 出力 | id 規則 |
+|---|---|---|
+| 0 (整形差分のみ) | 1 件 (excluded=NO_CHANGED_NODES) | `<input.id>` (suffix なし) |
+| 0 (unmatched あり、enclosure 不成立) | 1 件 (excluded=MODULE_WIDE_CHANGE) | `<input.id>` |
+| 1 | 1 件 (抽出成功) | `<input.id>` (suffix なし) |
+| N (≥ 2) | N 件 (各 candidate 独立) | `<input.id>#0`, `<input.id>#1`, ... |
+| 構造的失敗 (parse-error 等) | 1 件 (excluded) | `<input.id>` |
+
+Python 側 Gateway は **prefix-match で id 突き合わせ**を行う (`<batch_key>` または `<batch_key>#X` 形式の全行を集める)。
+
+### setup 構築規約
+
+各 candidate の `setup` は **「自分以外の全 top-level statement (matched + 他 unmatched) の before 版を index 順に結合」** したもの。
+
+```
+candidate i に対する setup:
+  setup = generate(beforeBody.filter(idx => idx !== candidate.beforeIndex))
+  slow  = generate(beforeBody[candidate.beforeIndex])
+  fast  = generate(afterBody[candidate.afterIndex])
+```
+
+メンタルモデル: 「他の最適化対象は **最適化前の状態 (before) を環境として固定**」。これにより:
+
+1. **両側 (slow/fast) の setup が完全同一**になり、関数間依存があっても等価判定が破綻しない
+2. 各 candidate を独立した最適化単位として扱える (Selakovic 論文では PR 単位の最適化として記述されているが、本前処理器ではより細かい変換単位で抽出する)
+3. `var hoisting` や副作用順序を含めた実行コンテキストが現実的に再現される
+
+### clientServer フォールバック
+
+Selakovic データセットは 3 カテゴリ (clientIssues / serverIssues / clientServerIssues) でレイアウトが混在している:
+
+| カテゴリ | 物理構造 | 最適化対象の所在 |
+|---|---|---|
+| **clientIssues** | `v_*.html` + `<libname>_*.js` (jsperf 用ライブラリスナップショット) | inline `<script>` 内 (`f1` 慣習で記述) |
+| **serverIssues** | `<libname>_*/` ディレクトリ + `test_case_*.js` | `<libname>_*/index.js` 等 |
+| **clientServerIssues** | `v_*.html` + `<libname>_*.js` 単一ファイル + `test_case_*.js` | `<libname>_*.js` 単一ファイル (inline script は jsperf 計測ハーネス) |
+
+clientIssues と clientServerIssues は **物理構造がほぼ同一** で識別困難。`v_*.html` と `<libname>_*.js` の両方を持つ。判別の鍵は **「inline script に意味論的変更があるか」** という抽出時の動的判定:
+
+```
+1. v_*.html + <libname>_*.js (single-file) 共存を検出 (layout.detectLayout が両 path を保持)
+2. 1 次抽出: client モードで inline script を AST diff
+3. 1 次結果が all-excluded (= inline script に最適化が見つからない) なら:
+4.   2 次抽出: server-single-file モードで <libname>_*.js を AST diff
+5.   2 次結果に extracted が 1 件でも出れば採用 (clientServerIssues 救済)
+6. 2 次でも空なら 1 次結果を返す
+```
+
+これは **論文非依存の物理構造ベース探索順序ルール**。threats to validity に「inline script に変更が見つからない場合のみ library 側を見る」と honest に書ける。Selakovic Table 4 / precondition への依存はない。
+
+実測効果: clientServerIssues 28 件中 27 件 (96.4%) が fallback 経由で抽出成功。serverIssues / clientIssues も同じ判定ロジックで救済されるケースあり。
+
+### 除外理由の意味論
+
+`ExclusionReason` enum (`mb-analyzer/src/contracts/preprocessing-contracts.ts` ↔ `mb_scanner/domain/entities/preprocessing.py`) で 7 種を定義:
+
+| reason | 意味 | 救済可能性 |
+|---|---|---|
+| `parse-error` | Babel parser が SyntaxError を throw | データ固有の特殊 syntax を扱う plugin 追加で部分救済可 |
+| `no-changed-nodes` | 全 top-level statement が AST hash で matched (整形差分のみ) | 救済不要 (意味論変更なし) |
+| `module-wide-change` | unmatched 残るが 3 段すべての enclosure 候補型 (関数/Block/top-level statement) に到達できない | 設計上ほぼ起きない (top-level statement で必ず救える) |
+| `multi-file-change` | server 系で意味論変更が複数 .js ファイルにまたがる | 出力スキーマ拡張 (1 issue → 複数ファイル) で対応可、ただし保守的に除外 |
+| `no-enclosure-candidate` | enclosure 抽出の内部不変違反 (通常起こらない) | bug fix 対象 |
+| `layout-unknown` | `v_*.html` も `<libname>_*/` も `<libname>_*.js` も無いディレクトリ | データ固有、個別対応が必要 |
+| `missing-files` | 期待ファイル欠落 / I/O 失敗 | データ固有、個別対応が必要 |
+
+実測 (Selakovic 97 issue): 抽出成功 96 件 (99.0%)、`multi-file-change` 1 件のみ除外。threats to validity への記述方針: 各除外を **「データセット固有の限界として明示」** し、論文非依存性を主張する論理を保つ。
+
+### 既知の運用上の落とし穴 (Node CLI の stdout flush)
+
+`preprocess-selakovic` の出力は 1 issue あたり最大 100KB+ になる (改良 3 で top-level statement 全体が slow/fast に入るため)。Node の `process.exit()` を即座に呼ぶと **stdout が flush 完了前に exit して 64KB で truncate される** (macOS pipe バッファ境界)。Python subprocess.run 経由では結果消失として観測される。
+
+回避策 (`mb-analyzer/src/cli/index.ts`):
+
+```ts
+main()
+  .then(async (code) => {
+    await waitForFlush(process.stdout);  // drain イベントを待つ
+    await waitForFlush(process.stderr);
+    process.exit(code);
+  });
+```
+
+`process.exit()` の前に `waitForFlush` で drain を待つ。これは preprocess-selakovic / preprocess-selakovic-batch のように大量 stdout を返すサブコマンド全般で必要な対策。pruning / equivalence-checker は出力量が小さいので顕在化しなかったが、**新サブコマンドで大量出力が想定される場合は同パターンを踏襲する**。
+
+### 既知の運用上の落とし穴 (VM cross-realm Error)
+
+`vm.runInContext` で throw された `Error` は **VM context (別 realm) の Error コンストラクタで生成**されるため、outer realm から `e instanceof Error` で判定すると **常に false になる**。これは Node.js の vm モジュール固有の挙動で、ライブラリ作者が頻繁に踏む落とし穴。
+
+旧実装 (`mb-analyzer/src/equivalence-checker/checker.ts`):
+
+```ts
+const message = e instanceof Error ? e.message : "unexpected non-Error thrown";
+```
+
+→ VM 内で `ReferenceError: angular is not defined` が throw されても `instanceof Error` が false で本来のメッセージが捨てられ、全件「unexpected non-Error thrown」として report されていた。
+
+修正後 (duck typing):
+
+```ts
+function extractErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "object" && e !== null) {
+    const obj = e as { message?: unknown; constructor?: { name?: unknown } };
+    const ctorName = typeof obj.constructor?.name === "string" ? obj.constructor.name : null;
+    if (typeof obj.message === "string") {
+      return ctorName !== null && ctorName !== "Object" ? `${ctorName}: ${obj.message}` : obj.message;
+    }
+  }
+  if (typeof e === "string") return e;
+  return `unexpected throw: ${String(e)}`;
+}
+```
+
+`.constructor.name` で型名 (`ReferenceError` / `TypeError` / `SyntaxError`) を、`.message` で詳細を拾う。これで VM 内 throw でも本来のエラー種別とメッセージが outer に伝わる。
+
+なお `executor.ts` の `captureException` は元々 duck typing で実装されている (oracle 用の exception field キャプチャ)。本修正は **executor 外で起きる throw** (= setup の `vm.runInContext` 直接 throw) を outer try/catch で受ける際の同パターン適用。
+
+### Selakovic データセットでの実測 (Phase 4.3 一次観測)
+
+97 件の抽出済 issue (= 112 結果) に対する `check-equivalence-batch` 実行結果:
+
+```
+total: 112  equal: 15  not_equal: 0  error: 97
+```
+
+`error` 96 件 (1 件は別エラー) は **すべてフレームワーク / Node CommonJS / DOM / jsperf 計測ハーネスのグローバル識別子未定義**:
+
+| 識別子 | 件数 | 種類 |
+|---|---|---|
+| `execute` | 34 | jsperf 計測ハーネス (`var a = execute(f1, 10)`) |
+| `angular` | 19 | Angular |
+| `require` | 19 | Node CommonJS |
+| `Ember` | 7 | Ember.js |
+| その他 | 17 | document / $ / exports / window / jQuery / _ / React / f1 |
+
+これらは **抽出器のミスではなく VM sandbox 環境の制約**。本来両側 (slow/fast) が同じ throw → 等価判定すべきだが、現状は setup throw が全体 error verdict に畳まれる仕様。
+
+対処: **Proxy-based undefined stub を VM sandbox に仕込む** (PR #5 で対応予定)。未定義 globalThis アクセスを「何でも吸収する stub」に自動置換し、両側で同じ動作にして等価判定を成立させる。本 PR スコープ外。
