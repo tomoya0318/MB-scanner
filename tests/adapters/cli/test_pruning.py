@@ -115,6 +115,11 @@ class TestPruneCLI:
         res = self.runner.invoke(app, ["prune", "--input", str(bad)])
         assert res.exit_code == 2
 
+    def test_input_file_not_found_exits_2(self, tmp_path: Path) -> None:
+        missing = tmp_path / "nope.json"
+        res = self.runner.invoke(app, ["prune", "--input", str(missing)])
+        assert res.exit_code == 2
+
 
 def _stub_batch_result(input_id: str, verdict: PruningVerdict = PruningVerdict.PRUNED) -> PruningResult:
     return PruningResult(id=input_id, verdict=verdict)

@@ -141,6 +141,9 @@ def prune(
             timeout_ms=timeout_ms,
             max_iterations=max_iterations,
         )
+    except FileNotFoundError as e:
+        typer.echo(f"Input file not found: {e}", err=True)
+        raise typer.Exit(EXIT_ERROR) from e
     except (json.JSONDecodeError, ValueError) as e:
         typer.echo(f"Invalid input: {e}", err=True)
         raise typer.Exit(EXIT_ERROR) from e
