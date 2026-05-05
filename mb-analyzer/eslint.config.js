@@ -8,6 +8,9 @@ import globals from "globals";
 // - ast/ は Babel AST 操作の汎用ユーティリティ (末端層、機能間で共有)
 // - contracts と ast は互いに独立した末端層なので、相互 import も禁止する
 // - equivalence-checker/ は pruning/ 等の将来機能を import してはならない
+// - preprocessing/ は pipeline 上 equivalence-checker / pruning の前段だが、機能的には
+//   独立 (CLI で順次呼び出すだけ)。preprocessing/common は preprocessing/selakovic を
+//   import してはならない (ドメイン非依存層、@angular/common 流の命名)
 // - cli/ のみ composition root として全機能を import できる
 const DEPENDENCY_ZONES = [
   {
@@ -15,6 +18,7 @@ const DEPENDENCY_ZONES = [
     from: [
       "./src/ast",
       "./src/equivalence-checker",
+      "./src/preprocessing",
       "./src/pruning",
       "./src/equivalence-class-test",
       "./src/eslint-rule-codegen",
@@ -25,6 +29,28 @@ const DEPENDENCY_ZONES = [
     target: "./src/ast",
     from: [
       "./src/contracts",
+      "./src/equivalence-checker",
+      "./src/preprocessing",
+      "./src/pruning",
+      "./src/equivalence-class-test",
+      "./src/eslint-rule-codegen",
+      "./src/cli",
+    ],
+  },
+  {
+    target: "./src/preprocessing/common",
+    from: [
+      "./src/preprocessing/selakovic",
+      "./src/equivalence-checker",
+      "./src/pruning",
+      "./src/equivalence-class-test",
+      "./src/eslint-rule-codegen",
+      "./src/cli",
+    ],
+  },
+  {
+    target: "./src/preprocessing",
+    from: [
       "./src/equivalence-checker",
       "./src/pruning",
       "./src/equivalence-class-test",
