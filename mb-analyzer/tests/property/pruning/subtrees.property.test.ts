@@ -1,5 +1,5 @@
 /**
- * 対象: src/pruning/ast/subtrees.ts の SubtreeSet
+ * 対象: src/ast/subtree-hash.ts の SubtreeSet
  * 観点: ランダムな式について SubtreeSet の所属判定が再 parse 安定性 / 決定性 /
  *      衝突回避の 3 性質を満たすかを検証 (内部 canonicalHash の代数的性質を public
  *      API 経由で間接確認)

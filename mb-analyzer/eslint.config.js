@@ -6,12 +6,14 @@ import globals from "globals";
 // 機能間の依存方向ルール。
 // - contracts/ は Python ↔ TS の JSON 契約 (末端層、誰からも import される、何も import しない)
 // - ast/ は Babel AST 操作の汎用ユーティリティ (末端層、機能間で共有)
+// - contracts と ast は互いに独立した末端層なので、相互 import も禁止する
 // - equivalence-checker/ は pruning/ 等の将来機能を import してはならない
 // - cli/ のみ composition root として全機能を import できる
 const DEPENDENCY_ZONES = [
   {
     target: "./src/contracts",
     from: [
+      "./src/ast",
       "./src/equivalence-checker",
       "./src/pruning",
       "./src/equivalence-class-test",
@@ -22,6 +24,7 @@ const DEPENDENCY_ZONES = [
   {
     target: "./src/ast",
     from: [
+      "./src/contracts",
       "./src/equivalence-checker",
       "./src/pruning",
       "./src/equivalence-class-test",
