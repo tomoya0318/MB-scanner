@@ -194,7 +194,7 @@ function extractFromScripts(
       {
         layout,
         excluded: EXCLUSION_REASON.MODULE_WIDE_CHANGE,
-        excluded_detail: `${unmatchedBeforeIdx.length} before / ${unmatchedAfterIdx.length} after unmatched statements without Function/Method/Block enclosure`,
+        excluded_detail: `${unmatchedBeforeIdx.length} before / ${unmatchedAfterIdx.length} after unmatched statements without enclosure (no Function/Method, Block, nor top-level statement candidate matched)`,
         before_node_count: beforeNodeCount,
         after_node_count: afterNodeCount,
       },

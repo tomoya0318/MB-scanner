@@ -29,8 +29,7 @@ async function main(): Promise<number> {
 /**
  * pipe 出力 (Python subprocess 経由など) で大量 stdout (>64KB) を書くとき、
  * `process.exit()` 即座実行だと flush が間に合わず stdout が truncate される。
- * 解決策: `exitCode` だけ設定して Node のイベントループに自然終了させる。
- * stdout/stderr が drain された後で exit する。
+ * 解決策: `drain` イベントを `await` して書き残しを掃いてから `process.exit(code)` を呼ぶ。
  *
  * preprocess-selakovic で 1 issue から 100KB+ の slow/fast を返すケースに対応。
  */

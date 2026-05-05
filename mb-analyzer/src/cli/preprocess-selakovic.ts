@@ -44,7 +44,8 @@ function parseInput(raw: string): PreprocessingInput | string {
   const obj = parsed as Record<string, unknown>;
   if (typeof obj.issue_dir !== "string") return "'issue_dir' field must be a string";
   const input: PreprocessingInput = { issue_dir: obj.issue_dir };
-  if (obj.id !== undefined) {
+  // null は undefined と同じ「省略」として扱う (Pydantic optional の serialize 形式に対応)。
+  if (obj.id !== undefined && obj.id !== null) {
     if (typeof obj.id !== "string") return "'id' field must be a string when present";
     input.id = obj.id;
   }
@@ -213,7 +214,15 @@ function parseBatchLine(raw: string): PreprocessingInput | BatchLineParseError {
     return { id: undefined, error: "Expected a JSON object per line" };
   }
   const obj = parsed as Record<string, unknown>;
-  const id = typeof obj.id === "string" ? obj.id : undefined;
+  // null は undefined と同じ「省略」として扱う (Pydantic optional の serialize 形式に対応)。
+  let id: string | undefined;
+  if (obj.id === undefined || obj.id === null) {
+    id = undefined;
+  } else if (typeof obj.id === "string") {
+    id = obj.id;
+  } else {
+    return { id: undefined, error: "'id' field must be a string when present" };
+  }
   if (typeof obj.issue_dir !== "string") return { id, error: "'issue_dir' field must be a string" };
   const input: PreprocessingInput = { issue_dir: obj.issue_dir };
   if (id !== undefined) input.id = id;
