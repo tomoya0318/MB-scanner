@@ -1,5 +1,5 @@
 import { prune } from "../pruning";
-import type { PruningInput, PruningResult } from "../shared/pruning-contracts";
+import type { PruningInput, PruningResult } from "../contracts/pruning-contracts";
 
 const EXIT_PRUNED = 0;
 const EXIT_INITIAL_MISMATCH = 1;

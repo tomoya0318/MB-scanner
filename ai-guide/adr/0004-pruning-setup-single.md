@@ -2,7 +2,7 @@
 
 - **Status**: accepted
 - **Date**: 2026-04-23
-- **Related**: PR #8, `mb-analyzer/src/shared/pruning-contracts.ts`, `mb_scanner/domain/entities/pruning.py`
+- **Related**: PR #8, `mb-analyzer/src/contracts/pruning-contracts.ts`, `mb_scanner/domain/entities/pruning.py`
 
 ## コンテキスト
 

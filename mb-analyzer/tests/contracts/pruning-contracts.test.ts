@@ -17,7 +17,7 @@ import {
   type PruningInput,
   type PruningResult,
   type PruningVerdict,
-} from "../../src/shared/pruning-contracts";
+} from "../../src/contracts/pruning-contracts";
 
 describe("PRUNING_VERDICT", () => {
   it("Python 側 PruningVerdict StrEnum と同じ文字列値を持つ", () => {
