@@ -115,7 +115,10 @@ class TestNodeRunnerPreprocessorGatewayMocked:
         assert cmd[-1] == "preprocess-selakovic"
         assert str(fake_cli) in cmd
 
-    def test_payload_omits_id_field_when_none(self, tmp_path: Path) -> None:
+    def test_payload_keeps_id_field_as_null_when_none(self, tmp_path: Path) -> None:
+        # ai-guide/architecture/index.md: Python → Node の serialize は exclude_defaults=False,
+        # exclude_none=False で揃え、フィールドが silently 落ちるリファクタ事故を防ぐ。
+        # Node 側 parseInput は null を undefined と同じ「省略」として扱う。
         fake_cli = tmp_path / "cli.js"
         fake_cli.write_text("// stub")
         stdout = json.dumps(_fake_extracted_result()) + "\n"
@@ -126,7 +129,7 @@ class TestNodeRunnerPreprocessorGatewayMocked:
 
         sent_payload = run_mock.call_args.kwargs["input"]
         parsed = json.loads(sent_payload)
-        assert "id" not in parsed
+        assert parsed["id"] is None
         assert parsed["issue_dir"] == "/tmp/x"
 
     def test_subprocess_timeout_returns_error(self, tmp_path: Path) -> None:

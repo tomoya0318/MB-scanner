@@ -66,9 +66,7 @@ class NodeRunnerPreprocessorGateway:
         if not self._cli_path.exists():
             return [_gateway_error(_cli_not_found_message(self._cli_path), id_=input_.id)]
 
-        # exclude_none=True: id 未設定時に "id": null を送らず、フィールドごと省略する
-        # (Node 側契約: 省略 = string ではない、として扱う)。
-        payload = input_.model_dump_json(exclude_none=True)
+        payload = input_.model_dump_json(exclude_defaults=False, exclude_none=False)
         subprocess_timeout = _SECONDS_PER_ITEM + self._timeout_margin_sec
 
         try:
@@ -136,9 +134,9 @@ class NodeRunnerPreprocessorGateway:
                 sent_item = item.model_copy(update={"id": key})
             indexed.append((key, original_id, sent_item))
 
-        # sent_item.id は indexed 構築で必ず文字列が埋まっているので、exclude_none=True でも
-        # 送信時に id フィールドが落ちることはない。
-        payload_lines = [sent_item.model_dump_json(exclude_none=True) for _, _, sent_item in indexed]
+        payload_lines = [
+            sent_item.model_dump_json(exclude_defaults=False, exclude_none=False) for _, _, sent_item in indexed
+        ]
         payload = "\n".join(payload_lines) + "\n"
 
         subprocess_timeout = _SECONDS_PER_ITEM * len(items) + _BATCH_TIMEOUT_BUFFER_SEC + self._timeout_margin_sec
