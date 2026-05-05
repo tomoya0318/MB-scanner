@@ -52,6 +52,22 @@ function makeClientIdenticalDir(): string {
   return dir;
 }
 
+function makeClientMultiCandidateDir(): string {
+  // 2 つの top-level function declaration がそれぞれ独立に変更されている → 2 candidate
+  const dir = mkdtempSync(join(tmpdir(), "mbs-preprocess-cli-test-"));
+  const before = `<html><body><script>
+function f() { return arr[0]; }
+function g() { return arr[0]; }
+</script></body></html>`;
+  const after = `<html><body><script>
+function f() { return arr[1]; }
+function g() { return arr[2]; }
+</script></body></html>`;
+  writeFileSync(join(dir, "v_before.html"), before);
+  writeFileSync(join(dir, "v_after.html"), after);
+  return dir;
+}
+
 describe("runPreprocessSelakovic", () => {
   let stdoutSpy: WritableSpy;
   let stderrSpy: WritableSpy;
@@ -181,6 +197,21 @@ describe("runPreprocessSelakovic", () => {
     expect(results).toHaveLength(1);
     expect(results[0]?.id).toBe("case-01");
     expect(results[0]?.excluded).toBe("no-changed-nodes");
+  });
+
+  it("複数 candidate を返す入力は id を <original_id>#<index> で suffix 付与する", async () => {
+    const dir = makeClientMultiCandidateDir();
+    tmpDirs.push(dir);
+    restoreStdin = feedStdin(JSON.stringify({ id: "case-01", issue_dir: dir }));
+
+    const code = await runPreprocessSelakovic();
+
+    expect(code).toBe(0);
+    const results = parseStdoutLines(stdoutSpy.writes);
+    expect(results.length).toBeGreaterThanOrEqual(2);
+    expect(results.map((r) => r.id)).toEqual(
+      results.map((_, idx) => `case-01#${idx}`),
+    );
   });
 
   it("出力は常に JSONL (各 result は独立行)", async () => {
