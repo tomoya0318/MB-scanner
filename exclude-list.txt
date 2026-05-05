@@ -3,25 +3,53 @@
 
 # キャッシュファイル
 .ruff_cache/
+.pytest_cache/
+.import_linter_cache/
+.mypy_cache/
+.pyright_cache/
+.eslintcache
+*.tsbuildinfo
+__pycache__/
+*.pyc
+*.pyo
 
 # ログファイル
 *.log
 
-# 特定のディレクトリ
-data/
+# データ・出力・一時ファイル
+# data/ は基本除外するが mb_scanner.db のみ同期する
++ data/
++ data/mb_scanner.db
+- data/**
 tmp/
-.venv/
-tests/
-.git/
-.claude/
-AGENTS.md
-CLAUDE.md
-ai-guide/
-.ai/
 outputs/
-benchmark/node_modules/
-benchmark/dist/
+result.json
+.ai/
+
+# 仮想環境・ビルド成果物
+.venv/
+node_modules/
+dist/
+mb-analyzer-legacy/
+build/
+wheels/
+debug/
+*.egg-info/
+
+# Git・worktree
+.git
+.git/
+
+# カバレッジ
+coverage/
+.coverage
+htmlcov/
+mb-analyzer/coverage/
+
+# エディタ・ローカルツール
+.vscode/
+.mise/
+.cmux-surface
 
 # 設定ファイル
-.env.sample
 .gitignore
