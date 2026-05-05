@@ -6,4 +6,4 @@ export type {
   PruningInput,
   PruningResult,
   PruningVerdict,
-} from "../shared/pruning-contracts";
+} from "../contracts/pruning-contracts";

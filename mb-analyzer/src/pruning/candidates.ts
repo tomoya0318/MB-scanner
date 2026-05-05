@@ -1,8 +1,8 @@
 import type { File, Node } from "@babel/types";
 
-import type { FastSubtreeSet } from "./ast/subtrees";
-import { nodeSize } from "./ast/inspect";
-import { walkNodes } from "./ast/walk";
+import { nodeSize } from "../ast/inspect";
+import type { SubtreeSet } from "../ast/subtree-hash";
+import { walkNodes } from "../ast/walk";
 import { BLACKLIST_CATEGORIES, type ExcludeRule, type BlacklistCategories } from "./rules/blacklist";
 import { PLACEHOLDER_NAME_PATTERN } from "./rules/replacement";
 import { WHITELIST_CATEGORIES } from "./rules/whitelist";
@@ -18,7 +18,7 @@ import { WHITELIST_CATEGORIES } from "./rules/whitelist";
  *   3. 親子 blacklist: 親 field validator が置換後の型 (ExpressionStatement / Identifier /
  *      StringLiteral) を受理しない位置を除外。ルールは `@babel/types` の文法メタ
  *      データから `rules/blacklist.ts` で自動導出 (ADR 0005)
- *   4. FastSubtreeSet.has: fast に同型が存在する「共通ノード」に絞る
+ *   4. SubtreeSet.has: fast に同型が存在する「共通ノード」に絞る
  *      (研究計画 §第 1 段階 で「差分ノードは必須扱い」とするため)
  *
  * 結果は `end - start` の降順でソート。サイズが大きい候補を先に試す方が、成功
@@ -39,12 +39,12 @@ export interface CandidatePath {
  * pruning 候補を列挙する。
  *
  * @param slow 対象の File AST
- * @param diff FastSubtreeSet (fast との共通ノード判定)。undefined なら差分フィルタを
+ * @param diff SubtreeSet (fast との共通ノード判定)。undefined なら差分フィルタを
  *   適用せず全ての whitelist ノードを候補にする (テスト用)。
  */
 export function enumerateCandidates(
   slow: File,
-  diff?: FastSubtreeSet,
+  diff?: SubtreeSet,
 ): CandidatePath[] {
   const candidates: CandidatePath[] = [];
   const blacklist = BLACKLIST_CATEGORIES;
@@ -72,7 +72,7 @@ function isCandidate(
   parent: Node,
   parentKey: string,
   blacklist: BlacklistCategories,
-  diff: FastSubtreeSet | undefined,
+  diff: SubtreeSet | undefined,
 ): boolean {
   if (isPlaceholderNode(node)) return false;
 
@@ -120,7 +120,7 @@ if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
   // 本 if ブロック内でだけ必要なので遅延 import (production bundle には残らない)
   const { parse } = await import("./ast/parser");
-  const { FastSubtreeSet } = await import("./ast/subtrees");
+  const { SubtreeSet } = await import("../ast/subtree-hash");
 
   const stubNode = (type: string, extra: Record<string, unknown> = {}): Node =>
     ({ type, ...extra }) as unknown as Node;
@@ -222,7 +222,7 @@ if (import.meta.vitest) {
     it("diff の has === false は除外、undefined 時は diff 段がスキップされる", () => {
       const id = stubNode("Identifier");
       const parent = stubNode("ExpressionStatement");
-      const diffReject = { has: () => false } as unknown as FastSubtreeSet;
+      const diffReject = { has: () => false } as unknown as SubtreeSet;
 
       expect(isCandidate(id, parent, "expression", emptyBlacklist, diffReject)).toBe(false);
       expect(isCandidate(id, parent, "expression", emptyBlacklist, undefined)).toBe(true);
@@ -284,14 +284,14 @@ if (import.meta.vitest) {
     });
   });
 
-  describe("enumerateCandidates (in-source) — FastSubtreeSet 連携", () => {
+  describe("enumerateCandidates (in-source) — SubtreeSet 連携", () => {
     const SLOW_CODE = "use(key, flag);";
     const FAST_CODE = "use(key);";
 
     it("差分ノードは diff 渡し時に除外される", () => {
       const slow = parse(SLOW_CODE);
       const fast = parse(FAST_CODE);
-      const diff = new FastSubtreeSet(fast);
+      const diff = new SubtreeSet(fast);
 
       const candidates = enumerateCandidates(slow, diff);
       const flagIdent = candidates.find(
@@ -304,7 +304,7 @@ if (import.meta.vitest) {
     it("共通ノードは diff 渡し時にも候補に入る", () => {
       const slow = parse(SLOW_CODE);
       const fast = parse(FAST_CODE);
-      const diff = new FastSubtreeSet(fast);
+      const diff = new SubtreeSet(fast);
 
       const candidates = enumerateCandidates(slow, diff);
       const keyIdents = candidates.filter(

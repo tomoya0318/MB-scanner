@@ -1,16 +1,16 @@
 /**
- * 対象: src/pruning/ast/subtrees.ts の FastSubtreeSet
- * 観点: ランダムな式について FastSubtreeSet の所属判定が再 parse 安定性 / 決定性 /
+ * 対象: src/ast/subtree-hash.ts の SubtreeSet
+ * 観点: ランダムな式について SubtreeSet の所属判定が再 parse 安定性 / 決定性 /
  *      衝突回避の 3 性質を満たすかを検証 (内部 canonicalHash の代数的性質を public
  *      API 経由で間接確認)
  * 判定事項:
- *   - 同一ソースから生成した 2 つの File は互いに FastSubtreeSet で全サブツリー所属
- *   - 同一コードから別々に作った FastSubtreeSet は他方の全サブツリーを含む (決定性)
+ *   - 同一ソースから生成した 2 つの File は互いに SubtreeSet で全サブツリー所属
+ *   - 同一コードから別々に作った SubtreeSet は他方の全サブツリーを含む (決定性)
  *   - リテラル値を 1 箇所変えた File は元集合に含まれない (衝突回避)
  */
 import * as fc from "fast-check";
 import { describe, it } from "vitest";
-import { FastSubtreeSet } from "../../../src/pruning/ast/subtrees";
+import { SubtreeSet } from "../../../src/ast/subtree-hash";
 import { parse } from "../../../src/pruning/ast/parser";
 import { walkAllNodes } from "./walk";
 
@@ -38,13 +38,13 @@ const expressionArb: fc.Arbitrary<string> = fc.letrec((tie) => ({
   ),
 })).expr;
 
-describe("FastSubtreeSet (property)", () => {
+describe("SubtreeSet (property)", () => {
   it("同じソースから作った 2 つの File は全サブツリーが集合に含まれる (再 parse 安定性)", () => {
     fc.assert(
       fc.property(expressionArb, (code) => {
         const slow = parse(code);
         const fast = parse(code);
-        const subtrees = new FastSubtreeSet(fast);
+        const subtrees = new SubtreeSet(fast);
         for (const node of walkAllNodes(slow)) {
           if (!subtrees.has(node)) return false;
         }
@@ -54,12 +54,12 @@ describe("FastSubtreeSet (property)", () => {
     );
   });
 
-  it("同じコードから別々に構築した FastSubtreeSet は他方の全サブツリーを含む (決定性)", () => {
+  it("同じコードから別々に構築した SubtreeSet は他方の全サブツリーを含む (決定性)", () => {
     // 集合構築の結果が実行間で安定 (内部 hash が決定論的) なら、別々に作っても
     // 一方のサブツリーは他方に必ず含まれる
     fc.assert(
       fc.property(expressionArb, (code) => {
-        const set1 = new FastSubtreeSet(parse(code));
+        const set1 = new SubtreeSet(parse(code));
         const file2 = parse(code);
         for (const node of walkAllNodes(file2)) {
           if (!set1.has(node)) return false;
@@ -74,7 +74,7 @@ describe("FastSubtreeSet (property)", () => {
     const codeArb = fc.tuple(identifierArb, numberArb, numberArb).filter(([, a, b]) => a !== b);
     fc.assert(
       fc.property(codeArb, ([name, a, b]) => {
-        const setA = new FastSubtreeSet(parse(`${name}[${a}]`));
+        const setA = new SubtreeSet(parse(`${name}[${a}]`));
         const fileB = parse(`${name}[${b}]`);
         // File 全体・Program 全体・ExpressionStatement のいずれも setA には無い
         // (リテラル値が違うので)
