@@ -30,13 +30,29 @@ async function main(): Promise<number> {
 // `process.exit()` を直接呼ぶと kernel に渡されていない write が捨てられて末尾の出力が
 // truncate される。空 write のコールバックは内部キューが完全に flush された時点で発火
 // するので、backpressure の有無に関わらず確実に exit 直前まで待てる。
+// closed/destroyed や同期 throw で callback が永遠に来ないケースも想定し、error/close と
+// try/catch でフォールバック resolve してプロセスがハングしないようにする。
 function waitForFlush(stream: NodeJS.WriteStream): Promise<void> {
   return new Promise((resolve) => {
     if (stream.writableLength === 0 && !stream.writableNeedDrain) {
       resolve();
       return;
     }
-    stream.write("", () => resolve());
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    stream.once("error", finish);
+    stream.once("close", finish);
+    try {
+      const accepted = stream.write("", () => finish());
+      // write が false かつ closed 済みなら drain も来ないので即 resolve
+      if (!accepted && stream.destroyed) finish();
+    } catch {
+      finish();
+    }
   });
 }
 
