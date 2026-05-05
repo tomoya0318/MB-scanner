@@ -229,3 +229,30 @@ run = "docker compose --profile archive build scanner"
 [tasks."docker:archive:run"]
 description = "再現実験用 (prod) イメージで単発コマンドを実行する（引数は docker compose run に追加される）"
 run = "docker compose --profile archive run --rm scanner"
+
+# =============================================================================
+# サーバ同期 (rsync)
+# =============================================================================
+
+[tasks."sync:brain1"]
+description = "brain-1 サーバへ rsync で同期する"
+run = """
+echo "📤 Syncing files to brain-1..."
+rsync -av --exclude-from=exclude-list.txt . brain-1:/mnt/data1/tomoya-n/MB-Scanner
+echo "✅ Sync to brain-1 completed!"
+"""
+
+[tasks."sync:brain2"]
+description = "brain-2 サーバへ rsync で同期する"
+run = """
+echo "📤 Syncing files to brain-2..."
+rsync -av --exclude-from=exclude-list.txt . brain-2:/mnt/data1/tomoya-n/MB-Scanner
+echo "✅ Sync to brain-2 completed!"
+"""
+
+[tasks."sync:dry-run"]
+description = "brain-2 への同期内容を dry-run で確認する"
+run = """
+echo "🔍 Dry-run: previewing sync to brain-2..."
+rsync -av --dry-run --exclude-from=exclude-list.txt . brain-2:/mnt/data1/tomoya-n/MB-Scanner
+"""
