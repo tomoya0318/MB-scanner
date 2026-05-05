@@ -53,3 +53,4 @@ mb-analyzer/coverage/
 
 # 設定ファイル
 .gitignore
+.mise.toml

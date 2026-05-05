@@ -71,7 +71,9 @@ describe("runPrune", () => {
     expect(parseStdout(stdoutSpy.writes).verdict).toBe("initial_mismatch");
   });
 
-  it("setup 自体が throw すると engine が verdict=error を返し exit 2", async () => {
+  it("両側で setup throw は exception oracle equal 扱いで pruning が走る", async () => {
+    // 両側で同じ setup → exception oracle で equal → pruning Phase 2 まで進む。
+    // verdict は pruned / initial_match のいずれか (error にはならない)。
     restoreStdin = feedStdin(
       JSON.stringify({
         setup: `throw new Error("setup boom")`,
@@ -84,8 +86,9 @@ describe("runPrune", () => {
 
     const code = await runPrune();
 
-    expect(code).toBe(2);
-    expect(parseStdout(stdoutSpy.writes).verdict).toBe("error");
+    const result = parseStdout(stdoutSpy.writes);
+    expect(result.verdict).not.toBe("error");
+    expect(code).not.toBe(2);
   });
 
   it("timeout_ms が engine に届く (effective_timeout_ms 反映)", async () => {

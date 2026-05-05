@@ -97,4 +97,52 @@ describe("checkEquivalence", () => {
       "external_observation",
     ]);
   });
+
+  describe("undefined stub fallback", () => {
+    it("setup に framework global (angular / require) を含んでも equal を判定できる", async () => {
+      // jsperf 慣習を模した trio。両側とも framework 呼び出しは stub で吸収されるので
+      // ピュアな算術部分の等価性だけが評価される。
+      const result = await checkEquivalence({
+        setup: `
+          var module = angular.module("app", []);
+          var lib = require("lodash");
+          var n = 7;
+        `,
+        slow: "n * 2",
+        fast: "n + n",
+      });
+      expect(result.verdict).toBe("equal");
+    });
+
+    it("execute(f1, n) ハーネス + setup の f1 で両側 equal を判定できる", async () => {
+      // Selakovic の jsperf benchmark テンプレ: setup で f1 を定義し body は execute(f1, ...)
+      // の呼び出し。execute は stub。f1 内部の最適化前後の意味が等価なら equal。
+      const result = await checkEquivalence({
+        setup: `var f1 = function (arr) { return arr.reduce(function (a, b) { return a + b; }, 0); };`,
+        slow: "execute(function () { return f1([1,2,3,4]); }, 10)",
+        fast: "execute(function () { return f1([1,2,3,4]); }, 10)",
+      });
+      expect(result.verdict).toBe("equal");
+    });
+
+    it("片側だけ未定義 global を呼んでも stub に化けるので throw 差にはならない", async () => {
+      // 両側 stub() に解決され、return_value も typeof で揃って equal。
+      const result = await checkEquivalence({
+        slow: "typeof angular.module",
+        fast: "typeof Ember.Application",
+      });
+      expect(result.verdict).toBe("equal");
+    });
+
+    it("setup で両側同じ例外が出れば exception oracle で equal", async () => {
+      const result = await checkEquivalence({
+        setup: `throw new TypeError("setup boom");`,
+        slow: "1 + 1",
+        fast: "2",
+      });
+      expect(result.verdict).toBe("equal");
+      const exc = result.observations.find((o) => o.oracle === "exception");
+      expect(exc?.verdict).toBe("equal");
+    });
+  });
 });

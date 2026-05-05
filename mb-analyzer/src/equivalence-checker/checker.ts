@@ -42,11 +42,12 @@ export async function checkEquivalence(
       effective_timeout_ms: timeout_ms,
     };
   } catch (e) {
-    // setup 自体の実行エラーや予期しない executor 例外は全体 error に畳み込む。
-    // `vm.runInContext` で throw された Error は VM context (別 realm) で生成されるため
-    // outer realm の `instanceof Error` が false になる (Node.js の vm モジュール固有の挙動)。
-    // duck typing で `.message` / `.constructor.name` を拾うことで cross-realm Error も
-    // 本来のメッセージとして報告できる。
+    // setup と body の実行例外は executor 内で捕捉して exception oracle に回すので、
+    // ここに来るのは executor 自身の想定外バグや vm 初期化失敗など稀なケース。
+    // `vm.runInContext` 側で throw された Error は VM context (別 realm) で生成される
+    // ため outer realm の `instanceof Error` が false になる (Node.js の vm モジュール
+    // 固有の挙動)。duck typing で `.message` / `.constructor.name` を拾うことで
+    // cross-realm Error も本来のメッセージとして報告できる。
     return {
       verdict: VERDICT.ERROR,
       observations: [],

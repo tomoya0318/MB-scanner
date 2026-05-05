@@ -141,3 +141,41 @@ describe("executeSandboxed: 決定性", () => {
     expect(a.return_value).toBe(b.return_value);
   });
 });
+
+describe("executeSandboxed: undefined stub fallback", () => {
+  it("setup に require / angular を含んでも例外で死なず body が走る", async () => {
+    const setup = `
+      var $ = require("jquery");
+      var module = angular.module("app", []);
+      var f1 = function (n) { return n + 1; };
+    `;
+    const res = await run("f1(10)", setup);
+    expect(res.exception).toBeNull();
+    expect(res.return_value).toBe("11");
+  });
+
+  it("body 内の execute(f1, n) ハーネス呼び出しは stub で吸収される", async () => {
+    const setup = `var f1 = function () { return 42; };`;
+    const res = await run("var a = execute(f1, 10); typeof a", setup);
+    expect(res.exception).toBeNull();
+    expect(res.return_value).toBe('"function"');
+  });
+});
+
+describe("executeSandboxed: setup 例外", () => {
+  it("setup で throw された例外は exception に詰めて body は実行しない", async () => {
+    const res = await run(
+      "globalThis.bodyRan = true; 999",
+      `throw new TypeError("setup boom");`,
+    );
+    expect(res.exception).toEqual({ ctor: "TypeError", message: "setup boom" });
+    expect(res.return_is_undefined).toBe(true);
+    expect(res.new_globals).not.toContain("bodyRan");
+  });
+
+  it("setup で primitive throw も Unknown として捕捉される", async () => {
+    const res = await run("1", `throw "raw string"`);
+    expect(res.exception?.ctor).toBe("Unknown");
+    expect(res.exception?.message).toBe("raw string");
+  });
+});

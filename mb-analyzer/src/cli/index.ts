@@ -26,32 +26,32 @@ async function main(): Promise<number> {
   return await handler();
 }
 
-/**
- * pipe 出力 (Python subprocess 経由など) で大量 stdout (>64KB) を書くとき、
- * `process.exit()` 即座実行だと flush が間に合わず stdout が truncate される。
- * 解決策: `drain` イベントを `await` して書き残しを掃いてから `process.exit(code)` を呼ぶ。
- *
- * preprocess-selakovic で 1 issue から 100KB+ の slow/fast を返すケースに対応。
- */
-async function waitForFlush(stream: NodeJS.WriteStream): Promise<void> {
-  return new Promise<void>((resolve) => {
-    if (stream.writableLength === 0) {
+// pipe (Python subprocess など) では POSIX 上 process.stdout/stderr の write が async で、
+// `process.exit()` を直接呼ぶと kernel に渡されていない write が捨てられて末尾の出力が
+// truncate される。空 write のコールバックは内部キューが完全に flush された時点で発火
+// するので、backpressure の有無に関わらず確実に exit 直前まで待てる。
+function waitForFlush(stream: NodeJS.WriteStream): Promise<void> {
+  return new Promise((resolve) => {
+    if (stream.writableLength === 0 && !stream.writableNeedDrain) {
       resolve();
       return;
     }
-    stream.once("drain", () => resolve());
+    stream.write("", () => resolve());
   });
+}
+
+async function flushStdio(): Promise<void> {
+  await Promise.all([waitForFlush(process.stdout), waitForFlush(process.stderr)]);
 }
 
 main()
   .then(async (code) => {
-    await waitForFlush(process.stdout);
-    await waitForFlush(process.stderr);
+    await flushStdio();
     process.exit(code);
   })
   .catch(async (err: unknown) => {
     const message = err instanceof Error ? err.message : "unexpected non-Error thrown";
     process.stderr.write(`Fatal: ${message}\n`);
-    await waitForFlush(process.stderr);
+    await flushStdio();
     process.exit(2);
   });

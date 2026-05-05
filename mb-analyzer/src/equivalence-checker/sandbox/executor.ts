@@ -45,11 +45,27 @@ export interface ExecuteOptions {
 export async function executeSandboxed(options: ExecuteOptions): Promise<ExecutionCapture> {
   const { context, consoleCalls, baselineKeys } = createStabilizedContext();
 
+  let exception: ExceptionCapture | null = null;
+  let timedOut = false;
+  let returnValue = "undefined";
+  let returnIsUndefined = true;
+
+  // setup の例外も body と同じ ExecutionCapture.exception に詰める。両 sandbox で
+  // 同じ setup を流すので両側で同じ例外になり、exception oracle で equal と判定される。
+  let setupThrew = false;
   if (options.setup.length > 0) {
-    vm.runInContext(normalizeSetup(options.setup), context, {
-      timeout: options.timeout_ms,
-      displayErrors: false,
-    });
+    try {
+      vm.runInContext(normalizeSetup(options.setup), context, {
+        timeout: options.timeout_ms,
+        displayErrors: false,
+      });
+    } catch (e) {
+      setupThrew = true;
+      if (isTimeoutError(e)) {
+        timedOut = true;
+      }
+      exception = captureException(e);
+    }
   }
 
   const setupKeys = Object.keys(context).filter((k) => !baselineKeys.has(k));
@@ -63,26 +79,23 @@ export async function executeSandboxed(options: ExecuteOptions): Promise<Executi
     }
   }
 
-  let exception: ExceptionCapture | null = null;
-  let timedOut = false;
-  let returnValue = "undefined";
-  let returnIsUndefined = true;
-
-  try {
-    const result: unknown = vm.runInContext(options.body, context, {
-      timeout: options.timeout_ms,
-      displayErrors: false,
-    });
-    const resolved = await resolveIfPromise(result);
-    if (resolved !== undefined) {
-      returnIsUndefined = false;
+  if (!setupThrew) {
+    try {
+      const result: unknown = vm.runInContext(options.body, context, {
+        timeout: options.timeout_ms,
+        displayErrors: false,
+      });
+      const resolved = await resolveIfPromise(result);
+      if (resolved !== undefined) {
+        returnIsUndefined = false;
+      }
+      returnValue = snapshotValue(resolved);
+    } catch (e) {
+      if (isTimeoutError(e)) {
+        timedOut = true;
+      }
+      exception = captureException(e);
     }
-    returnValue = snapshotValue(resolved);
-  } catch (e) {
-    if (isTimeoutError(e)) {
-      timedOut = true;
-    }
-    exception = captureException(e);
   }
 
   const argSnapshots: ArgumentSnapshot[] = trackedKeys.map((key) => {

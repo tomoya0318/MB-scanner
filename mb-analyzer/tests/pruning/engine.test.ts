@@ -100,9 +100,9 @@ describe("prune — error", () => {
     expect(result.verdict).toBe("error");
   });
 
-  it("初回等価性検証で error verdict が返れば pruning 結果も error (setup ランタイムエラー)", async () => {
-    // setup でランタイムエラーを起こすと equivalence-checker が verdict=error を返し、
-    // prune はそれを Phase 1 で検出して PRUNING_VERDICT.ERROR に畳み込む (engine.ts L72-79)。
+  it("setup ランタイムエラーは両側で同じ throw として equal 扱い、pruning が走る", async () => {
+    // executor が setup 例外を exception oracle に詰めるので、両側で同じ setup なら
+    // 全体 equal → pruning Phase 2 まで進む (error にはならない)。
     const result = await prune({
       slow: "1",
       fast: "1",
@@ -110,8 +110,7 @@ describe("prune — error", () => {
       timeout_ms: 2000,
       max_iterations: 10,
     });
-    expect(result.verdict).toBe("error");
-    expect(result.error_message).toBeDefined();
+    expect(result.verdict).not.toBe("error");
     expect(result.node_count_before).toBeGreaterThan(0);
   });
 });

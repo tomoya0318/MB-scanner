@@ -63,16 +63,15 @@ describe("runCheckEquivalence", () => {
     expect(parseStdout(stdoutSpy.writes).verdict).toBe("not_equal");
   });
 
-  it("checker が error を返すと exit 2", async () => {
-    // setup 自体が throw → checker トップ catch で verdict=error
+  it("両側で setup throw は exception oracle equal で exit 0", async () => {
     restoreStdin = feedStdin(
       JSON.stringify({ setup: `throw new Error("setup boom")`, slow: "1", fast: "1" }),
     );
 
     const code = await runCheckEquivalence();
 
-    expect(code).toBe(2);
-    expect(parseStdout(stdoutSpy.writes).verdict).toBe("error");
+    expect(code).toBe(0);
+    expect(parseStdout(stdoutSpy.writes).verdict).toBe("equal");
   });
 
   it("setup + timeout_ms が checker に届く (effective_timeout_ms 反映)", async () => {
