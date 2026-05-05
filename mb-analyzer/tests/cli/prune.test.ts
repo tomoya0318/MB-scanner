@@ -170,9 +170,7 @@ describe("runPrune", () => {
     const code = await runPrune();
 
     expect(code).toBe(2);
-    expect(stderrSpy.writes.join("")).toContain(
-      "'timeout_ms' field must be a finite number when present",
-    );
+    expect(stderrSpy.writes.join("")).toContain("'timeout_ms' field must be an integer");
   });
 
   it("max_iterations が present かつ非 number だと exit 2", async () => {
@@ -183,19 +181,66 @@ describe("runPrune", () => {
     const code = await runPrune();
 
     expect(code).toBe(2);
-    expect(stderrSpy.writes.join("")).toContain(
-      "'max_iterations' field must be a finite number when present",
-    );
+    expect(stderrSpy.writes.join("")).toContain("'max_iterations' field must be an integer");
   });
 
-  it("max_iterations が Infinity (非 finite) だと exit 2", async () => {
+  it("max_iterations が Infinity (非整数) だと exit 2", async () => {
     restoreStdin = feedStdin(`{"slow":"1","fast":"1","timeout_ms":1000,"max_iterations":1e500}`);
 
     const code = await runPrune();
 
     expect(code).toBe(2);
-    expect(stderrSpy.writes.join("")).toContain(
-      "'max_iterations' field must be a finite number when present",
+    expect(stderrSpy.writes.join("")).toContain("'max_iterations' field must be an integer");
+  });
+
+  it("max_iterations=0 は exit 2 (engine がループをスキップして silently pruned を返す事故を防ぐ)", async () => {
+    restoreStdin = feedStdin(
+      JSON.stringify({ slow: "1", fast: "1", timeout_ms: 1000, max_iterations: 0 }),
     );
+
+    const code = await runPrune();
+
+    expect(code).toBe(2);
+    expect(stderrSpy.writes.join("")).toContain("'max_iterations' field must be in [1, 100000]");
+  });
+
+  it("max_iterations が負だと exit 2", async () => {
+    restoreStdin = feedStdin(
+      JSON.stringify({ slow: "1", fast: "1", timeout_ms: 1000, max_iterations: -1 }),
+    );
+
+    const code = await runPrune();
+
+    expect(code).toBe(2);
+    expect(stderrSpy.writes.join("")).toContain("'max_iterations' field must be in [1, 100000]");
+  });
+
+  it("max_iterations が小数だと exit 2", async () => {
+    restoreStdin = feedStdin(
+      JSON.stringify({ slow: "1", fast: "1", timeout_ms: 1000, max_iterations: 0.5 }),
+    );
+
+    const code = await runPrune();
+
+    expect(code).toBe(2);
+    expect(stderrSpy.writes.join("")).toContain("'max_iterations' field must be an integer");
+  });
+
+  it("timeout_ms=0 は exit 2", async () => {
+    restoreStdin = feedStdin(JSON.stringify({ slow: "1", fast: "1", timeout_ms: 0 }));
+
+    const code = await runPrune();
+
+    expect(code).toBe(2);
+    expect(stderrSpy.writes.join("")).toContain("'timeout_ms' field must be in [1, 60000]");
+  });
+
+  it("timeout_ms が上限超過 (60000 超) だと exit 2", async () => {
+    restoreStdin = feedStdin(JSON.stringify({ slow: "1", fast: "1", timeout_ms: 60001 }));
+
+    const code = await runPrune();
+
+    expect(code).toBe(2);
+    expect(stderrSpy.writes.join("")).toContain("'timeout_ms' field must be in [1, 60000]");
   });
 });

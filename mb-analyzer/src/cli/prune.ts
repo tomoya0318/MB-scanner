@@ -7,6 +7,34 @@ const EXIT_ERROR = 2;
 const EXIT_BATCH_OK = 0;
 const EXIT_BATCH_IO_FAILURE = 2;
 
+// Python 側 contract (`mb_scanner.domain.entities.pruning`) と整合させる値域。
+// ここで弾かないと engine は 0/負/小数の max_iterations でループをスキップして
+// silently `verdict="pruned"` を返してしまう。
+const MIN_TIMEOUT_MS = 1;
+const MAX_TIMEOUT_MS = 60_000;
+const MIN_MAX_ITERATIONS = 1;
+const MAX_MAX_ITERATIONS = 100_000;
+
+function validateTimeoutMs(value: unknown): number | string {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    return "'timeout_ms' field must be an integer";
+  }
+  if (value < MIN_TIMEOUT_MS || value > MAX_TIMEOUT_MS) {
+    return `'timeout_ms' field must be in [${MIN_TIMEOUT_MS}, ${MAX_TIMEOUT_MS}]`;
+  }
+  return value;
+}
+
+function validateMaxIterations(value: unknown): number | string {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    return "'max_iterations' field must be an integer";
+  }
+  if (value < MIN_MAX_ITERATIONS || value > MAX_MAX_ITERATIONS) {
+    return `'max_iterations' field must be in [${MIN_MAX_ITERATIONS}, ${MAX_MAX_ITERATIONS}]`;
+  }
+  return value;
+}
+
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) {
@@ -35,16 +63,14 @@ function parseInput(raw: string): PruningInput | string {
     input.setup = obj.setup;
   }
   if (obj.timeout_ms !== undefined) {
-    if (typeof obj.timeout_ms !== "number" || !Number.isFinite(obj.timeout_ms)) {
-      return "'timeout_ms' field must be a finite number when present";
-    }
-    input.timeout_ms = obj.timeout_ms;
+    const validated = validateTimeoutMs(obj.timeout_ms);
+    if (typeof validated === "string") return validated;
+    input.timeout_ms = validated;
   }
   if (obj.max_iterations !== undefined) {
-    if (typeof obj.max_iterations !== "number" || !Number.isFinite(obj.max_iterations)) {
-      return "'max_iterations' field must be a finite number when present";
-    }
-    input.max_iterations = obj.max_iterations;
+    const validated = validateMaxIterations(obj.max_iterations);
+    if (typeof validated === "string") return validated;
+    input.max_iterations = validated;
   }
   return input;
 }
@@ -90,14 +116,13 @@ function parseBatchLine(raw: string): PruningInput | { id: string | undefined; e
   if (obj.timeout_ms === undefined) {
     return { id, error: "'timeout_ms' field is required in batch mode" };
   }
-  if (typeof obj.timeout_ms !== "number" || !Number.isFinite(obj.timeout_ms)) {
-    return { id, error: "'timeout_ms' field must be a finite number" };
-  }
+  const validatedTimeout = validateTimeoutMs(obj.timeout_ms);
+  if (typeof validatedTimeout === "string") return { id, error: validatedTimeout };
 
   const input: PruningInput = {
     slow: obj.slow,
     fast: obj.fast,
-    timeout_ms: obj.timeout_ms,
+    timeout_ms: validatedTimeout,
   };
   if (id !== undefined) input.id = id;
   if (obj.setup !== undefined) {
@@ -105,10 +130,9 @@ function parseBatchLine(raw: string): PruningInput | { id: string | undefined; e
     input.setup = obj.setup;
   }
   if (obj.max_iterations !== undefined) {
-    if (typeof obj.max_iterations !== "number" || !Number.isFinite(obj.max_iterations)) {
-      return { id, error: "'max_iterations' field must be a finite number when present" };
-    }
-    input.max_iterations = obj.max_iterations;
+    const validated = validateMaxIterations(obj.max_iterations);
+    if (typeof validated === "string") return { id, error: validated };
+    input.max_iterations = validated;
   }
   return input;
 }

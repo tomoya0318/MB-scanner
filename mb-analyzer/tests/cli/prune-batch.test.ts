@@ -237,6 +237,80 @@ describe("runPruneBatch", () => {
     expect(result.error_message).toContain("max_iterations");
   });
 
+  it("max_iterations=0 の行は error verdict (engine の silently pruned を防ぐ)", async () => {
+    restoreStdin = feedStdin(
+      JSON.stringify({
+        id: "zero_iter",
+        slow: "1",
+        fast: "1",
+        timeout_ms: 1000,
+        max_iterations: 0,
+      }) + "\n",
+    );
+
+    const code = await runPruneBatch();
+
+    expect(code).toBe(0);
+    const result = getResult(parseOutput(spy.writes), 0);
+    expect(result.id).toBe("zero_iter");
+    expect(result.verdict).toBe("error");
+    expect(result.error_message).toContain("max_iterations");
+  });
+
+  it("max_iterations が負の行は error verdict", async () => {
+    restoreStdin = feedStdin(
+      JSON.stringify({
+        id: "neg_iter",
+        slow: "1",
+        fast: "1",
+        timeout_ms: 1000,
+        max_iterations: -1,
+      }) + "\n",
+    );
+
+    const code = await runPruneBatch();
+
+    expect(code).toBe(0);
+    const result = getResult(parseOutput(spy.writes), 0);
+    expect(result.id).toBe("neg_iter");
+    expect(result.verdict).toBe("error");
+    expect(result.error_message).toContain("max_iterations");
+  });
+
+  it("max_iterations が小数の行は error verdict", async () => {
+    restoreStdin = feedStdin(
+      JSON.stringify({
+        id: "frac_iter",
+        slow: "1",
+        fast: "1",
+        timeout_ms: 1000,
+        max_iterations: 0.5,
+      }) + "\n",
+    );
+
+    const code = await runPruneBatch();
+
+    expect(code).toBe(0);
+    const result = getResult(parseOutput(spy.writes), 0);
+    expect(result.id).toBe("frac_iter");
+    expect(result.verdict).toBe("error");
+    expect(result.error_message).toContain("max_iterations");
+  });
+
+  it("timeout_ms=0 の行は error verdict", async () => {
+    restoreStdin = feedStdin(
+      JSON.stringify({ id: "zero_to", slow: "1", fast: "1", timeout_ms: 0 }) + "\n",
+    );
+
+    const code = await runPruneBatch();
+
+    expect(code).toBe(0);
+    const result = getResult(parseOutput(spy.writes), 0);
+    expect(result.id).toBe("zero_to");
+    expect(result.verdict).toBe("error");
+    expect(result.error_message).toContain("timeout_ms");
+  });
+
   it("slow が非 string の行は error verdict", async () => {
     restoreStdin = feedStdin(
       JSON.stringify({ id: "bad_slow", slow: 1, fast: "1", timeout_ms: 1000 }) + "\n",
