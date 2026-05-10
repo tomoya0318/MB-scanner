@@ -1,42 +1,62 @@
 import {
   EXECUTION_ENVIRONMENT,
+  ORACLE,
   VERDICT,
   type EquivalenceCheckResult,
   type EquivalenceInput,
   type ExecutionEnvironment,
+  type Oracle,
   type OracleObservation,
 } from "../../contracts/equivalence-contracts";
 import {
   checkArgumentMutation,
+  checkDomMutation,
   checkException,
   checkExternalObservation,
+  checkInteractionTrace,
   checkReturnValue,
   deriveOverallVerdict,
 } from "../common/comparison";
 import {
+  applyIterationCap,
   executeInJsdom,
   executeSandboxed,
   type ExecutionCapture,
   type JsdomExecuteOptions,
 } from "../common/sandbox";
+import { routeOracles } from "./oracle-routing";
+import {
+  DOM_NORMALIZE_PROFILE,
+  EXTERNAL_OBSERVATION_PROFILE,
+  INTERACTION_TRACE_PROFILE,
+  ITERATION_CAP,
+} from "./profiles";
 
 const DEFAULT_TIMEOUT_MS = 5000;
 
 /**
- * (setup, slow, fast) の 1 トリプルに対して意味論的等価性を判定する。
- * slow と fast は独立した sandbox で実行され、副作用の漏洩はない。
+ * Selakovic dataset 用の等価検証エントリ。`(setup, slow, fast)` を環境ごとに実行し、
+ * `oracle-routing.ts` が選んだ oracle 群で観測して verdict に畳む。
  *
- * `environment` (ADR-0012): `vm` (デフォルト) = 素の `node:vm` + 非決定 API stub。
- * `jsdom` = jsdom window/document + 相対 `require` 解決 (browser ライブラリ / server `test_case` 向け)。
+ * - `environment === "vm"` (デフォルト / pruning): 素 vm + 非決定性遮断。oracle は C1/C4/C5/C3 の 4 本 (Phase 2a と同一)。
+ * - `environment === "jsdom"` (Selakovic の client/server candidate): jsdom window/document + require shim + server vm globals。
+ *   body には iteration-cap (ADR-0017) をかける。oracle は上記 4 本 + C2 (DOM) + C6 (interaction-trace)。
+ *   C2/C6 のチャネルが空なら oracle 自身が `not_applicable` を返す。`mount_html` も plumb する。
+ *
+ * 記録 Proxy (C6 の取得側) の executor への注入はまだ繋いでいない (= runnable が recorder-aware である必要があり
+ * preprocessing 側の設計判断待ち。`wrap-targets.ts` 参照)。よって現状 C6 は常に `not_applicable`。
  */
-export async function checkEquivalence(
-  input: EquivalenceInput,
-): Promise<EquivalenceCheckResult> {
+export async function checkEquivalence(input: EquivalenceInput): Promise<EquivalenceCheckResult> {
   const setup = input.setup ?? "";
   const timeout_ms = input.timeout_ms ?? DEFAULT_TIMEOUT_MS;
   const environment: ExecutionEnvironment = input.environment ?? EXECUTION_ENVIRONMENT.VM;
+  const isJsdom = environment === EXECUTION_ENVIRONMENT.JSDOM;
+
+  const slowBody = isJsdom ? applyIterationCap(input.slow, ITERATION_CAP) : input.slow;
+  const fastBody = isJsdom ? applyIterationCap(input.fast, ITERATION_CAP) : input.fast;
+
   const run = (body: string): Promise<ExecutionCapture> => {
-    if (environment === EXECUTION_ENVIRONMENT.JSDOM) {
+    if (isJsdom) {
       const jsdomOpts: JsdomExecuteOptions = { setup, body, timeout_ms };
       if (input.module_base_dir !== undefined) jsdomOpts.module_base_dir = input.module_base_dir;
       if (input.mount_html !== undefined) jsdomOpts.mount_html = input.mount_html;
@@ -46,15 +66,10 @@ export async function checkEquivalence(
   };
 
   try {
-    const [slow, fast] = await Promise.all([run(input.slow), run(input.fast)]);
-
-    const observations: OracleObservation[] = [
-      checkReturnValue(slow, fast),
-      checkArgumentMutation(slow, fast),
-      checkException(slow, fast),
-      checkExternalObservation(slow, fast),
-    ];
-
+    const [slow, fast] = await Promise.all([run(slowBody), run(fastBody)]);
+    const observations: OracleObservation[] = routeOracles(isJsdom ? "jsdom" : "vm").map((o) =>
+      runOracle(o, slow, fast, isJsdom),
+    );
     return {
       verdict: deriveOverallVerdict(observations),
       observations,
@@ -72,6 +87,28 @@ export async function checkEquivalence(
       error_message: extractErrorMessage(e),
       effective_timeout_ms: timeout_ms,
     };
+  }
+}
+
+function runOracle(
+  oracle: Oracle,
+  slow: ExecutionCapture,
+  fast: ExecutionCapture,
+  isJsdom: boolean,
+): OracleObservation {
+  switch (oracle) {
+    case ORACLE.RETURN_VALUE:
+      return checkReturnValue(slow, fast);
+    case ORACLE.ARGUMENT_MUTATION:
+      return checkArgumentMutation(slow, fast);
+    case ORACLE.EXCEPTION:
+      return checkException(slow, fast);
+    case ORACLE.EXTERNAL_OBSERVATION:
+      return checkExternalObservation(slow, fast, isJsdom ? EXTERNAL_OBSERVATION_PROFILE : undefined);
+    case ORACLE.DOM_MUTATION:
+      return checkDomMutation(slow, fast, DOM_NORMALIZE_PROFILE);
+    case ORACLE.INTERACTION_TRACE:
+      return checkInteractionTrace(slow, fast, INTERACTION_TRACE_PROFILE);
   }
 }
 

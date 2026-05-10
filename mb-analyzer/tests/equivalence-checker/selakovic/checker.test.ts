@@ -88,7 +88,7 @@ describe("checkEquivalence", () => {
     expect(result.verdict).toBe("not_equal"); // 片方 timeout 例外、片方正常 → O3 で not_equal
   });
 
-  it("4 observation が必ず揃う", async () => {
+  it("vm 環境では 4 observation が必ず揃う (C1/C4/C5/C3)", async () => {
     const result = await checkEquivalence({ slow: "1", fast: "1" });
     expect(result.observations.map((o) => o.oracle)).toEqual([
       "return_value",
@@ -96,5 +96,28 @@ describe("checkEquivalence", () => {
       "exception",
       "external_observation",
     ]);
+  });
+
+  it("jsdom 環境では 6 observation が揃う (+ C2 dom_mutation / C6 interaction_trace)", async () => {
+    const result = await checkEquivalence({ slow: "1 + 1", fast: "2", environment: "jsdom", timeout_ms: 5000 });
+    expect(new Set(result.observations.map((o) => o.oracle))).toEqual(
+      new Set(["exception", "return_value", "interaction_trace", "dom_mutation", "argument_mutation", "external_observation"]),
+    );
+    // 記録 Proxy は未注入なので C6 は not_applicable、DOM は両側未変更なので一致 (equal)
+    const c6 = result.observations.find((o) => o.oracle === "interaction_trace");
+    expect(c6?.verdict).toBe("not_applicable");
+    expect(result.verdict).toBe("equal");
+  });
+
+  it("jsdom 環境で DOM を変えると C2 が verdict を出す", async () => {
+    const result = await checkEquivalence({
+      slow: "document.body.innerHTML = '<p>A</p>'; 1",
+      fast: "document.body.innerHTML = '<p>B</p>'; 1",
+      environment: "jsdom",
+      timeout_ms: 5000,
+    });
+    const c2 = result.observations.find((o) => o.oracle === "dom_mutation");
+    expect(c2?.verdict).toBe("not_equal");
+    expect(result.verdict).toBe("not_equal");
   });
 });
