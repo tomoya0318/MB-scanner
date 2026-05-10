@@ -1,6 +1,6 @@
 # ADR-0012: 等価検証の実行環境を jsdom+vm 主軸 + Playwright fallback にする
 
-- **Status**: proposed。前提の実証ステータスは `tmp/phase2b-adr-assumption-audit.md` §A/§C-1/§C-2 参照（実行主軸は Phase 1.0 + 2a で実証済 = §A-1/§A-2、残る未決は「Playwright fallback の扱いを決め直す」§C-1 のみ — fallback が 7 代表でも 97 件実走でも 0 発火）。`accepted` 昇格は §C-1 の判断 (残す / trigger 1 のみ / cut のどれか) を本 ADR に書き込んだ時点。Phase 2a は本 ADR の「最小 jsdom sandbox」部分だけ前借り済。
+- **Status**: accepted (2026-05-11)。前提は Phase 1.0 代表 7 件 + Phase 2a 97 件実走で実証済（`tmp/phase2b-adr-assumption-audit.md` §A-1/§A-2）。残っていた §C-1（Playwright fallback の扱い）は下記「### fallback: Playwright」に判断を書き込んだ — fallback トリガーは 7 代表でも 97 件でも 0 発火のため Playwright executor は未実装の documented-but-untested とし、trigger を満たす issue が出たら trigger 1（runtime error）から実装する。Phase 2a は本 ADR の「最小 jsdom sandbox」部分を前借り済、Phase 2b で `common/sandbox/executors/{vm,jsdom}.ts` への再配置 + server vm globals/`.json` require を実装済。
 - **Date**: 2026-05-10
 - **Related**: ADR-0013 (等価の operational definition — どの channel を観測するか / timing は非観測), ADR-0015 (equivalence-checker の構造 — DOM/interaction-trace oracle は実行環境非依存、`capture.dom_html` を見るだけ), ADR-0016 (SUT module の npm dep 解決 — 上流が宣言しない dep を dataset fork に lockfile で宣言。sandbox はそれが install 済みで `createRequire` で引ける状態で body を走らせる), ADR-0017 (sandbox の実行前 transform — 非決定性 API の固定 + iteration-cap), `mb-analyzer/src/equivalence-checker/sandbox/`, `ai-guide/code-map.md` §等価性検証器, `tmp/oracle-mapping.md` §8, `tmp/dataset-conventions.md` §6, `tmp/phase2b-adr-assumption-audit.md` §A/§C-1/§C-2, `tmp/0002_phase1-adr-and-spike/spike-results.md` §1/§2/§8
 
@@ -66,6 +66,8 @@ Selakovic dataset は **client 系 80 件 (Angular / Ember / jQuery / React の 
 
 Playwright 側は `page.evaluate` で `(setup, body)` を実行し、`capture.dom_html` に `page.content()` の結果を詰める。**firefox / webkit は使わない** (chromium 1 種で十分、CI コストを抑える)。
 
+**§C-1 の判断 (accepted 時点)**: 上記 trigger 1〜3 は Phase 1.0 代表 7 件でも Phase 2a 97 件実走でも **0 発火** (`tmp/phase2b-adr-assumption-audit.md` §C-1)。よって本 ADR では Playwright fallback を**設計には残すが executor は実装しない (documented-but-untested)**。jsdom で環境不足由来の `error` になった issue は batch 結果にその旨を記録する (= 現状は trigger 1 の手前で止まっている状態)。将来 trigger を満たす issue が現れたら **trigger 1 (runtime error → chromium 再実行) から実装**し、必要なら本 ADR の「## トリガー」も含めて再検討する。`playwright` の dev 依存追加・CI セットアップも実装時まで先送り。
+
 ### oracle 側は環境非依存
 
 jsdom でも Playwright でも、oracle (特に O5 DOM oracle) が見るのは `capture.dom_html` (正規化前 HTML 文字列) と他の capture フィールドだけ。正規化 (空白・属性順序・フレームワークノイズの除去) は oracle 側 (= adapter から渡される正規化プロファイル、ADR-0015) で一括して行う。→ 実行環境の差は executor に閉じ込められ、oracle は 1 実装で済む。
@@ -83,7 +85,7 @@ jsdom でも Playwright でも、oracle (特に O5 DOM oracle) が見るのは `
 ### 段階的実装 (Phase 2a → 2b)
 
 - **Phase 2a (完了)**: preprocess 改修 (ADR-0011) の検証に既存フラットの `equivalence-checker/` を使い、**最小 jsdom sandbox** (= スパイク `spike-jsdom.mjs` の production 化 = `sandbox/jsdom-executor.ts`、Playwright fallback も channel ルーティングも無し) だけ前借り実装した。
-- **Phase 2b**: `equivalence-checker/` を `common/`+`selakovic/` に再配置 (ADR-0015)、Playwright fallback (扱いは要決定 — §補足)・channel ルーティング・iteration-cap transform の AST pass 化 (ADR-0017) を完成。
+- **Phase 2b**: `equivalence-checker/` を `common/`+`selakovic/` に再配置 (ADR-0015)、server vm globals/`.json` require、channel ルーティング、iteration-cap transform の AST pass 化 (ADR-0017) を実装。Playwright fallback は §C-1 の判断どおり documented-but-untested（executor 未実装）。
 
 ## 結果 / 影響
 
@@ -107,6 +109,6 @@ jsdom でも Playwright でも、oracle (特に O5 DOM oracle) が見るのは `
 
 ## 補足
 
-- 前提の実証ステータスは `tmp/phase2b-adr-assumption-audit.md` §A/§C にソース付き。要点: jsdom+vm 主軸は Phase 1.0 代表 7 件 (AngularJS 1.3.18 665KB の load+bootstrap+`f1()` 実行を含む) + Phase 2a の 97 件実走で実証済 (`spike-results.md` §1/§2、`tmp/0003_phase2a-preprocess-rework/verify-97-results.md`)。「jsdom が AngularJS でほぼ動かない」という最大リスクは否定済、C2 (DOM) も react-808 で取れた。**Playwright fallback は代表 7 件でも 97 件実走でも 0 発火** = 「fallback が要る patch がある」という前提に現状エビデンスがない → Phase 2b で「documented-but-untested として残す / trigger 1 (runtime error) のみに絞る / 完全に cut し jsdom で落ちたら excluded にする」のどれかを決め直す (監査 §C-1。最小 stub だけ先に入れて C2/C6 込みの再走後に確定でもよい)。
+- 前提の実証ステータスは `tmp/phase2b-adr-assumption-audit.md` §A/§C にソース付き。要点: jsdom+vm 主軸は Phase 1.0 代表 7 件 (AngularJS 1.3.18 665KB の load+bootstrap+`f1()` 実行を含む) + Phase 2a の 97 件実走で実証済 (`spike-results.md` §1/§2、`tmp/0003_phase2a-preprocess-rework/verify-97-results.md`)。「jsdom が AngularJS でほぼ動かない」という最大リスクは否定済、C2 (DOM) も react-808 で取れた。**Playwright fallback は代表 7 件でも 97 件実走でも 0 発火** = 「fallback が要る patch がある」という前提に現状エビデンスがない → §C-1 の判断（上記「### fallback: Playwright」）= documented-but-untested として設計に残し、executor は実装しない。2b.4 の 97 件再走 (C2/C6 込み) で trigger が発火したら trigger 1 から実装する。
 - Phase 1.0 スパイク script は `mb-analyzer/src/` 無変更の使い捨て (`tmp/0002_phase1-adr-and-spike/spike/`)。Phase 2a の最小 jsdom sandbox はこれを production 化したもの (`equivalence-checker/sandbox/jsdom-executor.ts`)。
 - 既存 sandbox に DOM 取得機能は無い (`sandbox/{executor,serializer,stabilizer}.ts`) — Phase 2b で `executor.ts` に jsdom 環境構築 + `capture.dom_html` + `capture.interaction_trace` を足す (ADR-0015)。
