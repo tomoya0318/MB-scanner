@@ -1,14 +1,18 @@
 """等価性検証器の入出力 Pydantic モデル
 
-Node.js 側 (`mb-analyzer/src/shared/types.ts`) と JSON シリアライゼーション互換を保つ。
-フィールド名は snake_case、列挙値文字列も両言語で完全一致。
+Node.js 側 (`mb-analyzer/src/contracts/equivalence-contracts.ts`) と JSON シリアライゼーション
+互換を保つ。フィールド名は snake_case、列挙値文字列も両言語で完全一致。
+
+paired-change で更新する: ``mb-analyzer/src/contracts/equivalence-contracts.ts``。
 """
 
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-MAX_CODE_LENGTH = 1_000_000
+# Selakovic preprocess は作用点 A の clientIssue で bundled ライブラリ (AngularJS 665KB / Ember 2MB 等)
+# を slow/fast に丸ごと埋め込むので、上限は大きめに取る (ADR-0011)。
+MAX_CODE_LENGTH = 20_000_000
 MIN_TIMEOUT_MS = 1
 MAX_TIMEOUT_MS = 60_000
 DEFAULT_TIMEOUT_MS = 5_000
@@ -40,11 +44,26 @@ class Oracle(StrEnum):
     EXTERNAL_OBSERVATION = "external_observation"
 
 
+class ExecutionEnvironment(StrEnum):
+    """実行環境 (ADR-0012)
+
+    - ``VM``: 素の ``node:vm`` + 非決定 API stub。純粋計算向け。
+    - ``JSDOM``: jsdom window/document + 相対 ``require`` 解決。browser ライブラリ
+      (AngularJS / jQuery 等) / server ``test_case`` 向け (Phase 2a の最小版)。
+    """
+
+    VM = "vm"
+    JSDOM = "jsdom"
+
+
 class EquivalenceInput(BaseModel):
     """Node ランナーへ送る入力
 
     ``id`` はバッチ API で Python ↔ Node 間の順序暗黙依存を避けるための optional マーカー。
     単発 API では ``None`` のままで後方互換。
+
+    ``environment`` 省略時は ``vm``。``module_base_dir`` は ``jsdom`` 環境で相対 ``require('./x')``
+    を解決する基準ディレクトリ (通常 issue ディレクトリの絶対パス)。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -54,6 +73,8 @@ class EquivalenceInput(BaseModel):
     slow: str = Field(max_length=MAX_CODE_LENGTH)
     fast: str = Field(max_length=MAX_CODE_LENGTH)
     timeout_ms: int = Field(default=DEFAULT_TIMEOUT_MS, ge=MIN_TIMEOUT_MS, le=MAX_TIMEOUT_MS)
+    environment: ExecutionEnvironment | None = None
+    module_base_dir: str | None = None
 
 
 class OracleObservation(BaseModel):

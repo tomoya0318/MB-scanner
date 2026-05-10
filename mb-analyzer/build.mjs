@@ -13,7 +13,9 @@ const buildOptions = {
   format: "esm",
   outfile: path.join(__dirname, "dist", "cli.js"),
   target: "node22",
-  external: ["vm"],
+  // jsdom は fs リソース (default-stylesheet.css 等) を __dirname 相対で読むので bundle 不可。
+  // external にして実行時に node_modules から require させる (dist/cli.js は banner で createRequire 済)。
+  external: ["vm", "jsdom"],
   // 判断: ai-guide/adr/0007-in-source-testing-internal-helpers.md
   // minifySyntax は esbuild の `if (...)` DCE を起動するために必須 (esbuild #1955)
   define: {

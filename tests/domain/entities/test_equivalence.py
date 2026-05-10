@@ -6,8 +6,10 @@ from pydantic import ValidationError
 import pytest
 
 from mb_scanner.domain.entities.equivalence import (
+    MAX_CODE_LENGTH,
     EquivalenceCheckResult,
     EquivalenceInput,
+    ExecutionEnvironment,
     Oracle,
     OracleObservation,
     OracleVerdict,
@@ -16,7 +18,7 @@ from mb_scanner.domain.entities.equivalence import (
 
 
 class TestEnums:
-    """TypeScript 側 (shared/types.ts) と文字列値が揃っていること"""
+    """TypeScript 側 (contracts/equivalence-contracts.ts) と文字列値が揃っていること"""
 
     def test_verdict_values(self) -> None:
         assert Verdict.EQUAL.value == "equal"
@@ -34,6 +36,9 @@ class TestEnums:
             "exception",
             "external_observation",
         }
+
+    def test_execution_environment_values(self) -> None:
+        assert {e.value for e in ExecutionEnvironment} == {"vm", "jsdom"}
 
 
 class TestEquivalenceInput:
@@ -56,9 +61,15 @@ class TestEquivalenceInput:
             EquivalenceInput(slow="1", fast="1", timeout_ms=60_001)
 
     def test_code_length_bound(self) -> None:
-        long = "x" * 1_000_001
+        long = "x" * (MAX_CODE_LENGTH + 1)
         with pytest.raises(ValidationError):
             EquivalenceInput(slow=long, fast="1")
+
+    def test_bundled_lib_code_within_bound(self) -> None:
+        # Selakovic 作用点 A の clientIssue は bundled ライブラリを slow/fast に丸ごと埋める (数 MB)
+        big = "x" * 3_000_000
+        inp = EquivalenceInput(slow=big, fast=big)
+        assert len(inp.slow) == 3_000_000
 
     def test_extra_fields_rejected(self) -> None:
         with pytest.raises(ValidationError):
@@ -67,6 +78,20 @@ class TestEquivalenceInput:
     def test_id_default_none(self) -> None:
         inp = EquivalenceInput(slow="1", fast="1")
         assert inp.id is None
+
+    def test_environment_and_module_base_dir(self) -> None:
+        inp = EquivalenceInput(slow="1", fast="1", environment=ExecutionEnvironment.JSDOM, module_base_dir="/x/y")
+        assert inp.environment == ExecutionEnvironment.JSDOM
+        assert inp.module_base_dir == "/x/y"
+
+    def test_environment_defaults_none(self) -> None:
+        inp = EquivalenceInput(slow="1", fast="1")
+        assert inp.environment is None
+        assert inp.module_base_dir is None
+
+    def test_environment_string_round_trip(self) -> None:
+        inp = EquivalenceInput.model_validate({"slow": "1", "fast": "1", "environment": "jsdom"})
+        assert inp.environment == ExecutionEnvironment.JSDOM
 
     def test_id_round_trip(self) -> None:
         inp = EquivalenceInput(id="case-001", slow="1", fast="1", timeout_ms=3000)

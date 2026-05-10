@@ -1,10 +1,13 @@
 import {
+  EXECUTION_ENVIRONMENT,
   VERDICT,
   type EquivalenceCheckResult,
   type EquivalenceInput,
+  type ExecutionEnvironment,
   type OracleObservation,
 } from "../contracts/equivalence-contracts";
-import { executeSandboxed } from "./sandbox/executor";
+import { executeInJsdom } from "./sandbox/jsdom-executor";
+import { executeSandboxed, type ExecutionCapture } from "./sandbox/executor";
 import { checkArgumentMutation } from "./oracles/argument-mutation";
 import { checkException } from "./oracles/exception";
 import { checkExternalObservation } from "./oracles/external-observation";
@@ -16,18 +19,30 @@ const DEFAULT_TIMEOUT_MS = 5000;
 /**
  * (setup, slow, fast) の 1 トリプルに対して意味論的等価性を判定する。
  * slow と fast は独立した sandbox で実行され、副作用の漏洩はない。
+ *
+ * `environment` (ADR-0012): `vm` (デフォルト) = 素の `node:vm` + 非決定 API stub。
+ * `jsdom` = jsdom window/document + 相対 `require` 解決 (browser ライブラリ / server `test_case` 向け、
+ * Phase 2a の最小版)。
  */
 export async function checkEquivalence(
   input: EquivalenceInput,
 ): Promise<EquivalenceCheckResult> {
   const setup = input.setup ?? "";
   const timeout_ms = input.timeout_ms ?? DEFAULT_TIMEOUT_MS;
+  const environment: ExecutionEnvironment = input.environment ?? EXECUTION_ENVIRONMENT.VM;
+  const run = (body: string): Promise<ExecutionCapture> => {
+    if (environment === EXECUTION_ENVIRONMENT.JSDOM) {
+      return executeInJsdom(
+        input.module_base_dir !== undefined
+          ? { setup, body, timeout_ms, module_base_dir: input.module_base_dir }
+          : { setup, body, timeout_ms },
+      );
+    }
+    return executeSandboxed({ setup, body, timeout_ms });
+  };
 
   try {
-    const [slow, fast] = await Promise.all([
-      executeSandboxed({ setup, body: input.slow, timeout_ms }),
-      executeSandboxed({ setup, body: input.fast, timeout_ms }),
-    ]);
+    const [slow, fast] = await Promise.all([run(input.slow), run(input.fast)]);
 
     const observations: OracleObservation[] = [
       checkReturnValue(slow, fast),

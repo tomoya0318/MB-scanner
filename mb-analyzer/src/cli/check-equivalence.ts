@@ -1,5 +1,14 @@
 import { checkEquivalence } from "../equivalence-checker";
-import type { EquivalenceCheckResult, EquivalenceInput } from "../contracts/equivalence-contracts";
+import {
+  EXECUTION_ENVIRONMENT,
+  type EquivalenceCheckResult,
+  type EquivalenceInput,
+  type ExecutionEnvironment,
+} from "../contracts/equivalence-contracts";
+
+function parseEnvironment(value: unknown): ExecutionEnvironment | null {
+  return value === EXECUTION_ENVIRONMENT.VM || value === EXECUTION_ENVIRONMENT.JSDOM ? value : null;
+}
 
 const EXIT_EQUAL = 0;
 const EXIT_NOT_EQUAL = 1;
@@ -39,6 +48,15 @@ function parseInput(raw: string): EquivalenceInput | string {
       return "'timeout_ms' field must be a finite number when present";
     }
     input.timeout_ms = obj.timeout_ms;
+  }
+  if (obj.environment !== undefined && obj.environment !== null) {
+    const env = parseEnvironment(obj.environment);
+    if (env === null) return "'environment' field must be 'vm' or 'jsdom' when present";
+    input.environment = env;
+  }
+  if (obj.module_base_dir !== undefined && obj.module_base_dir !== null) {
+    if (typeof obj.module_base_dir !== "string") return "'module_base_dir' field must be a string when present";
+    input.module_base_dir = obj.module_base_dir;
   }
   return input;
 }
@@ -97,6 +115,15 @@ function parseBatchLine(raw: string): EquivalenceInput | { id: string | undefine
   if (obj.setup !== undefined) {
     if (typeof obj.setup !== "string") return { id, error: "'setup' field must be a string when present" };
     input.setup = obj.setup;
+  }
+  if (obj.environment !== undefined && obj.environment !== null) {
+    const env = parseEnvironment(obj.environment);
+    if (env === null) return { id, error: "'environment' field must be 'vm' or 'jsdom' when present" };
+    input.environment = env;
+  }
+  if (obj.module_base_dir !== undefined && obj.module_base_dir !== null) {
+    if (typeof obj.module_base_dir !== "string") return { id, error: "'module_base_dir' field must be a string when present" };
+    input.module_base_dir = obj.module_base_dir;
   }
   return input;
 }

@@ -35,12 +35,29 @@ export const ALL_ORACLES: readonly Oracle[] = [
   ORACLE.EXTERNAL_OBSERVATION,
 ] as const;
 
+/**
+ * 実行環境 (ADR-0012)。
+ * - `vm`: `node:vm` の素 context (非決定 API stub のみ)。純粋計算向け。
+ * - `jsdom`: jsdom の window/document を持つ context + 相対 `require` 解決。
+ *   browser ライブラリ (AngularJS / jQuery 等) / server `test_case` 向け (Phase 2a の最小版 —
+ *   Playwright fallback・channel ルーティングは Phase 2b)。
+ */
+export const EXECUTION_ENVIRONMENT = {
+  VM: "vm",
+  JSDOM: "jsdom",
+} as const;
+export type ExecutionEnvironment = (typeof EXECUTION_ENVIRONMENT)[keyof typeof EXECUTION_ENVIRONMENT];
+
 export interface EquivalenceInput {
   id?: string;
   setup?: string;
   slow: string;
   fast: string;
   timeout_ms?: number;
+  /** 実行環境。省略時は `vm`。 */
+  environment?: ExecutionEnvironment;
+  /** `jsdom` 環境で相対 `require('./x')` を解決する基準ディレクトリ (= 通常 issue ディレクトリの絶対パス)。 */
+  module_base_dir?: string;
 }
 
 export interface OracleObservation {
