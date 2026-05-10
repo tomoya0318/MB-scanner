@@ -1,263 +1,348 @@
-import type { File, Node, Statement } from "@babel/types";
-
 import { countNodes } from "../../ast/inspect";
 import { parse } from "../../ast/parser";
-import { canonicalHash } from "../../ast/subtree-hash";
 import {
-  EXCLUSION_REASON,
+  ASPECT,
+  CANDIDATE_KIND,
   LAYOUT_KIND,
-  type ExclusionReason,
-  type LayoutKind,
+  type CandidateKind,
+  type ExecutionEnvironmentHint,
   type PreprocessingResult,
 } from "../../contracts/preprocessing-contracts";
-import { findChangedNodes } from "../common/ast-diff";
-import { findMinimalEnclosure } from "../common/enclosure";
-import { statementToCode, statementsToCode } from "../common/setup-cleanup";
+import { statementsToCode } from "../common/setup-cleanup";
+import { buildAngularRunnable } from "./angular-bootstrap";
+import { routeAspect, statementsChanged } from "./aspect-routing";
+import { isIndependent } from "./case-split";
+import { extractF1, type F1Decomposition } from "./f1-extract";
+import { extractFromScripts, extractFromServerFiles } from "./legacy-diff";
+import { diffLibPair } from "./lib-diff";
+import { extractTest } from "./test-extract";
 
 /**
- * Selakovic 1 issue 分の (setup, slow, fast) 抽出。論文 Table 4 / precondition には
- * 一切依存せず、AST diff の minimal differential extraction だけで切り出す。
+ * Selakovic 1 issue 分の `(setup, slow, fast)` 抽出 — ADR-0011 の Tier 2 (Selakovic adapter)。
  *
- * **1 入力 → N 結果** モデル:
- * - 同一 PR に独立した最適化が複数同居するケース (例: socket.io 573 では encodePacket と
- *   decodePacket が同時最適化) を独立した抽出単位として出力する
- * - 1 candidate → 1 結果、N candidate → N 結果、抽出失敗 → 1 結果 (excluded)
+ * **段 1 (役割分解 + 計測ハーネス除去)** — ADR-0011 §段1:
+ * - ① `<lib>_before/after` ペア (dir scan、`extract()` には CLI が読んだ map で渡る)
+ * - ② ベンチマーク関数 body ペア (client: inline `<script>` の `f1` body / server: `test_case_*.js` の `test()` body)
+ * - 計測ハーネス (`execute(f1,n)` 以降 / `$.ajax({mark,mean})` / `init`/`setupTest`) は setup へ回すか破棄
+ * - body 内のループ反復回数は書き換えない (= 復元可能性のため。反復縮小は等価検証側 — ADR-0013)
  *
- * **statement 対応付け戦略**:
- * - top-level statement の canonical hash を計算し、ハッシュ一致するものを
- *   matched (= 不変) としてマーク
- * - 残った unmatched-before と unmatched-after を順序対応で組合せて candidate にする
- * - これにより before/after で statement 数が違うケース (デバッグ行追加・削除等) でも
- *   不変 statement を正しく除外して真の変更点を特定できる
- *
- * **setup 構築規約**:
- * - 各 candidate の setup = 「自分以外の全 top-level statement (matched + 他 unmatched)
- *   の before 版を index 順に結合」
- * - 「他の最適化対象は最適化前の状態を環境として固定」というメンタルモデル
- * - 両側 (slow/fast) の setup が同じなので、関数間依存があっても等価判定に影響しない
+ * **段 2 (作用点ルーティング)** — ADR-0011 §段2:
+ * - ①② の実コード差分で A (lib のみ) / B (body のみ) / A+B (両方) / fallback に振り分け
+ * - A / B → candidate 1 個。A+B → ADR-0014 の identifier 交差判定で independent なら 2 candidate
+ *   (lib candidate / body candidate)、co-evolution の疑いなら 1 candidate
+ * - fallback (どちらにも実コード差なし / 規約外フォーマット) → Tier 1 の素の top-level diff (`legacy-diff.ts`)
  */
 
 export type SelakovicExtractInput =
-  | { kind: "client"; before_script: string; after_script: string }
-  | { kind: "server"; before_files: Record<string, string>; after_files: Record<string, string> };
+  | {
+      kind: "client";
+      /** v_before.html の inline `<script>` 内容 (`<script src>` は除く)。 */
+      before_inline: string;
+      after_inline: string;
+      /** `<lib>_before/after` の relative path / 正規化ファイル名 → ソース (lib pair なしなら `{}`)。 */
+      lib_before_files: Record<string, string>;
+      lib_after_files: Record<string, string>;
+      lib_kind: "dir" | "file" | null;
+      /** v_before.html が `<script src="<lib>_before.js">` でこの lib を参照しているか (= workload が runtime に lib を叩く)。 */
+      lib_referenced_by_workload: boolean;
+    }
+  | {
+      kind: "server";
+      /** test_case_before.js / test_case_after.js の内容 (なければ null → fallback)。 */
+      before_test_case: string | null;
+      after_test_case: string | null;
+      lib_before_files: Record<string, string>;
+      lib_after_files: Record<string, string>;
+      lib_kind: "dir" | "file" | null;
+    };
+
+const ENV_JSDOM: ExecutionEnvironmentHint = "jsdom";
 
 export function extract(input: SelakovicExtractInput): PreprocessingResult[] {
-  if (input.kind === "client") {
-    return extractFromScripts(input.before_script, input.after_script, LAYOUT_KIND.CLIENT);
-  }
-  return extractFromServerFiles(input.before_files, input.after_files);
+  if (input.kind === "client") return extractClient(input);
+  return extractServer(input);
 }
 
-function extractFromServerFiles(
-  beforeFiles: Record<string, string>,
-  afterFiles: Record<string, string>,
-): PreprocessingResult[] {
-  const commonKeys = Object.keys(beforeFiles).filter((k) => k in afterFiles);
-  if (commonKeys.length === 0) {
-    return [excluded(LAYOUT_KIND.SERVER, EXCLUSION_REASON.MISSING_FILES, "no common .js files between before/after")];
+// ─────────────────────────────────────────────────────────────────────────────
+// client (inline `<script>` の f1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function extractClient(input: Extract<SelakovicExtractInput, { kind: "client" }>): PreprocessingResult[] {
+  const f1Before = extractF1(input.before_inline);
+  const f1After = extractF1(input.after_inline);
+  const beforeNodeCount = safeCount(input.before_inline);
+  const afterNodeCount = safeCount(input.after_inline);
+
+  const fallback = (): PreprocessingResult[] =>
+    annotateFallback(extractFromScripts(input.before_inline, input.after_inline, LAYOUT_KIND.CLIENT));
+
+  if (f1Before === null || f1After === null) return fallback();
+  if (f1Before.wrapperKind !== f1After.wrapperKind) return fallback();
+  // angular wrapper の bootstrap 再構成情報が欠落 → フォールバック
+  if (f1Before.wrapperKind === "angular-controller-wrapper" && (f1Before.angular === undefined || f1After.angular === undefined)) {
+    return fallback();
   }
 
-  const filesWithChanges: string[] = [];
-  for (const key of commonKeys) {
-    const before = beforeFiles[key];
-    const after = afterFiles[key];
-    if (before === undefined || after === undefined) continue;
-    if (before === after) continue;
-    filesWithChanges.push(key);
-  }
+  const libChange = diffLibPair(input.lib_before_files, input.lib_after_files);
+  const libHasRealChange = input.lib_kind !== null && libChange.hasRealChange;
+  const bodyHasRealChange = statementsChanged(f1Before.f1Body.body, f1After.f1Body.body);
+  const aspect = routeAspect(libHasRealChange, bodyHasRealChange);
+  if (aspect === ASPECT.FALLBACK) return fallback();
 
-  if (filesWithChanges.length === 0) {
-    return [excluded(LAYOUT_KIND.SERVER, EXCLUSION_REASON.NO_CHANGED_NODES, "all common files are byte-identical")];
-  }
+  const libSourceBefore = singleLibSource(input.lib_before_files);
+  const libSourceAfter = singleLibSource(input.lib_after_files);
+  const libNeededInSetup = input.lib_kind !== null && input.lib_referenced_by_workload;
 
-  // 「意味論的変更があるファイル」だけを集める。1 入力 → N 結果モデルでは、
-  // 単一ファイル内の複数 candidate も複数ファイルからの candidate もフラットに出力できるが、
-  // 複数ファイル変更は対応付け曖昧度が増すため保守的に除外する。
-  const semanticChanges: Array<{ key: string; results: PreprocessingResult[] }> = [];
-  for (const key of filesWithChanges) {
-    const before = beforeFiles[key];
-    const after = afterFiles[key];
-    if (before === undefined || after === undefined) continue;
-    const results = extractFromScripts(before, after, LAYOUT_KIND.SERVER);
-    // 整形差分のみのファイルはスキップ
-    if (results.length === 1 && results[0]?.excluded === EXCLUSION_REASON.NO_CHANGED_NODES) continue;
-    semanticChanges.push({ key, results });
-  }
-
-  if (semanticChanges.length === 0) {
-    return [excluded(LAYOUT_KIND.SERVER, EXCLUSION_REASON.NO_CHANGED_NODES, "no semantic changes (formatting/comment only)")];
-  }
-  if (semanticChanges.length > 1) {
-    return [excluded(
-      LAYOUT_KIND.SERVER,
-      EXCLUSION_REASON.MULTI_FILE_CHANGE,
-      `changes span ${semanticChanges.length} files: ${semanticChanges.map((c) => c.key).join(", ")}`,
-    )];
-  }
-  const onlyChange = semanticChanges[0];
-  if (onlyChange === undefined) {
-    return [excluded(LAYOUT_KIND.SERVER, EXCLUSION_REASON.MISSING_FILES, "internal: empty semanticChanges")];
-  }
-  return onlyChange.results;
-}
-
-interface CandidateRecord {
-  readonly beforeIndex: number;
-  readonly afterIndex: number;
-  readonly beforeStmt: Statement;
-  readonly afterStmt: Statement;
-  readonly enclosureType: string;
-}
-
-function extractFromScripts(
-  beforeScript: string,
-  afterScript: string,
-  layout: LayoutKind,
-): PreprocessingResult[] {
-  let beforeAst: File;
-  let afterAst: File;
-  try {
-    beforeAst = parse(beforeScript);
-    afterAst = parse(afterScript);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "parse failed";
-    return [excluded(layout, EXCLUSION_REASON.PARSE_ERROR, message)];
-  }
-
-  const beforeNodeCount = countNodes(beforeAst);
-  const afterNodeCount = countNodes(afterAst);
-
-  const beforeBody = beforeAst.program.body;
-  const afterBody = afterAst.program.body;
-
-  // top-level statement の canonical hash を計算して greedy match
-  const beforeHashes = beforeBody.map(canonicalHash);
-  const afterHashes = afterBody.map(canonicalHash);
-
-  const beforeMatched = new Set<number>();
-  const afterMatched = new Set<number>();
-  for (let i = 0; i < beforeBody.length; i++) {
-    for (let j = 0; j < afterBody.length; j++) {
-      if (afterMatched.has(j)) continue;
-      if (beforeHashes[i] === afterHashes[j]) {
-        beforeMatched.add(i);
-        afterMatched.add(j);
-        break;
-      }
-    }
-  }
-
-  const unmatchedBeforeIdx = beforeBody.map((_, i) => i).filter((i) => !beforeMatched.has(i));
-  const unmatchedAfterIdx = afterBody.map((_, i) => i).filter((i) => !afterMatched.has(i));
-
-  // 順序対応で組合せて candidate にする (短い方まで)。
-  // 余った片側は「削除」(unmatched-before のみ) または「追加」(unmatched-after のみ) として無視。
-  // これは jsperf レポートの追加/削除や、PR 内で純粋に追加された helper 関数を捨てる効果がある。
-  const candidates: CandidateRecord[] = [];
-  const minU = Math.min(unmatchedBeforeIdx.length, unmatchedAfterIdx.length);
-  for (let k = 0; k < minU; k++) {
-    const beforeIdx = unmatchedBeforeIdx[k];
-    const afterIdx = unmatchedAfterIdx[k];
-    if (beforeIdx === undefined || afterIdx === undefined) continue;
-    const beforeStmt = beforeBody[beforeIdx];
-    const afterStmt = afterBody[afterIdx];
-    if (beforeStmt === undefined || afterStmt === undefined) continue;
-
-    const stmtChanged = findChangedNodesForStatement(beforeStmt, afterStmt);
-    if (stmtChanged === null || stmtChanged.size === 0) continue;
-
-    const enclosureType = findEnclosureForStatement(beforeStmt, stmtChanged);
-    if (enclosureType === null) continue;
-
-    candidates.push({
-      beforeIndex: beforeIdx,
-      afterIndex: afterIdx,
-      beforeStmt,
-      afterStmt,
-      enclosureType,
-    });
-  }
-
-  if (candidates.length === 0) {
-    if (unmatchedBeforeIdx.length === 0 && unmatchedAfterIdx.length === 0) {
-      return [
-        {
-          layout,
-          excluded: EXCLUSION_REASON.NO_CHANGED_NODES,
-          excluded_detail: "all top-level statements matched (formatting/comment only changes)",
-          before_node_count: beforeNodeCount,
-          after_node_count: afterNodeCount,
-        },
+  let candidates: PreprocessingResult[];
+  if (aspect === ASPECT.LIB) {
+    candidates = [buildClientLibCandidate(f1Before, libSourceBefore, libSourceAfter, CANDIDATE_KIND.SINGLE)];
+  } else if (aspect === ASPECT.BODY) {
+    candidates = [buildClientBodyCandidate(f1Before, f1After, libSourceBefore, libNeededInSetup, CANDIDATE_KIND.SINGLE)];
+  } else {
+    // A+B → ADR-0014: body の参照 identifier と lib の変化関数名 (lib-diff の近似) の交差で判定。
+    // 交差なし (independent) → lib candidate / body candidate に分割、交差あり → 1 candidate (co-evolution の疑い)。
+    if (isIndependent(f1Before.f1Body.body, libChange.changedFunctionNames)) {
+      candidates = [
+        buildClientLibCandidate(f1Before, libSourceBefore, libSourceAfter, CANDIDATE_KIND.LIB),
+        buildClientBodyCandidate(f1Before, f1After, libSourceBefore, libNeededInSetup, CANDIDATE_KIND.BODY),
       ];
+    } else {
+      candidates = [buildClientCombinedCandidate(f1Before, f1After, libSourceBefore, libSourceAfter)];
     }
-    return [
-      {
-        layout,
-        excluded: EXCLUSION_REASON.MODULE_WIDE_CHANGE,
-        excluded_detail: `${unmatchedBeforeIdx.length} before / ${unmatchedAfterIdx.length} after unmatched statements without enclosure (no Function/Method, Block, nor top-level statement candidate matched)`,
-        before_node_count: beforeNodeCount,
-        after_node_count: afterNodeCount,
-      },
-    ];
   }
 
-  // 各 candidate を独立した結果として出力
-  return candidates.map((c) => {
-    // setup: 自分以外の全 top-level statement の before 版を index 順に結合
-    const setupStatements = beforeBody.filter((_, idx) => idx !== c.beforeIndex);
+  return candidates.map((c) => ({ ...c, aspect, before_node_count: beforeNodeCount, after_node_count: afterNodeCount }));
+}
 
+/** 作用点 A の lib candidate: lib varies / body fixed@before。 */
+function buildClientLibCandidate(
+  f1Before: F1Decomposition,
+  libSourceBefore: string,
+  libSourceAfter: string,
+  kind: CandidateKind,
+): PreprocessingResult {
+  const preF1 = statementsToCode([...f1Before.preF1Statements]);
+  if (f1Before.wrapperKind === "angular-controller-wrapper" && f1Before.angular !== undefined) {
+    const a = f1Before.angular;
     return {
-      layout,
-      setup: statementsToCode(setupStatements),
-      slow: statementToCode(c.beforeStmt),
-      fast: statementToCode(c.afterStmt),
-      enclosure_type: c.enclosureType,
+      layout: LAYOUT_KIND.CLIENT,
+      setup: "",
+      slow: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preF1Code: preF1, f1BodyCode: f1BodyRaw(f1Before) }),
+      fast: buildAngularRunnable({ libSource: libSourceAfter, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preF1Code: preF1, f1BodyCode: f1BodyRaw(f1Before) }),
+      enclosure_type: "angular-controller-wrapper",
+      candidate_kind: kind,
+      environment: ENV_JSDOM,
+    };
+  }
+  return {
+    layout: LAYOUT_KIND.CLIENT,
+    setup: "",
+    slow: flatRunnable(libSourceBefore, preF1, f1BodyWrapped(f1Before)),
+    fast: flatRunnable(libSourceAfter, preF1, f1BodyWrapped(f1Before)),
+    enclosure_type: "lib-file",
+    candidate_kind: kind,
+    environment: ENV_JSDOM,
+  };
+}
+
+/** 作用点 B の body candidate: body varies / lib fixed@before。 */
+function buildClientBodyCandidate(
+  f1Before: F1Decomposition,
+  f1After: F1Decomposition,
+  libSourceBefore: string,
+  libNeededInSetup: boolean,
+  kind: CandidateKind,
+): PreprocessingResult {
+  const preF1 = statementsToCode([...f1Before.preF1Statements]);
+  if (f1Before.wrapperKind === "angular-controller-wrapper" && f1Before.angular !== undefined) {
+    const a = f1Before.angular;
+    return {
+      layout: LAYOUT_KIND.CLIENT,
+      setup: "",
+      slow: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preF1Code: preF1, f1BodyCode: f1BodyRaw(f1Before) }),
+      fast: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preF1Code: preF1, f1BodyCode: f1BodyRaw(f1After) }),
+      enclosure_type: "angular-controller-wrapper",
+      candidate_kind: kind,
+      environment: ENV_JSDOM,
+    };
+  }
+  const setupParts: string[] = [];
+  if (libNeededInSetup && libSourceBefore.length > 0) setupParts.push(libSourceBefore);
+  if (preF1.length > 0) setupParts.push(preF1);
+  return {
+    layout: LAYOUT_KIND.CLIENT,
+    setup: setupParts.join("\n;\n"),
+    slow: f1BodyWrapped(f1Before),
+    fast: f1BodyWrapped(f1After),
+    enclosure_type: "f1-body",
+    candidate_kind: kind,
+    // clientIssues の inline `<script>` は browser context で動く前提 (= `document`/`window` を参照しうる)
+    // ので、純粋計算に見える f1 body でも jsdom で実行する。
+    environment: ENV_JSDOM,
+  };
+}
+
+/** A+B co-evolution の疑い: lib も body も同時に変える 1 candidate。 */
+function buildClientCombinedCandidate(
+  f1Before: F1Decomposition,
+  f1After: F1Decomposition,
+  libSourceBefore: string,
+  libSourceAfter: string,
+): PreprocessingResult {
+  const preF1 = statementsToCode([...f1Before.preF1Statements]);
+  if (f1Before.wrapperKind === "angular-controller-wrapper" && f1Before.angular !== undefined) {
+    const a = f1Before.angular;
+    return {
+      layout: LAYOUT_KIND.CLIENT,
+      setup: "",
+      slow: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preF1Code: preF1, f1BodyCode: f1BodyRaw(f1Before) }),
+      fast: buildAngularRunnable({ libSource: libSourceAfter, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preF1Code: preF1, f1BodyCode: f1BodyRaw(f1After) }),
+      enclosure_type: "angular-controller-wrapper",
+      candidate_kind: CANDIDATE_KIND.SINGLE,
+      environment: ENV_JSDOM,
+    };
+  }
+  return {
+    layout: LAYOUT_KIND.CLIENT,
+    setup: "",
+    slow: flatRunnable(libSourceBefore, preF1, f1BodyWrapped(f1Before)),
+    fast: flatRunnable(libSourceAfter, preF1, f1BodyWrapped(f1After)),
+    enclosure_type: "lib-file+f1-body",
+    candidate_kind: CANDIDATE_KIND.SINGLE,
+    environment: ENV_JSDOM,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// server (test_case_*.js の test())
+// ─────────────────────────────────────────────────────────────────────────────
+
+function extractServer(input: Extract<SelakovicExtractInput, { kind: "server" }>): PreprocessingResult[] {
+  const fallback = (): PreprocessingResult[] =>
+    annotateFallback(extractFromServerFiles(input.lib_before_files, input.lib_after_files));
+
+  if (input.before_test_case === null || input.after_test_case === null) return fallback();
+  const testBefore = extractTest(input.before_test_case);
+  const testAfter = extractTest(input.after_test_case);
+  if (testBefore === null || testAfter === null) return fallback();
+
+  const libChange = diffLibPair(input.lib_before_files, input.lib_after_files);
+  const libHasRealChange = input.lib_kind !== null && libChange.hasRealChange;
+  const bodyHasRealChange = statementsChanged(testBefore.testBody.body, testAfter.testBody.body);
+  const aspect = routeAspect(libHasRealChange, bodyHasRealChange);
+  if (aspect === ASPECT.FALLBACK) return fallback();
+
+  // server は A / B / A+B いずれも 1 candidate (ADR-0014: ケース IV-B は暫定的に 1 candidate 扱い)。
+  // slow/fast = test_case_{before,after} の runnable program。aspect A なら init() の require が
+  // `_before` ↔ `_after` で切り替わり、aspect B なら test() body が切り替わる。
+  const beforeNodeCount = safeCount(input.before_test_case);
+  const afterNodeCount = safeCount(input.after_test_case);
+  return [
+    {
+      layout: LAYOUT_KIND.SERVER,
+      setup: "",
+      slow: buildServerRunnable(input.before_test_case),
+      fast: buildServerRunnable(input.after_test_case),
+      enclosure_type: "server-test-case",
+      candidate_kind: CANDIDATE_KIND.SINGLE,
+      environment: ENV_JSDOM,
+      aspect,
       before_node_count: beforeNodeCount,
       after_node_count: afterNodeCount,
-    };
-  });
-}
-
-/**
- * 1 つの top-level statement ペアで AST diff を取り、changed_nodes の集合を返す。
- *
- * `findChangedNodes` は File を受け取る前提なので、stub の File AST に詰めて呼ぶ。
- * 整形差分のみの場合 (changed.size === 0) はそのまま空 Set を返す。
- */
-function findChangedNodesForStatement(beforeStmt: Statement, afterStmt: Statement): Set<Node> | null {
-  const beforeFile = wrapAsFile(beforeStmt);
-  const afterFile = wrapAsFile(afterStmt);
-  return findChangedNodes(beforeFile, afterFile);
-}
-
-/**
- * statement 単独で minimal enclosure を求め、enclosure_type 名を返す。
- * Module 到達 (enclosure null) なら null を返す。
- */
-function findEnclosureForStatement(beforeStmt: Statement, changed: Set<Node>): string | null {
-  const beforeFile = wrapAsFile(beforeStmt);
-  const result = findMinimalEnclosure(beforeFile, changed);
-  return result?.enclosureType ?? null;
-}
-
-function wrapAsFile(stmt: Statement): File {
-  return {
-    type: "File",
-    program: {
-      type: "Program",
-      body: [stmt],
-      directives: [],
-      sourceType: "script",
     },
-    comments: [],
-    errors: [],
-  } as unknown as File;
+  ];
 }
 
-function excluded(layout: LayoutKind, reason: ExclusionReason, detail: string): PreprocessingResult {
-  return {
-    layout,
-    excluded: reason,
-    excluded_detail: detail,
-  };
+// ─────────────────────────────────────────────────────────────────────────────
+// runnable program builders
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** `[libSource]\n;\n[preF1]\n;\n[bodyCode]` を 1 つの実行可能スクリプトに連結する (top-level f1 用)。 */
+function flatRunnable(libSource: string, preF1Code: string, bodyCode: string): string {
+  const parts: string[] = [];
+  if (libSource.length > 0) {
+    parts.push(libSource);
+    parts.push(";");
+  }
+  if (preF1Code.length > 0) {
+    parts.push(preF1Code);
+    parts.push(";");
+  }
+  parts.push(bodyCode);
+  return parts.join("\n");
+}
+
+/**
+ * server `test_case_*.js` の内容を「module/exports/require を与えて評価 → init()/setupTest()/test() を
+ * 実行 → 観測値を JSON で return」する自己完結 IIFE に包む。`require('./<lib>_*.js')` は実行環境
+ * (jsdom executor) が `module_base_dir` 起点で解決する (= グローバル `require`)。
+ */
+function buildServerRunnable(testCaseSource: string): string {
+  return [
+    "(function () {",
+    "var __selakovic_module = { exports: {} };",
+    "var __selakovic_require = (typeof require === 'function') ? require : function () { return {}; };",
+    "(function (module, exports, require) {",
+    testCaseSource,
+    "})(__selakovic_module, __selakovic_module.exports, __selakovic_require);",
+    "var __selakovic_exp = __selakovic_module.exports;",
+    "var __selakovic_tryJson = function (v) { try { return JSON.stringify(v); } catch (e) { return '<<unserializable>>'; } };",
+    "var __selakovic_i, __selakovic_s, __selakovic_r, __selakovic_ex = null;",
+    "try {",
+    "  __selakovic_i = (typeof __selakovic_exp.init === 'function') ? __selakovic_exp.init() : undefined;",
+    "  __selakovic_s = (typeof __selakovic_exp.setupTest === 'function') ? __selakovic_exp.setupTest(__selakovic_i) : undefined;",
+    "  __selakovic_r = (typeof __selakovic_exp.test === 'function') ? __selakovic_exp.test(__selakovic_i, __selakovic_s) : undefined;",
+    "} catch (e) {",
+    "  __selakovic_ex = { name: (e && e.name) || 'Error', message: (e && e.message) || String(e) };",
+    "}",
+    "return JSON.stringify({ test: (__selakovic_r === undefined ? '<<undefined>>' : __selakovic_r), init: __selakovic_tryJson(__selakovic_i), setup: __selakovic_tryJson(__selakovic_s), exception: __selakovic_ex });",
+    "})()",
+  ].join("\n");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * f1 body の中身 (外側の `{}` を含まない statement 列) を生コード化する。
+ * `buildAngularRunnable` の `f1BodyCode` (= `var f1 = function () { <ここ> }` の中身) に使う。
+ */
+function f1BodyRaw(f1: F1Decomposition): string {
+  return statementsToCode([...f1.f1Body.body]);
+}
+
+/**
+ * f1 body を `(function () { <body> })()` で包んだ実行式。standalone な body candidate / flat runnable
+ * の body 部に使う。完了値が「捨てられる末尾式」(`for(...) <expr>;`) ではなく f1 本来の `return` 値
+ * (なければ undefined) になるので、`%2===0` ↔ `&1===0` のような precedence 差が偽 not_equal を生まない。
+ */
+function f1BodyWrapped(f1: F1Decomposition): string {
+  return `(function () {\n${f1BodyRaw(f1)}\n})()`;
+}
+
+/** lib file map から「単一の lib ソース」を取り出す (clientIssues の lib は単一ファイル形式)。 */
+function singleLibSource(files: Record<string, string>): string {
+  const values = Object.values(files);
+  if (values.length === 0) return "";
+  if (values.length === 1) return values[0] ?? "";
+  return values.join("\n;\n");
+}
+
+function safeCount(source: string): number {
+  try {
+    return countNodes(parse(source));
+  } catch {
+    return 0;
+  }
+}
+
+/** fallback (Tier 1 素の diff) の結果に `aspect: "fallback"` 等の hint を付与する。 */
+function annotateFallback(results: PreprocessingResult[]): PreprocessingResult[] {
+  return results.map((r) => ({
+    ...r,
+    aspect: ASPECT.FALLBACK,
+    candidate_kind: CANDIDATE_KIND.SINGLE,
+    environment: ENV_JSDOM,
+  }));
 }

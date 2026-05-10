@@ -40,6 +40,45 @@ class ExclusionReason(StrEnum):
     MISSING_FILES = "missing-files"
 
 
+class Aspect(StrEnum):
+    """作用点ルーティングの結果 (ADR-0011 §段2)
+
+    - ``LIB`` (``A``): lib (``<lib>_*.js``) のみに実コード変化 — 真 patch は lib の中
+    - ``BODY`` (``B``): ベンチマーク関数 body (``f1.body`` / ``test()`` body) のみに変化
+    - ``BOTH`` (``A+B``): 両方変化 — ADR-0014 の identifier 交差判定で 1 or 2 candidate に分割
+    - ``FALLBACK``: どちらにも実コード変化なし / 規約外フォーマット → Tier 1 の素の top-level diff
+    """
+
+    LIB = "A"
+    BODY = "B"
+    BOTH = "A+B"
+    FALLBACK = "fallback"
+
+
+class CandidateKind(StrEnum):
+    """A+B split (ADR-0014) における candidate の役割
+
+    - ``LIB``: lib varies / body fixed@before
+    - ``BODY``: body varies / lib fixed@before
+    - ``SINGLE``: split しない (A / B / A+B co-evolution / fallback)
+    """
+
+    LIB = "lib"
+    BODY = "body"
+    SINGLE = "single"
+
+
+class ExecutionEnvironmentHint(StrEnum):
+    """preprocess が推奨する等価検証の実行環境 (ADR-0012)
+
+    server / Angular controller-wrapper は ``require`` 解決 / DOM が要るので ``JSDOM``、
+    純粋計算の top-level f1 は ``VM``。``equivalence.ExecutionEnvironment`` と値を一致させる。
+    """
+
+    VM = "vm"
+    JSDOM = "jsdom"
+
+
 class PreprocessingInput(BaseModel):
     """Node ランナーへ送る preprocessing 入力 (1 issue 分)
 
@@ -72,3 +111,6 @@ class PreprocessingResult(BaseModel):
     after_node_count: int | None = None
     excluded: ExclusionReason | None = None
     excluded_detail: str | None = None
+    aspect: Aspect | None = None
+    candidate_kind: CandidateKind | None = None
+    environment: ExecutionEnvironmentHint | None = None

@@ -1,4 +1,5 @@
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 
 import {
   EXCLUSION_REASON,
@@ -8,8 +9,8 @@ import {
 } from "../contracts/preprocessing-contracts";
 import { extract, type SelakovicExtractInput } from "../preprocessing/selakovic";
 import { extractInlineScripts } from "../preprocessing/selakovic/client";
-import { detectLayout } from "../preprocessing/selakovic/layout";
-import { loadLibFiles } from "../preprocessing/selakovic/server";
+import { detectLayout, type DetectedLayout } from "../preprocessing/selakovic/layout";
+import { loadLibPair } from "../preprocessing/selakovic/lib-pair";
 
 const EXIT_OK = 0;
 const EXIT_ERROR = 2;
@@ -21,6 +22,10 @@ const EXIT_BATCH_IO_FAILURE = 2;
  * - extract() は `PreprocessingResult[]` を返す (1 candidate なら 1 件、N candidate なら N 件)
  * - CLI は出力を **常に JSONL** (1 結果 = 1 行) に統一する
  * - 複数結果の id は `<original_id>#<index>` を付与して識別 (1 結果なら suffix なし)
+ *
+ * ファイル I/O (レイアウト判定 / inline `<script>` 抽出 / `<lib>_*.js` 読み出し / test_case 読み出し)
+ * は CLI に閉じ込め、`extract()` は文字列内容のみを受け取る純関数に保つ (ADR-0011 Tier 2 は dataset
+ * 規約を使うが I/O 層は分離する)。
  */
 
 async function readStdin(): Promise<string> {
@@ -44,12 +49,29 @@ function parseInput(raw: string): PreprocessingInput | string {
   const obj = parsed as Record<string, unknown>;
   if (typeof obj.issue_dir !== "string") return "'issue_dir' field must be a string";
   const input: PreprocessingInput = { issue_dir: obj.issue_dir };
-  // null は undefined と同じ「省略」として扱う (Pydantic optional の serialize 形式に対応)。
   if (obj.id !== undefined && obj.id !== null) {
     if (typeof obj.id !== "string") return "'id' field must be a string when present";
     input.id = obj.id;
   }
   return input;
+}
+
+const SCRIPT_TAG_PATTERN = /<script\b([^>]*)>[\s\S]*?<\/script>/gi;
+const SRC_ATTR_PATTERN = /\bsrc\s*=\s*["']([^"']+)["']/i;
+
+/** v_before.html が `<script src="<lib>_before.js">` でローカルの lib を参照しているか。 */
+function htmlReferencesLib(html: string): boolean {
+  let match: RegExpExecArray | null;
+  SCRIPT_TAG_PATTERN.lastIndex = 0;
+  while ((match = SCRIPT_TAG_PATTERN.exec(html)) !== null) {
+    const attrs = match[1] ?? "";
+    const srcMatch = SRC_ATTR_PATTERN.exec(attrs);
+    const src = srcMatch?.[1];
+    if (src === undefined) continue;
+    if (/^https?:/i.test(src)) continue;
+    if (/_before\.js$/i.test(src)) return true;
+  }
+  return false;
 }
 
 /**
@@ -58,11 +80,9 @@ function parseInput(raw: string): PreprocessingInput | string {
  * レイアウト判定 + ファイル I/O の前段で除外する場合は 1 件の error result を返す。
  * extract() で複数 candidate が出た場合はそのまま配列を返す。
  *
- * **fallback 戦略 (clientServer 救済)**:
- * client モードで全結果が `no-changed-nodes` (= inline script に変更なし) になった場合、
- * `<libname>_*.js` 単一ファイルが共存していれば server-single-file モードで再試行する。
- * これにより clientServerIssues カテゴリ (実際の最適化はライブラリ側) を救済できる。
- * 物理ファイル構造ベースの探索順序ルールで、Selakovic 論文 §6 / Table 4 への依存はない。
+ * ADR-0011 改修により、client 経路でも `<lib>_*.js` を dir scan で読み込んで diff 対象に
+ * 含めるため、旧来の「client → server-single-file fallback」(clientServer 救済) は不要になった
+ * (作用点 A の clientIssues は段2 ルーティングで自然に処理される)。
  */
 function preprocess(input: PreprocessingInput): PreprocessingResult[] {
   const layout = detectLayout(input.issue_dir);
@@ -77,76 +97,9 @@ function preprocess(input: PreprocessingInput): PreprocessingResult[] {
     ];
   }
 
-  // 1 次抽出
-  const primaryResults = runExtraction(layout, /*useFallback*/ false);
-
-  // client モードで extracted が 1 件も出なかった (= 全件 excluded) かつ server-single-file
-  // fallback が利用可能なら、ライブラリ側の AST diff で再試行する。
-  // 論文非依存の物理構造ベース探索順序ルール: v_*.html で最適化が見つからなければ
-  // <libname>_*.js を見る。これにより clientServerIssues (jsperf ハーネスは jsperf 計測
-  // 用で実最適化はライブラリ側) が救済される。
-  if (
-    layout.kind === LAYOUT_KIND.CLIENT &&
-    layout.serverFiles !== undefined &&
-    primaryResults.every((r) => r.excluded !== undefined)
-  ) {
-    const fallbackResults = runExtraction(layout, /*useFallback*/ true);
-    // fallback で extracted が 1 件でも出れば採用 (= ライブラリ側に最適化があった)
-    if (fallbackResults.some((r) => r.excluded === undefined)) {
-      return fallbackResults;
-    }
-  }
-
-  return primaryResults;
-}
-
-function runExtraction(layout: ReturnType<typeof detectLayout>, useFallback: boolean): PreprocessingResult[] {
   let extractInput: SelakovicExtractInput;
   try {
-    if (useFallback && layout.serverFiles !== undefined) {
-      extractInput = {
-        kind: "server",
-        before_files: loadLibFiles(layout.serverFiles.beforeFile),
-        after_files: loadLibFiles(layout.serverFiles.afterFile),
-      };
-    } else if (layout.kind === LAYOUT_KIND.CLIENT) {
-      if (layout.clientFiles === undefined) {
-        return [
-          {
-            layout: LAYOUT_KIND.CLIENT,
-            excluded: EXCLUSION_REASON.MISSING_FILES,
-            excluded_detail: "internal: client layout but no file paths",
-          },
-        ];
-      }
-      const beforeHtml = readFileSync(layout.clientFiles.beforeHtml, "utf-8");
-      const afterHtml = readFileSync(layout.clientFiles.afterHtml, "utf-8");
-      extractInput = {
-        kind: "client",
-        before_script: extractInlineScripts(beforeHtml),
-        after_script: extractInlineScripts(afterHtml),
-      };
-    } else if (layout.serverDirs !== undefined) {
-      extractInput = {
-        kind: "server",
-        before_files: loadLibFiles(layout.serverDirs.beforeDir),
-        after_files: loadLibFiles(layout.serverDirs.afterDir),
-      };
-    } else if (layout.serverFiles !== undefined) {
-      extractInput = {
-        kind: "server",
-        before_files: loadLibFiles(layout.serverFiles.beforeFile),
-        after_files: loadLibFiles(layout.serverFiles.afterFile),
-      };
-    } else {
-      return [
-        {
-          layout: LAYOUT_KIND.SERVER,
-          excluded: EXCLUSION_REASON.MISSING_FILES,
-          excluded_detail: "internal: server layout but no dir/file paths",
-        },
-      ];
-    }
+    extractInput = buildExtractInput(input.issue_dir, layout);
   } catch (e) {
     return [
       {
@@ -158,6 +111,42 @@ function runExtraction(layout: ReturnType<typeof detectLayout>, useFallback: boo
   }
 
   return extract(extractInput);
+}
+
+function buildExtractInput(issueDir: string, layout: DetectedLayout): SelakovicExtractInput {
+  const libPair = loadLibPair(layout);
+  const libBeforeFiles = libPair?.beforeFiles ?? {};
+  const libAfterFiles = libPair?.afterFiles ?? {};
+  const libKind = libPair?.kind ?? null;
+
+  if (layout.kind === LAYOUT_KIND.CLIENT) {
+    if (layout.clientFiles === undefined) {
+      throw new Error("internal: client layout but no html file paths");
+    }
+    const beforeHtml = readFileSync(layout.clientFiles.beforeHtml, "utf-8");
+    const afterHtml = readFileSync(layout.clientFiles.afterHtml, "utf-8");
+    return {
+      kind: "client",
+      before_inline: extractInlineScripts(beforeHtml),
+      after_inline: extractInlineScripts(afterHtml),
+      lib_before_files: libBeforeFiles,
+      lib_after_files: libAfterFiles,
+      lib_kind: libKind,
+      lib_referenced_by_workload: htmlReferencesLib(beforeHtml),
+    };
+  }
+
+  // server: test_case_*.js (なければ null → extract() 側で fallback)
+  const beforeTestCasePath = join(issueDir, "test_case_before.js");
+  const afterTestCasePath = join(issueDir, "test_case_after.js");
+  return {
+    kind: "server",
+    before_test_case: existsSync(beforeTestCasePath) ? readFileSync(beforeTestCasePath, "utf-8") : null,
+    after_test_case: existsSync(afterTestCasePath) ? readFileSync(afterTestCasePath, "utf-8") : null,
+    lib_before_files: libBeforeFiles,
+    lib_after_files: libAfterFiles,
+    lib_kind: libKind,
+  };
 }
 
 /**
@@ -214,7 +203,6 @@ function parseBatchLine(raw: string): PreprocessingInput | BatchLineParseError {
     return { id: undefined, error: "Expected a JSON object per line" };
   }
   const obj = parsed as Record<string, unknown>;
-  // null は undefined と同じ「省略」として扱う (Pydantic optional の serialize 形式に対応)。
   let id: string | undefined;
   if (obj.id === undefined || obj.id === null) {
     id = undefined;

@@ -1,0 +1,51 @@
+/**
+ * Angular controller-wrapper の `f1` を「lib を load → module/controller を再構成 (計測ハーネス除去済)
+ * → controller を実体化 → f1() を 1 回実行 → 観測値を return」する自己完結 IIFE に組み立てる
+ * (ADR-0011 §段2 / Phase 1.0 スパイク `buildAngularProgram` の production 版)。
+ *
+ * `executeSandboxed` の body として使う前提 (= 最後の式の完了値が return_value oracle に乗る)。
+ * f1 body 内のループ反復回数は書き換えない (ADR-0013 — 反復縮小は等価検証側の transform)。
+ */
+export interface AngularRunnableOptions {
+  /** load する lib 全文 (`<lib>_before.js` or `<lib>_after.js`)。 */
+  readonly libSource: string;
+  readonly moduleName: string;
+  readonly ctrlName: string;
+  readonly ctrlParams: readonly string[];
+  /** controller body 内で f1 定義より前の非ハーネス statement のコード。 */
+  readonly preF1Code: string;
+  /** f1 の body のコード (外側の `{}` を含まない statement 列)。 */
+  readonly f1BodyCode: string;
+}
+
+export function buildAngularRunnable(opts: AngularRunnableOptions): string {
+  const params = opts.ctrlParams.length > 0 ? opts.ctrlParams.join(", ") : "$scope";
+  const scopeParam = opts.ctrlParams[0] ?? "$scope";
+  const moduleNameJson = JSON.stringify(opts.moduleName);
+  const ctrlNameJson = JSON.stringify(opts.ctrlName);
+  return [
+    "(function () {",
+    "// ---- library under test ----",
+    opts.libSource,
+    ";",
+    "// ---- bootstrap (reconstructed module/controller, measurement harness stripped) ----",
+    `var __selakovic_app = angular.module(${moduleNameJson}, []);`,
+    `__selakovic_app.controller(${ctrlNameJson}, function (${params}) {`,
+    opts.preF1Code,
+    ";",
+    "var f1 = function () {",
+    opts.f1BodyCode,
+    "};",
+    `globalThis.__selakovic_f1 = f1; globalThis.__selakovic_scope = ${scopeParam};`,
+    "});",
+    `var __selakovic_inj = angular.injector(['ng', ${moduleNameJson}]);`,
+    "var __selakovic_root = __selakovic_inj.get('$rootScope').$new();",
+    `__selakovic_inj.get('$controller')(${ctrlNameJson}, { $scope: __selakovic_root });`,
+    "// ---- run f1 once + capture observables ----",
+    "var __selakovic_ret = globalThis.__selakovic_f1();",
+    "var __selakovic_scopeState = {};",
+    "try { for (var __selakovic_k in globalThis.__selakovic_scope) { if (__selakovic_k.charAt(0) !== '$') { try { __selakovic_scopeState[__selakovic_k] = JSON.stringify(globalThis.__selakovic_scope[__selakovic_k]); } catch (e) { __selakovic_scopeState[__selakovic_k] = '<<unserializable>>'; } } } } catch (e) {}",
+    "return JSON.stringify({ f1Return: (__selakovic_ret === undefined ? '<<undefined>>' : __selakovic_ret), scopeState: __selakovic_scopeState });",
+    "})()",
+  ].join("\n");
+}

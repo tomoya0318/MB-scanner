@@ -35,6 +35,41 @@ export const EXCLUSION_REASON = {
 export type ExclusionReason = (typeof EXCLUSION_REASON)[keyof typeof EXCLUSION_REASON];
 
 /**
+ * 作用点ルーティングの結果 (ADR-0011 §段2)。
+ * - `A`: lib (`<lib>_*.js`) のみに実コード変化 — 真 patch は lib の中
+ * - `B`: ベンチマーク関数 body (`f1.body` / `test()` body) のみに変化 — 真 patch は body の中
+ * - `A+B`: 両方変化 — ADR-0014 の identifier 交差判定で 1 or 2 candidate に分割
+ * - `fallback`: どちらにも実コード変化なし / 規約外フォーマット → Tier 1 の素の top-level diff
+ */
+export const ASPECT = {
+  LIB: "A",
+  BODY: "B",
+  BOTH: "A+B",
+  FALLBACK: "fallback",
+} as const;
+export type Aspect = (typeof ASPECT)[keyof typeof ASPECT];
+
+/**
+ * A+B split (ADR-0014) における candidate の役割。
+ * - `lib`: lib varies / body fixed@before
+ * - `body`: body varies / lib fixed@before
+ * - `single`: split しない (A / B / A+B co-evolution / fallback)
+ */
+export const CANDIDATE_KIND = {
+  LIB: "lib",
+  BODY: "body",
+  SINGLE: "single",
+} as const;
+export type CandidateKind = (typeof CANDIDATE_KIND)[keyof typeof CANDIDATE_KIND];
+
+/**
+ * preprocess が推奨する等価検証の実行環境 (= 後段の equivalence-checker への hint)。
+ * server / Angular controller-wrapper は `require` 解決 / DOM が要るので `jsdom`、
+ * 純粋計算の top-level f1 は `vm`。値は `equivalence-contracts.ts` の `EXECUTION_ENVIRONMENT` と一致させる。
+ */
+export type ExecutionEnvironmentHint = "vm" | "jsdom";
+
+/**
  * CLI の入力 (1 issue 分)。Python から subprocess の stdin に流し込まれる。
  *
  * `issue_dir` は絶対パスで、CLI 側でファイル読み込みとレイアウト判定をする。
@@ -62,4 +97,10 @@ export interface PreprocessingResult {
   after_node_count?: number;
   excluded?: ExclusionReason;
   excluded_detail?: string;
+  /** 作用点ルーティングの結果 (ADR-0011 §段2)。fallback 経路では `fallback`。 */
+  aspect?: Aspect;
+  /** A+B split (ADR-0014) における役割。split しない candidate は `single`。 */
+  candidate_kind?: CandidateKind;
+  /** 後段の等価検証で使う実行環境の hint (`vm` / `jsdom`)。 */
+  environment?: ExecutionEnvironmentHint;
 }
