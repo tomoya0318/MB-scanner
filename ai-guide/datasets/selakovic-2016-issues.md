@@ -3,7 +3,8 @@
 等価性検証器 (`mbs check-equivalence`) の評価に利用する従来研究データセット。98 件の JS パフォーマンス改善 PR を収集したもの。
 
 - 出典: Selakovic & Pradel, "Performance issues and optimizations in JavaScript: an empirical study" (ICSE 2016)
-- 上流: https://github.com/marijaselakovic/JavaScriptIssuesStudy
+- 一次配布元: https://github.com/marijaselakovic/JavaScriptIssuesStudy (論文著者 repo)
+- submodule 参照先: https://github.com/tomoya0318/selakovic-2016-issues (`marijaselakovic/JavaScriptIssuesStudy` の fork。`data/selakovic-2016-issues/` と repo 名を揃え、上流が消えた場合の評価再現性を担保するため)
 - ライセンス: **repo に記載なし**。引用ベースの研究利用は慣行上問題ないが、派生データセットを再配布する場合は著者に要確認。
 
 ## 配置
@@ -14,7 +15,7 @@ data/selakovic-2016-issues/   # git submodule として登録済み (.gitmodules
 
 **git submodule 方式**を採用している理由:
 - commit SHA が `.gitmodules` + submodule ポインタとして親 repo にコミットされるため、**評価の再現性**が保証される
-- ライセンス未明記の上流 repo を fork せず、参照のみで済む
+- 一次配布元 (`marijaselakovic/JavaScriptIssuesStudy`) はライセンス未明記のまま消滅するリスクがあるため、自家 fork (`tomoya0318/selakovic-2016-issues`) を pin 先とすることでアクセス安定性を確保する
 - worktree 間で git objects (履歴・圧縮データ) は `main/.git/modules/selakovic-2016-issues/` に一元化される (実ファイルのみ worktree ごとに展開)
 
 ### 新規 clone 時
