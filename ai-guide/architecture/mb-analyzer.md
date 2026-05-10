@@ -35,8 +35,8 @@ cli/                      ──→ 全機能 (composition root)
 
 - **`contracts/`**: 末端層。他機能を import 禁止。Python 側 Pydantic モデルと JSON 互換な型定義のみ置く
 - **`ast/`**: 末端層。Babel AST 操作の汎用ユーティリティ (parse/walk/subtree-hash/inspect)。pruning と preprocessing で共有
-- **`preprocessing/common/`**: ドメイン非依存の前処理コア (AST diff, minimal enclosure, setup 構築)。`preprocessing/selakovic/` を import 禁止
-- **`preprocessing/selakovic/`**: Selakovic データセット固有のドメイン処理 (HTML パース、レイアウト判定、ライブラリ結合)
+- **`preprocessing/common/`**: ドメイン非依存の前処理コア (AST diff, minimal enclosure, setup 構築) = ADR-0011 の **Tier 1**。`preprocessing/selakovic/` を import 禁止
+- **`preprocessing/selakovic/`**: Selakovic データセット固有のドメイン処理 = ADR-0011 の **Tier 2** (段1 役割分解: `<lib>_*.js` dir scan + `f1`/`test()` body 抽出 + 計測ハーネス除去 / 段2 作用点ルーティング A·B·A+B + ADR-0014 case split / レイアウト判定 / HTML inline `<script>` 抽出 / Angular controller-wrapper 再構成)
 - **各機能パッケージ**: 自身より右側の機能を import 禁止。横依存を避ける
 - **`cli/`**: composition root。stdin/stdout と subprocess 契約を担当し、ビジネスロジックは持たない
 
@@ -59,20 +59,19 @@ mb-analyzer/                  # === TypeScript CLI (現行実装) ===
 │   │   ├── pruning-contracts.ts        # Python `pruning.py` と JSON 互換
 │   │   └── preprocessing-contracts.ts  # Python `preprocessing.py` と JSON 互換
 │   ├── equivalence-checker/  # 等価性検証器（pruning/ 等を import 禁止）
-│   │   ├── checker.ts        # checkEquivalence() 本体
+│   │   ├── checker.ts        # checkEquivalence() 本体 (environment で vm / jsdom を振り分け — ADR-0012)
 │   │   ├── verdict.ts        # 全体 verdict 判定ロジック (deriveOverallVerdict)
-│   │   ├── oracles/          # 4 oracle
-│   │   │   ├── return-value.ts
-│   │   │   ├── argument-mutation.ts
-│   │   │   ├── exception.ts
-│   │   │   └── external-observation.ts
-│   │   └── sandbox/          # vm.Script ベースのサンドボックス
-│   │       ├── stabilizer.ts # Date / Math.random / console の decoupling
-│   │       ├── executor.ts   # runInContext で slow / fast を実行
+│   │   ├── oracles/          # 4 oracle (return-value / argument-mutation / exception / external-observation)
+│   │   └── sandbox/          # 実行環境
+│   │       ├── stabilizer.ts # vm 環境: Date / Math.random / console の decoupling
+│   │       ├── executor.ts   # vm 環境: runInContext で slow / fast を実行
+│   │       ├── jsdom-executor.ts # jsdom 環境 (ADR-0012 最小版): window/document + 相対 require 解決
 │   │       └── serializer.ts # 副作用を含む値を文字列化
 │   ├── preprocessing/        # データセット前処理 (1 issue → (setup, slow, fast) 抽出)
-│   │   ├── common/           # ドメイン非依存 (ast-diff / enclosure / setup-cleanup)
-│   │   └── selakovic/        # Selakovic 固有 (layout / client / server / index)
+│   │   ├── common/           # Tier 1 (ADR-0011): ast-diff / enclosure / setup-cleanup
+│   │   └── selakovic/        # Tier 2 (ADR-0011): layout / lib-pair / f1-extract / test-extract /
+│   │                         #   lib-diff / aspect-routing / case-split / angular-bootstrap /
+│   │                         #   legacy-diff (fallback) / index (段1·段2 orchestration) / client
 │   ├── pruning/              # 第 1 段階 pruning エンジン
 │   │   ├── ast/parser.ts     # ast/parser を PARSER_PLUGINS で注入する薄ラッパー (ADR-0006)
 │   │   ├── candidates.ts / engine.ts / index.ts / inspect.ts
@@ -82,11 +81,13 @@ mb-analyzer/                  # === TypeScript CLI (現行実装) ===
 │       ├── check-equivalence.ts
 │       ├── prune.ts
 │       └── preprocess-selakovic.ts
-├── tests/                    # vitest (`tests/**/*.test.ts` を自動検出)
+├── tests/                    # vitest (`tests/{cli,equivalence-checker,pruning,contracts,preprocessing}/**` + property + integration)
 │   ├── cli/
-│   ├── equivalence-checker/
+│   ├── equivalence-checker/  # checker / oracles / sandbox (jsdom-executor.test.ts 含む)
+│   ├── preprocessing/        # selakovic.test.ts (Tier 2 段1·段2)
 │   ├── pruning/
 │   ├── property/
+│   ├── integration/          # selakovic-2016.test.ts
 │   └── contracts/
 ├── dist/cli.js               # esbuild バンドル成果物 (mise run build-analyzer で生成)
 ├── eslint.config.js          # `import/no-restricted-paths` で依存方向を機械強制
