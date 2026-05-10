@@ -1,3 +1,3 @@
 [submodule "data/selakovic-2016-issues"]
 	path = data/selakovic-2016-issues
-	url = https://github.com/marijaselakovic/JavaScriptIssuesStudy.git
+	url = git@github.com:tomoya0318/selakovic-2016-issues.git
