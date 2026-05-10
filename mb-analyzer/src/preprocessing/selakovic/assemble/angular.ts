@@ -49,3 +49,53 @@ export function buildAngularRunnable(opts: AngularRunnableOptions): string {
     "})()",
   ].join("\n");
 }
+
+// 判断: ai-guide/adr/0007-in-source-testing-internal-helpers.md
+if (import.meta.vitest) {
+  const { describe, it, expect } = import.meta.vitest;
+
+  const base = {
+    libSource: "/* lib */ var __LIB_MARKER__ = 1;",
+    moduleName: "myApp",
+    ctrlName: "Ctrl",
+    ctrlParams: ["$scope", "$http"] as const,
+    preF1Code: "var __PRE_F1_MARKER__ = 2;",
+    f1BodyCode: "var __F1_BODY_MARKER__ = 3;",
+  };
+
+  describe("buildAngularRunnable (in-source)", () => {
+    it("自己完結 IIFE に lib / module・controller 再構成 / preF1 / f1 body を埋め込む", () => {
+      const code = buildAngularRunnable({ ...base, ctrlParams: [...base.ctrlParams] });
+      expect(code.startsWith("(function () {")).toBe(true);
+      expect(code.trimEnd().endsWith("})()")).toBe(true);
+      expect(code).toContain(base.libSource); // 測定対象 lib
+      expect(code).toContain('angular.module("myApp", []);'); // module 再構成
+      expect(code).toContain('.controller("Ctrl", function ($scope, $http) {'); // ctrl 再構成 (params join)
+      expect(code).toContain(base.preF1Code); // f1 より前の非ハーネス statement
+      expect(code).toContain(`var f1 = function () {\n${base.f1BodyCode}\n};`); // f1 body は反復回数そのまま (ADR-0013)
+      expect(code).toContain("__selakovic_inj.get('$controller')(\"Ctrl\", { $scope: __selakovic_root });"); // 実体化
+      // 計測ハーネス (execute / $.ajax / mark) は一切埋め込まれない
+      expect(code).not.toContain("execute");
+      expect(code).not.toContain("$.ajax");
+    });
+
+    it("scope の観測には ctrlParams の先頭 (= $scope 相当) を使う", () => {
+      const code = buildAngularRunnable({ ...base, ctrlParams: ["$rootScopeAlias", "$timeout"] });
+      expect(code).toContain("function ($rootScopeAlias, $timeout) {");
+      expect(code).toContain("globalThis.__selakovic_scope = $rootScopeAlias;");
+    });
+
+    it("ctrlParams が空なら $scope をフォールバックに使う", () => {
+      const code = buildAngularRunnable({ ...base, ctrlParams: [] });
+      expect(code).toContain('.controller("Ctrl", function ($scope) {');
+      expect(code).toContain("globalThis.__selakovic_scope = $scope;");
+    });
+
+    it("module / controller 名は JSON.stringify でエスケープして埋める", () => {
+      const code = buildAngularRunnable({ ...base, moduleName: 'a"pp', ctrlName: "C\\tl" });
+      expect(code).toContain('angular.module("a\\"pp", []);');
+      expect(code).toContain('.controller("C\\\\tl", function');
+      expect(code).toContain("__selakovic_inj = angular.injector(['ng', \"a\\\"pp\"]);");
+    });
+  });
+}

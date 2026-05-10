@@ -402,13 +402,22 @@ TS 側 (mb-analyzer/src/)                    Python 側 (mb_scanner/)
 │                              │           │  (subprocess + JSONL parse)     │
 │ preprocessing/selakovic/     │           └─────────────┬───────────────────┘
 │ (= Tier 2, ADR-0011)         │  ←── stdin/stdout JSONL ─┘
-│   layout / lib-pair /        │
-│   f1-extract / test-extract /│
-│   lib-diff / aspect-routing /│
-│   case-split (ADR-0014) /    │
-│   angular-bootstrap /        │
-│   legacy-diff (fallback) /   │
-│   index (段1·段2) / client   │
+│   io/ (FS I/O 層)            │
+│     layout / lib-pair        │
+│   decompose/ (段1 役割分解)  │
+│     inline-script / f1 /     │
+│     test-case                │
+│   route/ (段2 作用点ルート)  │
+│     aspect / lib-diff /      │
+│     case-split (ADR-0014)    │
+│   assemble/ (setup/slow/fast)│
+│     angular / client /       │
+│     server / fallback        │
+│   pipeline (段1·段2 統括) /  │
+│   index (薄い barrel)        │
+│ (モジュール内ヘルパのテストは │
+│  各ファイルの in-source —     │
+│  ADR-0007)                   │
 │                              │
 │ cli/preprocess-selakovic.ts  │ ←── stdin (1 入力 / JSONL バッチ)
 │ (Node CLI エントリ)            │ ←── stdout (1 入力 → N 結果 JSONL)
@@ -419,21 +428,21 @@ TS 側 (mb-analyzer/src/)                    Python 側 (mb_scanner/)
 
 ### 抽出アルゴリズム — Tier 2 の段1 / 段2 (ADR-0011)
 
-`extract(input)` (`preprocessing/selakovic/index.ts`) は CLI が読んだファイル内容 (inline `<script>` / `test_case_*.js` / `<lib>_before/after` の map) を受け取り、2 段で処理する。Layout 判定 (`detectLayout`) と `<lib>_*` の dir scan (`loadLibPair`) は I/O を含むので CLI 側に閉じ込める。
+`preprocess(input)` (`preprocessing/selakovic/pipeline.ts`、公開は薄い barrel `index.ts` 経由) は CLI が読んだファイル内容 (inline `<script>` / `test_case_*.js` / `<lib>_before/after` の map) を受け取り、`io → decompose → route → assemble` の 4 層を順に通す。Layout 判定 (`io/layout.ts` の `detectLayout`) と `<lib>_*` の dir scan (`io/lib-pair.ts` の `loadLibPair`) は I/O を含むので CLI 側から呼ぶ — selakovic で `fs` に触るのは `io/` 配下だけ。
 
-**段 1 (役割分解 + 計測ハーネス除去)** — `f1-extract.ts` / `test-extract.ts` / `lib-pair.ts`:
+**段 1 (役割分解 + 計測ハーネス除去)** — `decompose/f1.ts` / `decompose/test-case.ts` / `decompose/inline-script.ts` (+ `io/lib-pair.ts`):
 
 - ① `<lib>_before/after` ペアを **dir scan** で取る (`<lib>_before(.js|/)` を探す。`<script src>`/`require` 参照とは独立 — clientIssues でも `<lib>_*.js` を必ず読む。これが ADR-0011 改修の核で、作用点 A の clientIssues が初めて真 patch を見られるようになる)。
 - ② ベンチマーク関数 body ペアを取る。clientIssues: inline `<script>` から `f1` 定義 (AST 親パスは実質 top-level 直書き / Angular controller-wrapper の 2 種) を特定して body を切り出し、`var a = execute(f1, n)` 以降 / `$.ajax({mark,mean})` / `console.log(mean)` を harness に分離、`f1` 定義より前の非ハーネス statement を preF1 (= setup の母体) に。server: `test_case_*.js` から `init`/`setupTest`/`test` を特定し `test()` body を切り出す (`init`/`setupTest` は計測ハーネス)。**body 内のループ反復回数 (`for (i<50000)`) は書き換えない** — 復元可能性のため、反復縮小は等価検証側の transform に委ねる (ADR-0013)。
 
-**段 2 (作用点ルーティング)** — `aspect-routing.ts` / `lib-diff.ts` / `case-split.ts`:
+**段 2 (作用点ルーティング)** — `route/aspect.ts` / `route/lib-diff.ts` / `route/case-split.ts`:
 
-- ① の差分 (`lib-diff.ts`: 行ベース multiset 差分で license/version/整形 noise を除いて実コード行が残るか + 近傍の関数名を近似) と ② の差分 (Tier 1 `findChangedNodes` の AST diff が空でないか) で作用点を **A** (lib のみ) / **B** (body のみ) / **A+B** (両方) / **fallback** (どちらも実質差なし / 規約外フォーマット) に振り分ける。
-- A → candidate 1 個 (lib varies / body fixed@before)。B → candidate 1 個 (body varies / lib fixed@before)。A+B → ADR-0014 の identifier 交差判定 (`isIndependent`: body の参照 identifier ∩ lib 変更関数名が空なら independent) で 2 candidate (`candidate_kind: lib` / `body`) に分割、交差ありなら co-evolution の疑いで 1 candidate。
-- candidate の `(setup, slow, fast)` は作用点 × wrapper kind で組み立てる: Angular controller-wrapper は `angular-bootstrap.ts` が「lib を load → module/controller を再構成 (ハーネス除去済) → controller を実体化 → `f1()` を 1 回実行 → 観測値を return」する自己完結 IIFE を作る (Phase 1.0 スパイクで AngularJS 950KB の jsdom load+bootstrap を実証)。top-level f1 の body candidate は `(function(){ <f1 body> })()` で包む (= 完了値が捨てられる末尾式ではなく `f1` 本来の `return` 値になる)。server は `test_case_*.js` を `module`/`exports`/`require` 込みで包んで `init()`/`setupTest()`/`test()` を実行する runnable (作用点 A なら `init()` の require が `_before`↔`_after` で切り替わる)。
+- ① の差分 (`route/lib-diff.ts`: 行ベース multiset 差分で license/version/整形 noise を除いて実コード行が残るか + 近傍の関数名を近似) と ② の差分 (`route/aspect.ts` の `statementsChanged` = Tier 1 `findChangedNodes` の AST diff が空でないか) で作用点を **A** (lib のみ) / **B** (body のみ) / **A+B** (両方) / **fallback** (どちらも実質差なし / 規約外フォーマット) に振り分ける。
+- A → candidate 1 個 (lib varies / body fixed@before)。B → candidate 1 個 (body varies / lib fixed@before)。A+B → ADR-0014 の identifier 交差判定 (`route/case-split.ts` の `isIndependent`: body の参照 identifier ∩ lib 変更関数名が空なら independent) で 2 candidate (`candidate_kind: lib` / `body`) に分割、交差ありなら co-evolution の疑いで 1 candidate。
+- candidate の `(setup, slow, fast)` は `assemble/` が作用点 × wrapper kind で組み立てる: Angular controller-wrapper は `assemble/angular.ts` が「lib を load → module/controller を再構成 (ハーネス除去済) → controller を実体化 → `f1()` を 1 回実行 → 観測値を return」する自己完結 IIFE を作る (Phase 1.0 スパイクで AngularJS 950KB の jsdom load+bootstrap を実証)。top-level f1 の client candidate は `assemble/client.ts` が `(function(){ <f1 body> })()` で包む (= 完了値が捨てられる末尾式ではなく `f1` 本来の `return` 値になる)。server は `assemble/server.ts` が `test_case_*.js` を `module`/`exports`/`require` 込みで包んで `init()`/`setupTest()`/`test()` を実行する runnable にする (作用点 A なら `init()` の require が `_before`↔`_after` で切り替わる)。
 - `environment` hint (ADR-0012): server / Angular wrapper / lib を含む candidate は `jsdom` (= `require` 解決 / DOM が要る)、Phase 2a では client candidate もすべて `jsdom` (inline `<script>` が `document`/`window` を参照しうるため)。後段 (verify スクリプト / Python orchestrator) が `EquivalenceInput.environment` + `module_base_dir` (= issue ディレクトリ) に渡し、jsdom executor が相対 `require` を解決する。
 
-**fallback (`legacy-diff.ts`)**: 段2 が「①にも②にも実質差なし」または `f1`/`test` が規約外フォーマットと判定した issue は、Tier 1 の素の top-level statement AST diff (= 旧 `extract()` の挙動: `canonicalHash` で matched を除外 → unmatched ペアを `findChangedNodes`/`findMinimalEnclosure` → candidate、setup = 自分以外の全 top-level statement の before 版) にフォールバックする。実物では稀 (Phase 2a の 97 issue では JSX を含む 1 件のみ excluded、fallback 経由抽出は 0)。下記「setup 構築規約」「enclosure 3 段優先順位」はこの fallback 経路の話。
+**fallback (`assemble/fallback.ts`)**: 段2 が「①にも②にも実質差なし」または `f1`/`test` が規約外フォーマットと判定した issue は、Tier 1 の素の top-level statement AST diff (= ADR-0011 以前の `preprocess()` (旧名 `extract()`) の素の挙動: `canonicalHash` で matched を除外 → unmatched ペアを `findChangedNodes`/`findMinimalEnclosure` → candidate、setup = 自分以外の全 top-level statement の before 版) にフォールバックする。実物では稀 (Phase 2a の 97 issue では JSX を含む 1 件のみ excluded、fallback 経由抽出は 0)。下記「setup 構築規約」「enclosure 3 段優先順位」はこの fallback 経路の話。
 
 ### enclosure 候補型の 3 段優先順位
 
@@ -453,7 +462,7 @@ TS 側 (mb-analyzer/src/)                    Python 側 (mb_scanner/)
 
 Selakovic データセットには **同一 PR に複数の独立した最適化が同居するケース**がある (例: socket.io 573 では `encodePacket` の switch case 順序入れ替え + `decodePacket` の if/else→switch 書き換えが同一 commit に含まれる)。
 
-これに対応するため、`extract()` の戻り値を **`list[PreprocessingResult]`** に拡張:
+これに対応するため、`preprocess()` の戻り値を **`list[PreprocessingResult]`** に拡張:
 
 | candidates 数 | 出力 | id 規則 |
 |---|---|---|

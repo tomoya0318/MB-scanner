@@ -2,7 +2,7 @@
  * 対象: CLI エントリ - runPreprocessSelakovic (single モード: `mbs preprocess-selakovic`)
  * 観点: stdin に 1 件の JSON object を受け取り、1+ 件の結果を JSONL で stdout に出力する契約
  * 判定事項:
- *   - 抽出成功 (extract が複数 candidate を返す) → JSONL の各行に id suffix が付与される
+ *   - 抽出成功 (preprocess が複数 candidate を返す) → JSONL の各行に id suffix が付与される
  *   - layout 判定不能ディレクトリ → 1 件の error result (LAYOUT_UNKNOWN) で exit 0
  *   - id 省略 (undefined / null / 未指定) → 出力に id フィールドなし
  *   - id 指定あり + 1 結果 → original_id を suffix なしで付与
@@ -10,7 +10,7 @@
  *   - issue_dir 欠落 / 非 string → exit 2
  *   - JSON parse 失敗 / 非 object → exit 2
  *
- * 注意: extract() の AST 解析の正しさは preprocessing/selakovic 配下の単体テスト責務 (
+ * 注意: preprocess() の AST 解析の正しさは preprocessing/selakovic 配下の単体テスト責務 (
  * `selakovic-2016.test.ts` 等) なので、CLI テストでは I/O 契約 (JSONL 形式 / id /
  * exit code) に絞って検証する。
  */

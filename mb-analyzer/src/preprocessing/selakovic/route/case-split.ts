@@ -1,6 +1,6 @@
 import type { Statement } from "@babel/types";
 
-import { walkNodes } from "../../ast/walk";
+import { walkNodes } from "../../../ast/walk";
 
 /**
  * ADR-0014: A+B (lib も body も変化) にルートされた issue について、body (`f1.body` / `test.body`)
@@ -36,4 +36,24 @@ function collectIdentifierNames(statements: readonly Statement[]): Set<string> {
     });
   }
   return names;
+}
+
+// 判断: ai-guide/adr/0007-in-source-testing-internal-helpers.md
+if (import.meta.vitest) {
+  const { describe, it, expect } = import.meta.vitest;
+  const { parse } = await import("../../../ast/parser");
+
+  describe("isIndependent (in-source, ADR-0014)", () => {
+    it("lib の変更関数名集合が空なら independent (= split する)", () => {
+      expect(isIndependent(parse("a + b;").program.body, new Set())).toBe(true);
+    });
+
+    it("body の参照 identifier と lib 変更関数名が交差すれば co-evolution の疑い (= split しない)", () => {
+      expect(isIndependent(parse("foo(x);").program.body, new Set(["foo"]))).toBe(false);
+    });
+
+    it("交差しなければ independent", () => {
+      expect(isIndependent(parse("foo(x);").program.body, new Set(["bar"]))).toBe(true);
+    });
+  });
 }

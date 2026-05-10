@@ -1,25 +1,26 @@
 import type { File, Node, Statement } from "@babel/types";
 
-import { countNodes } from "../../ast/inspect";
-import { parse } from "../../ast/parser";
-import { canonicalHash } from "../../ast/subtree-hash";
+import { countNodes } from "../../../ast/inspect";
+import { parse } from "../../../ast/parser";
+import { canonicalHash } from "../../../ast/subtree-hash";
 import {
   EXCLUSION_REASON,
   LAYOUT_KIND,
   type ExclusionReason,
   type LayoutKind,
   type PreprocessingResult,
-} from "../../contracts/preprocessing-contracts";
-import { findChangedNodes } from "../common/ast-diff";
-import { findMinimalEnclosure } from "../common/enclosure";
-import { statementToCode, statementsToCode } from "../common/setup-cleanup";
+} from "../../../contracts/preprocessing-contracts";
+import { findChangedNodes } from "../../common/ast-diff";
+import { findMinimalEnclosure } from "../../common/enclosure";
+import { statementToCode, statementsToCode } from "../../common/setup-cleanup";
 
 /**
  * Tier 1 の素の top-level statement AST diff だけで `(setup, slow, fast)` を切り出す
  * フォールバック経路 (ADR-0011 §段2 の「①にも②にも実質差がない / 規約外フォーマット」分岐)。
  *
- * 元は `selakovic/index.ts` の本体だったロジック。ADR-0011 で Tier 2 を段1/段2 構成に
- * 改修した際、規約外 issue 用の安全弁としてここに退避した。挙動は無変更。
+ * 元は `selakovic/pipeline.ts` の `preprocess()` 本体だったロジック。ADR-0011 で Tier 2 を
+ * 段1/段2 構成に改修した際、規約外 issue 用の安全弁としてここ (= `assemble/` の degenerate 版) に
+ * 退避した。挙動は無変更。
  *
  * **statement 対応付け戦略**: top-level statement の canonical hash で greedy match → matched
  * (= 不変) を除外 → 残った unmatched-before / unmatched-after を順序対応で組合せて candidate にする。

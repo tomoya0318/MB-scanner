@@ -9,8 +9,8 @@ import type {
   Statement,
 } from "@babel/types";
 
-import { parse } from "../../ast/parser";
-import { walkNodes } from "../../ast/walk";
+import { parse } from "../../../ast/parser";
+import { walkNodes } from "../../../ast/walk";
 
 /**
  * Selakovic clientIssues の inline `<script>` から「ベンチマーク関数 `f1`」を特定し、
@@ -246,4 +246,58 @@ function isHarnessStatement(stmt: Statement): boolean {
     }
   });
   return harness;
+}
+
+// 判断: ai-guide/adr/0007-in-source-testing-internal-helpers.md
+if (import.meta.vitest) {
+  const { describe, it, expect } = import.meta.vitest;
+
+  describe("extractF1 (in-source)", () => {
+    it("top-level f1 を役割分解する (計測ハーネスを harness に分離)", () => {
+      const src = `
+        var obj = {};
+        for (var i = 0; i < 100; i++) obj[i] = i;
+        var keys = Object.keys(obj);
+        var f1 = function () { for (var i = 0; i < keys.length; i++) keys[i] % 2 === 0; };
+        var a = execute(f1, 10);
+        var mean = jStat(a).mean();
+        console.log(mean);
+        $.ajax({ url: 'x', data: JSON.stringify({ mark: 0, mean: mean }) });
+      `;
+      const d = extractF1(src);
+      expect(d).not.toBeNull();
+      expect(d?.wrapperKind).toBe("top-level");
+      expect(d?.angular).toBeUndefined();
+      // preF1 = var obj / for / var keys の 3 つ (harness は除外)
+      expect(d?.preF1Statements).toHaveLength(3);
+      // harness = execute / mean / console.log / $.ajax の 4 つ
+      expect(d?.harnessStatements).toHaveLength(4);
+    });
+
+    it("Angular controller-wrapper の f1 を役割分解する", () => {
+      const src = `
+        var app = angular.module("myApp", []);
+        app.controller("Ctrl", function ($scope, $http) {
+          var keys = [1, 2, 3];
+          var f1 = function () { keys.length; };
+          var a = execute(f1, 10);
+        });
+      `;
+      const d = extractF1(src);
+      expect(d?.wrapperKind).toBe("angular-controller-wrapper");
+      expect(d?.angular?.moduleName).toBe("myApp");
+      expect(d?.angular?.ctrlName).toBe("Ctrl");
+      expect(d?.angular?.ctrlParams).toEqual(["$scope", "$http"]);
+      expect(d?.preF1Statements).toHaveLength(1); // var keys
+      expect(d?.harnessStatements).toHaveLength(1); // execute(f1, 10)
+    });
+
+    it("f1 が無いと null (= フォールバック対象)", () => {
+      expect(extractF1("function g() { return 1; }")).toBeNull();
+    });
+
+    it("parse できないソースは null", () => {
+      expect(extractF1("var f1 = function () {")).toBeNull();
+    });
+  });
 }

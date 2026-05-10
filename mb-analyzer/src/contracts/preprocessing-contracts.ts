@@ -73,7 +73,7 @@ export type ExecutionEnvironmentHint = "vm" | "jsdom";
  * CLI の入力 (1 issue 分)。Python から subprocess の stdin に流し込まれる。
  *
  * `issue_dir` は絶対パスで、CLI 側でファイル読み込みとレイアウト判定をする。
- * 純粋関数 `extract()` は文字列内容を受け取るので、ファイル I/O は CLI に閉じ込める。
+ * 純粋関数 `preprocess()` は文字列内容を受け取るので、ファイル I/O は CLI に閉じ込める。
  */
 export interface PreprocessingInput {
   id?: string;

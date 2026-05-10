@@ -1,7 +1,7 @@
 import type { File, Statement } from "@babel/types";
 
-import { ASPECT, type Aspect } from "../../contracts/preprocessing-contracts";
-import { findChangedNodes } from "../common/ast-diff";
+import { ASPECT, type Aspect } from "../../../contracts/preprocessing-contracts";
+import { findChangedNodes } from "../../common/ast-diff";
 
 /**
  * ADR-0011 §段2: ① `<lib>_*.js` に実コード変化があるか × ② ベンチマーク関数 body に
@@ -40,4 +40,27 @@ function asFile(statements: readonly Statement[]): File {
     comments: [],
     errors: [],
   } as unknown as File;
+}
+
+// 判断: ai-guide/adr/0007-in-source-testing-internal-helpers.md
+if (import.meta.vitest) {
+  const { describe, it, expect } = import.meta.vitest;
+  const { parse } = await import("../../../ast/parser");
+
+  describe("routeAspect / statementsChanged (in-source)", () => {
+    it("routeAspect: A / B / A+B / fallback", () => {
+      expect(routeAspect(true, false)).toBe(ASPECT.LIB);
+      expect(routeAspect(false, true)).toBe(ASPECT.BODY);
+      expect(routeAspect(true, true)).toBe(ASPECT.BOTH);
+      expect(routeAspect(false, false)).toBe(ASPECT.FALLBACK);
+    });
+
+    it("statementsChanged: 整形差は変化なし、意味論差は変化あり", () => {
+      const a = parse("x % 2 === 0;").program.body;
+      const b = parse("x  %  2  ===  0;").program.body; // 整形だけ違う
+      const c = parse("x & 1 === 0;").program.body; // 意味論が違う
+      expect(statementsChanged(a, b)).toBe(false);
+      expect(statementsChanged(a, c)).toBe(true);
+    });
+  });
 }

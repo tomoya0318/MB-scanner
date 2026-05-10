@@ -69,9 +69,11 @@ mb-analyzer/                  # === TypeScript CLI (現行実装) ===
 │   │       └── serializer.ts # 副作用を含む値を文字列化
 │   ├── preprocessing/        # データセット前処理 (1 issue → (setup, slow, fast) 抽出)
 │   │   ├── common/           # Tier 1 (ADR-0011): ast-diff / enclosure / setup-cleanup
-│   │   └── selakovic/        # Tier 2 (ADR-0011): layout / lib-pair / f1-extract / test-extract /
-│   │                         #   lib-diff / aspect-routing / case-split / angular-bootstrap /
-│   │                         #   legacy-diff (fallback) / index (段1·段2 orchestration) / client
+│   │   └── selakovic/        # Tier 2 (ADR-0011): io/{layout,lib-pair} (FS I/O) →
+│   │                         #   decompose/{inline-script,f1,test-case} (段1) →
+│   │                         #   route/{aspect,lib-diff,case-split} (段2) →
+│   │                         #   assemble/{angular,client,server,fallback} ((setup,slow,fast)) /
+│   │                         #   pipeline.ts (段1·段2 統括) / index.ts (薄い barrel)
 │   ├── pruning/              # 第 1 段階 pruning エンジン
 │   │   ├── ast/parser.ts     # ast/parser を PARSER_PLUGINS で注入する薄ラッパー (ADR-0006)
 │   │   ├── candidates.ts / engine.ts / index.ts / inspect.ts
@@ -84,7 +86,7 @@ mb-analyzer/                  # === TypeScript CLI (現行実装) ===
 ├── tests/                    # vitest (`tests/{cli,equivalence-checker,pruning,contracts,preprocessing}/**` + property + integration)
 │   ├── cli/
 │   ├── equivalence-checker/  # checker / oracles / sandbox (jsdom-executor.test.ts 含む)
-│   ├── preprocessing/        # selakovic.test.ts (Tier 2 段1·段2)
+│   ├── preprocessing/        # selakovic.test.ts (公開 API preprocess() のみ; モジュール内ヘルパは各 src ファイルの in-source — ADR-0007)
 │   ├── pruning/
 │   ├── property/
 │   ├── integration/          # selakovic-2016.test.ts

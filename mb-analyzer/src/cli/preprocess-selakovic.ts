@@ -7,10 +7,14 @@ import {
   type PreprocessingInput,
   type PreprocessingResult,
 } from "../contracts/preprocessing-contracts";
-import { extract, type SelakovicExtractInput } from "../preprocessing/selakovic";
-import { extractInlineScripts } from "../preprocessing/selakovic/client";
-import { detectLayout, type DetectedLayout } from "../preprocessing/selakovic/layout";
-import { loadLibPair } from "../preprocessing/selakovic/lib-pair";
+import {
+  detectLayout,
+  extractInlineScripts,
+  loadLibPair,
+  preprocess,
+  type DetectedLayout,
+  type SelakovicPreprocessInput,
+} from "../preprocessing/selakovic";
 
 const EXIT_OK = 0;
 const EXIT_ERROR = 2;
@@ -19,12 +23,12 @@ const EXIT_BATCH_IO_FAILURE = 2;
 
 /**
  * 1 入力 → N 結果モデル:
- * - extract() は `PreprocessingResult[]` を返す (1 candidate なら 1 件、N candidate なら N 件)
+ * - `preprocess()` は `PreprocessingResult[]` を返す (1 candidate なら 1 件、N candidate なら N 件)
  * - CLI は出力を **常に JSONL** (1 結果 = 1 行) に統一する
  * - 複数結果の id は `<original_id>#<index>` を付与して識別 (1 結果なら suffix なし)
  *
  * ファイル I/O (レイアウト判定 / inline `<script>` 抽出 / `<lib>_*.js` 読み出し / test_case 読み出し)
- * は CLI に閉じ込め、`extract()` は文字列内容のみを受け取る純関数に保つ (ADR-0011 Tier 2 は dataset
+ * は CLI に閉じ込め、`preprocess()` は文字列内容のみを受け取る純関数に保つ (ADR-0011 Tier 2 は dataset
  * 規約を使うが I/O 層は分離する)。
  */
 
@@ -75,16 +79,17 @@ function htmlReferencesLib(html: string): boolean {
 }
 
 /**
- * 1 issue 分の前処理を実行し、結果配列を返す。
+ * 1 issue (ディレクトリ) 分の前処理を実行し、結果配列を返す — レイアウト判定 + ファイル I/O を
+ * 担い、読んだ内容を純関数 `preprocess()` に渡す CLI 層のラッパ。
  *
  * レイアウト判定 + ファイル I/O の前段で除外する場合は 1 件の error result を返す。
- * extract() で複数 candidate が出た場合はそのまま配列を返す。
+ * `preprocess()` で複数 candidate が出た場合はそのまま配列を返す。
  *
  * ADR-0011 改修により、client 経路でも `<lib>_*.js` を dir scan で読み込んで diff 対象に
  * 含めるため、旧来の「client → server-single-file fallback」(clientServer 救済) は不要になった
  * (作用点 A の clientIssues は段2 ルーティングで自然に処理される)。
  */
-function preprocess(input: PreprocessingInput): PreprocessingResult[] {
+function preprocessIssue(input: PreprocessingInput): PreprocessingResult[] {
   const layout = detectLayout(input.issue_dir);
 
   if (layout.kind === LAYOUT_KIND.UNKNOWN) {
@@ -97,9 +102,9 @@ function preprocess(input: PreprocessingInput): PreprocessingResult[] {
     ];
   }
 
-  let extractInput: SelakovicExtractInput;
+  let preprocessInput: SelakovicPreprocessInput;
   try {
-    extractInput = buildExtractInput(input.issue_dir, layout);
+    preprocessInput = buildPreprocessInput(input.issue_dir, layout);
   } catch (e) {
     return [
       {
@@ -110,10 +115,10 @@ function preprocess(input: PreprocessingInput): PreprocessingResult[] {
     ];
   }
 
-  return extract(extractInput);
+  return preprocess(preprocessInput);
 }
 
-function buildExtractInput(issueDir: string, layout: DetectedLayout): SelakovicExtractInput {
+function buildPreprocessInput(issueDir: string, layout: DetectedLayout): SelakovicPreprocessInput {
   const libPair = loadLibPair(layout);
   const libBeforeFiles = libPair?.beforeFiles ?? {};
   const libAfterFiles = libPair?.afterFiles ?? {};
@@ -136,7 +141,7 @@ function buildExtractInput(issueDir: string, layout: DetectedLayout): SelakovicE
     };
   }
 
-  // server: test_case_*.js (なければ null → extract() 側で fallback)
+  // server: test_case_*.js (なければ null → preprocess() 側で fallback)
   const beforeTestCasePath = join(issueDir, "test_case_before.js");
   const afterTestCasePath = join(issueDir, "test_case_after.js");
   return {
@@ -179,7 +184,7 @@ export async function runPreprocessSelakovic(): Promise<number> {
     return EXIT_ERROR;
   }
 
-  const results = attachIds(preprocess(parsed), parsed.id);
+  const results = attachIds(preprocessIssue(parsed), parsed.id);
   emitResults(results);
   return EXIT_OK;
 }
@@ -239,7 +244,7 @@ export async function runPreprocessSelakovicBatch(): Promise<number> {
       process.stdout.write(`${JSON.stringify(errorResult)}\n`);
       continue;
     }
-    const results = attachIds(preprocess(parsed), parsed.id);
+    const results = attachIds(preprocessIssue(parsed), parsed.id);
     emitResults(results);
   }
 

@@ -6,8 +6,8 @@ import type {
   FunctionExpression,
 } from "@babel/types";
 
-import { parse } from "../../ast/parser";
-import { walkNodes } from "../../ast/walk";
+import { parse } from "../../../ast/parser";
+import { walkNodes } from "../../../ast/walk";
 
 /**
  * Selakovic serverIssues / clientServerIssues の `test_case_*.js` から `init` / `setupTest` /
@@ -82,4 +82,34 @@ function findNamedFn(file: File, name: string): FnLike | null {
     }
   });
   return found;
+}
+
+// 判断: ai-guide/adr/0007-in-source-testing-internal-helpers.md
+if (import.meta.vitest) {
+  const { describe, it, expect } = import.meta.vitest;
+
+  describe("extractTest (in-source)", () => {
+    it("test_case IIFE から test() body とパラメタを取り出す", () => {
+      const src = `
+        (function () {
+          function init() { return { x: 1 }; }
+          function setupTest(initResult) { return { y: initResult.x }; }
+          function test(initResult, setupTestResult) { return initResult.x + setupTestResult.y; }
+          exports.init = init; exports.setupTest = setupTest; exports.test = test;
+        })();
+      `;
+      const d = extractTest(src);
+      expect(d).not.toBeNull();
+      expect(d?.testParams).toEqual(["initResult", "setupTestResult"]);
+    });
+
+    it("exports.test = function(){} 形式も拾う", () => {
+      const src = `(function () { exports.test = function (a, b) { return a; }; })();`;
+      expect(extractTest(src)?.testParams).toEqual(["a", "b"]);
+    });
+
+    it("test() が無いと null", () => {
+      expect(extractTest("(function () { exports.init = function () {}; })();")).toBeNull();
+    });
+  });
 }

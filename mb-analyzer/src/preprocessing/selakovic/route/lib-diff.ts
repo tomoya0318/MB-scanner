@@ -105,3 +105,33 @@ function multisetDiff(a: readonly string[], b: readonly string[]): string[] {
   }
   return out;
 }
+
+// 判断: ai-guide/adr/0007-in-source-testing-internal-helpers.md
+if (import.meta.vitest) {
+  const { describe, it, expect } = import.meta.vitest;
+
+  describe("diffLibPair (in-source)", () => {
+    it("byte 一致は変化なし", () => {
+      const same = { "a.js": "function f() { return 1; }" };
+      expect(diffLibPair(same, { "a.js": "function f() { return 1; }" }).hasRealChange).toBe(false);
+    });
+
+    it("実コード行の変化を検出し、近傍の関数名を拾う", () => {
+      const r = diffLibPair(
+        { "a.js": "function ngRepeatAction() {\n  return index % 2 == 0;\n}" },
+        { "a.js": "function ngRepeatAction() {\n  return index & 1 == 0;\n}" },
+      );
+      expect(r.hasRealChange).toBe(true);
+      expect(r.changedFiles).toEqual(["a.js"]);
+      expect(r.changedFunctionNames.has("ngRepeatAction")).toBe(true);
+    });
+
+    it("license header / version 文字列だけの差は変化なし扱い", () => {
+      const r = diffLibPair(
+        { "a.js": "/* @license AngularJS v1.3.18 */\nfunction f() { return 1; }" },
+        { "a.js": "/* @license AngularJS v1.3.20 */\nfunction f() { return 1; }" },
+      );
+      expect(r.hasRealChange).toBe(false);
+    });
+  });
+}

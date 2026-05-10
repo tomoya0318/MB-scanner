@@ -1,8 +1,8 @@
 import { existsSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 
-import type { LayoutKind } from "../../contracts/preprocessing-contracts";
-import { LAYOUT_KIND } from "../../contracts/preprocessing-contracts";
+import type { LayoutKind } from "../../../contracts/preprocessing-contracts";
+import { LAYOUT_KIND } from "../../../contracts/preprocessing-contracts";
 
 /**
  * Selakovic データセットの 1 issue ディレクトリのレイアウトを判定する。
