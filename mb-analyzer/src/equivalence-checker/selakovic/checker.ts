@@ -5,14 +5,15 @@ import {
   type EquivalenceInput,
   type ExecutionEnvironment,
   type OracleObservation,
-} from "../contracts/equivalence-contracts";
-import { executeInJsdom } from "./sandbox/jsdom-executor";
-import { executeSandboxed, type ExecutionCapture } from "./sandbox/executor";
-import { checkArgumentMutation } from "./oracles/argument-mutation";
-import { checkException } from "./oracles/exception";
-import { checkExternalObservation } from "./oracles/external-observation";
-import { checkReturnValue } from "./oracles/return-value";
-import { deriveOverallVerdict } from "./verdict";
+} from "../../contracts/equivalence-contracts";
+import {
+  checkArgumentMutation,
+  checkException,
+  checkExternalObservation,
+  checkReturnValue,
+  deriveOverallVerdict,
+} from "../common/comparison";
+import { executeInJsdom, executeSandboxed, type ExecutionCapture } from "../common/sandbox";
 
 const DEFAULT_TIMEOUT_MS = 5000;
 
@@ -21,8 +22,7 @@ const DEFAULT_TIMEOUT_MS = 5000;
  * slow と fast は独立した sandbox で実行され、副作用の漏洩はない。
  *
  * `environment` (ADR-0012): `vm` (デフォルト) = 素の `node:vm` + 非決定 API stub。
- * `jsdom` = jsdom window/document + 相対 `require` 解決 (browser ライブラリ / server `test_case` 向け、
- * Phase 2a の最小版)。
+ * `jsdom` = jsdom window/document + 相対 `require` 解決 (browser ライブラリ / server `test_case` 向け)。
  */
 export async function checkEquivalence(
   input: EquivalenceInput,

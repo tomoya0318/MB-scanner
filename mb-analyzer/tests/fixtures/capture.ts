@@ -7,7 +7,7 @@
  * に置く。lifecycle を持つ fixture が増えたら同ディレクトリに共存させる想定。
  * 中身そのものは副作用なしの pure factory であり、`test.extend` 経由ではなく直接 import で使う。
  */
-import type { ExceptionCapture, ExecutionCapture } from "../../src/equivalence-checker/sandbox/executor";
+import type { ExceptionCapture, ExecutionCapture } from "../../src/equivalence-checker/common/sandbox/capture/types";
 
 export type { ExceptionCapture, ExecutionCapture };
 

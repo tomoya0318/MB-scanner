@@ -1,5 +1,6 @@
-import { ORACLE, ORACLE_VERDICT, type OracleObservation } from "../../contracts/equivalence-contracts";
-import { UNSERIALIZABLE_MARKER, type ExecutionCapture } from "../sandbox/executor";
+import { ORACLE, ORACLE_VERDICT, type OracleObservation } from "../../../../contracts/equivalence-contracts";
+import { UNSERIALIZABLE_MARKER } from "../../sandbox/capture/snapshot";
+import type { ExecutionCapture } from "../../sandbox/capture/types";
 
 /**
  * O1: 戻り値の deep equal 比較。

@@ -1,5 +1,6 @@
-import { ORACLE, ORACLE_VERDICT, type OracleObservation } from "../../contracts/equivalence-contracts";
-import { UNSERIALIZABLE_MARKER, type ExecutionCapture } from "../sandbox/executor";
+import { ORACLE, ORACLE_VERDICT, type OracleObservation } from "../../../../contracts/equivalence-contracts";
+import { UNSERIALIZABLE_MARKER } from "../../sandbox/capture/snapshot";
+import type { ExecutionCapture } from "../../sandbox/capture/types";
 
 /**
  * O2: setup 由来 object/array の pre/post snapshot 差分比較。

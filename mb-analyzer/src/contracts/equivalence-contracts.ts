@@ -25,6 +25,10 @@ export const ORACLE = {
   ARGUMENT_MUTATION: "argument_mutation",
   EXCEPTION: "exception",
   EXTERNAL_OBSERVATION: "external_observation",
+  /** C2: 正規化 DOM-HTML 文字列比較 (jsdom 環境のみ)。 */
+  DOM_MUTATION: "dom_mutation",
+  /** C6: 記録 Proxy で観測した workload→SUT 呼び出し列の比較。 */
+  INTERACTION_TRACE: "interaction_trace",
 } as const;
 export type Oracle = (typeof ORACLE)[keyof typeof ORACLE];
 
@@ -33,6 +37,8 @@ export const ALL_ORACLES: readonly Oracle[] = [
   ORACLE.ARGUMENT_MUTATION,
   ORACLE.EXCEPTION,
   ORACLE.EXTERNAL_OBSERVATION,
+  ORACLE.DOM_MUTATION,
+  ORACLE.INTERACTION_TRACE,
 ] as const;
 
 /**
@@ -58,6 +64,16 @@ export interface EquivalenceInput {
   environment?: ExecutionEnvironment;
   /** `jsdom` 環境で相対 `require('./x')` を解決する基準ディレクトリ (= 通常 issue ディレクトリの絶対パス)。 */
   module_base_dir?: string;
+  /** `jsdom` 環境で mount する HTML (`<body>` の中身)。react-808 系の `#demo*` 要素不在の解消用。 */
+  mount_html?: string;
+  /**
+   * 後段 oracle 選択 / 記録 Proxy で包む対象を決めるための preprocess 由来 hint。
+   * 値の集合は `preprocessing-contracts.ts` の `ASPECT` / `CANDIDATE_KIND` / `PreprocessingResult.enclosure_type`
+   * と揃える (両 contract を独立した leaf に保つため型は loose な `string`)。
+   */
+  aspect?: string;
+  candidate_kind?: string;
+  enclosure_type?: string;
 }
 
 export interface OracleObservation {

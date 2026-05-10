@@ -7,8 +7,8 @@
  */
 import { describe, it } from "vitest";
 import * as fc from "fast-check";
-import { checkReturnValue } from "../../../src/equivalence-checker/oracles/return-value";
-import { UNSERIALIZABLE_MARKER } from "../../../src/equivalence-checker/sandbox/executor";
+import { checkReturnValue } from "../../../src/equivalence-checker/common/comparison/oracles/return-value";
+import { UNSERIALIZABLE_MARKER } from "../../../src/equivalence-checker/common/sandbox/capture/snapshot";
 import { exceptionArbitrary } from "../../fixtures/arbitraries";
 import { capture } from "../../fixtures/capture";
 

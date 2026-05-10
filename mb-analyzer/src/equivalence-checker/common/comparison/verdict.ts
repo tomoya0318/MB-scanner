@@ -1,4 +1,4 @@
-import { ORACLE_VERDICT, VERDICT, type OracleObservation, type Verdict } from "../contracts/equivalence-contracts";
+import { ORACLE_VERDICT, VERDICT, type OracleObservation, type Verdict } from "../../../contracts/equivalence-contracts";
 
 /**
  * 4 oracle の observation 集合から全体 verdict を導出する純粋関数。

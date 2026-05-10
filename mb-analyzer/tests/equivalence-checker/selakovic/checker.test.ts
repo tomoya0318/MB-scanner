@@ -12,7 +12,7 @@
  *   - 4 oracle (return_value / argument_mutation / exception / external_observation) が必ず observations に揃う
  */
 import { describe, expect, it } from "vitest";
-import { checkEquivalence } from "../../src/equivalence-checker/checker";
+import { checkEquivalence } from "../../../src/equivalence-checker/selakovic/checker";
 
 describe("checkEquivalence", () => {
   it("equivalent な式は equal verdict", async () => {

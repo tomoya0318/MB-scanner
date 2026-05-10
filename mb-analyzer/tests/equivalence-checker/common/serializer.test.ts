@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import {
   SerializationError,
   serializeValue,
-} from "../../../src/equivalence-checker/sandbox/serializer";
+} from "../../../src/equivalence-checker/common/serializer";
 
 describe("serializeValue: primitives", () => {
   it("undefined / null / boolean", () => {

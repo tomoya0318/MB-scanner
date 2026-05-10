@@ -8,9 +8,9 @@
  *   - いずれかの key で post が異なる → not_equal（detail に差分 key を列挙）
  */
 import { describe, expect, it } from "vitest";
-import { checkArgumentMutation } from "../../../src/equivalence-checker/oracles/argument-mutation";
-import { UNSERIALIZABLE_MARKER } from "../../../src/equivalence-checker/sandbox/executor";
-import { capture } from "../../fixtures/capture";
+import { checkArgumentMutation } from "../../../../../src/equivalence-checker/common/comparison/oracles/argument-mutation";
+import { UNSERIALIZABLE_MARKER } from "../../../../../src/equivalence-checker/common/sandbox/capture/snapshot";
+import { capture } from "../../../../fixtures/capture";
 
 describe("checkArgumentMutation", () => {
   it("setup で object 無し → not_applicable", () => {

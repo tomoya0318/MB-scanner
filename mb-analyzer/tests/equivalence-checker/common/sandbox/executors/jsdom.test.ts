@@ -1,5 +1,5 @@
 /**
- * 対象: equivalence-checker/sandbox/jsdom-executor.ts (ADR-0012 の jsdom 環境 最小版)。
+ * 対象: equivalence-checker/common/sandbox/executors/jsdom.ts (ADR-0012 の jsdom 環境 最小版)。
  * 観点: jsdom window/document を持つ context で body を実行し `ExecutionCapture` を返す /
  *       console 捕捉 / Date.now の凍結 / 相対 require の解決 / 例外捕捉。
  */
@@ -9,7 +9,7 @@ import { join } from "path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { executeInJsdom } from "../../../src/equivalence-checker/sandbox/jsdom-executor";
+import { executeInJsdom } from "../../../../../src/equivalence-checker/common/sandbox/executors/jsdom";
 
 const TIMEOUT = 5000;
 

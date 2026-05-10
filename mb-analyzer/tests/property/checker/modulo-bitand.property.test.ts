@@ -11,7 +11,7 @@
  */
 import { describe, it } from "vitest";
 import * as fc from "fast-check";
-import { checkEquivalence } from "../../../src/equivalence-checker/checker";
+import { checkEquivalence } from "../../../src/equivalence-checker/selakovic/checker";
 
 describe("x % 2 vs x & 1 boundary (Angular #4359)", () => {
   it("非負整数 (0 含む) では必ず equal", async () => {

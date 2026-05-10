@@ -9,7 +9,7 @@
  * ケース (例: EJS #136b の out-of-range, Angular #4359 の負数) を含む。
  */
 import { describe, expect, it } from "vitest";
-import { checkEquivalence } from "../../src/equivalence-checker/checker";
+import { checkEquivalence } from "../../src/equivalence-checker/selakovic/checker";
 
 describe("Selakovic 2016 integration", () => {
   describe("Underscore #1222 — for-in+hasOwnProperty → Object.keys+for-loop", () => {

@@ -1,5 +1,5 @@
-import { ORACLE, ORACLE_VERDICT, type OracleObservation } from "../../contracts/equivalence-contracts";
-import type { ExceptionCapture, ExecutionCapture } from "../sandbox/executor";
+import { ORACLE, ORACLE_VERDICT, type OracleObservation } from "../../../../contracts/equivalence-contracts";
+import type { ExceptionCapture, ExecutionCapture } from "../../sandbox/capture/types";
 
 /**
  * O3: 例外の判定表。

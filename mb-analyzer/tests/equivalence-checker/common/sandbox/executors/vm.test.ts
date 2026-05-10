@@ -1,6 +1,6 @@
 /**
- * 対象: executeSandboxed (vm.Script による slow/fast 実行 + 観測値 (return/exception/console/globals/arg_snapshots) の捕捉)
- * 観点: 4 oracle が使う ExecutionCapture を過不足なく生成し、stabilizer との統合で決定的に動くこと
+ * 対象: executeSandboxed (素 node:vm context での slow/fast 実行 + 観測値 (return/exception/console/globals/arg_snapshots) の捕捉)
+ * 観点: 4 oracle が使う ExecutionCapture を過不足なく生成し、非決定性遮断・host 逃げ道遮断と統合して決定的に動くこと
  * 判定事項:
  *   - 戻り値: 式の serialize、setup 変数参照、文のみなら return_is_undefined=true、NaN/-0 区別
  *   - 例外: throw Error の ctor/message 捕捉、primitive throw → ctor "Unknown"
@@ -8,11 +8,12 @@
  *   - console: log/error 等が console_log に順序通りに蓄積
  *   - 引数変異 (O2): setup 由来の配列・オブジェクトの pre/post snapshot、プリミティブは除外
  *   - 新規 global (O4): body で代入された key だけが new_globals、setup 由来は除外
+ *   - host 逃げ道: process / require / eval / Function は undefined として遮断
  *   - Promise: resolve は return_value、reject は exception、async IIFE も await 済み
- *   - 決定性: stabilizer により Math.random / Date.now が同一 setup/body で再現
+ *   - 決定性: 非決定性遮断により Math.random / Date.now が同一 setup/body で再現
  */
 import { describe, expect, it } from "vitest";
-import { executeSandboxed } from "../../../src/equivalence-checker/sandbox/executor";
+import { executeSandboxed } from "../../../../../src/equivalence-checker/common/sandbox/executors/vm";
 
 function run(body: string, setup = "", timeout_ms = 2000) {
   return executeSandboxed({ setup, body, timeout_ms });
@@ -111,6 +112,13 @@ describe("executeSandboxed: 新規 global (O4)", () => {
   it("setup 由来の key は new_globals に含まれない", async () => {
     const res = await run("1", "var setupVar = 5;");
     expect(res.new_globals).not.toContain("setupVar");
+  });
+});
+
+describe("executeSandboxed: host 逃げ道の遮断", () => {
+  it("process / require / eval / Function は undefined", async () => {
+    const res = await run(`[typeof process, typeof require, typeof eval, typeof Function]`);
+    expect(res.return_value).toBe('["undefined","undefined","undefined","undefined"]');
   });
 });
 

@@ -35,6 +35,8 @@ class TestEnums:
             "argument_mutation",
             "exception",
             "external_observation",
+            "dom_mutation",
+            "interaction_trace",
         }
 
     def test_execution_environment_values(self) -> None:
@@ -92,6 +94,29 @@ class TestEquivalenceInput:
     def test_environment_string_round_trip(self) -> None:
         inp = EquivalenceInput.model_validate({"slow": "1", "fast": "1", "environment": "jsdom"})
         assert inp.environment == ExecutionEnvironment.JSDOM
+
+    def test_preprocess_hint_fields(self) -> None:
+        inp = EquivalenceInput.model_validate(
+            {
+                "slow": "1",
+                "fast": "1",
+                "mount_html": "<div id='demo'></div>",
+                "aspect": "A",
+                "candidate_kind": "lib",
+                "enclosure_type": "server-test-case",
+            }
+        )
+        assert inp.mount_html == "<div id='demo'></div>"
+        assert inp.aspect == "A"
+        assert inp.candidate_kind == "lib"
+        assert inp.enclosure_type == "server-test-case"
+
+    def test_preprocess_hint_fields_default_none(self) -> None:
+        inp = EquivalenceInput(slow="1", fast="1")
+        assert inp.mount_html is None
+        assert inp.aspect is None
+        assert inp.candidate_kind is None
+        assert inp.enclosure_type is None
 
     def test_id_round_trip(self) -> None:
         inp = EquivalenceInput(id="case-001", slow="1", fast="1", timeout_ms=3000)

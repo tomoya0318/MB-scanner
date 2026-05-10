@@ -10,6 +10,28 @@ function parseEnvironment(value: unknown): ExecutionEnvironment | null {
   return value === EXECUTION_ENVIRONMENT.VM || value === EXECUTION_ENVIRONMENT.JSDOM ? value : null;
 }
 
+// 単純な optional string フィールド一覧。型は文字列のみ、無効値は error 行化する。
+const OPTIONAL_STRING_FIELDS = [
+  "module_base_dir",
+  "mount_html",
+  "aspect",
+  "candidate_kind",
+  "enclosure_type",
+] as const;
+
+function assignOptionalStringFields(
+  obj: Record<string, unknown>,
+  input: EquivalenceInput,
+): string | null {
+  for (const field of OPTIONAL_STRING_FIELDS) {
+    const value = obj[field];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "string") return `'${field}' field must be a string when present`;
+    input[field] = value;
+  }
+  return null;
+}
+
 const EXIT_EQUAL = 0;
 const EXIT_NOT_EQUAL = 1;
 const EXIT_ERROR = 2;
@@ -54,10 +76,8 @@ function parseInput(raw: string): EquivalenceInput | string {
     if (env === null) return "'environment' field must be 'vm' or 'jsdom' when present";
     input.environment = env;
   }
-  if (obj.module_base_dir !== undefined && obj.module_base_dir !== null) {
-    if (typeof obj.module_base_dir !== "string") return "'module_base_dir' field must be a string when present";
-    input.module_base_dir = obj.module_base_dir;
-  }
+  const stringFieldError = assignOptionalStringFields(obj, input);
+  if (stringFieldError !== null) return stringFieldError;
   return input;
 }
 
@@ -121,10 +141,8 @@ function parseBatchLine(raw: string): EquivalenceInput | { id: string | undefine
     if (env === null) return { id, error: "'environment' field must be 'vm' or 'jsdom' when present" };
     input.environment = env;
   }
-  if (obj.module_base_dir !== undefined && obj.module_base_dir !== null) {
-    if (typeof obj.module_base_dir !== "string") return { id, error: "'module_base_dir' field must be a string when present" };
-    input.module_base_dir = obj.module_base_dir;
-  }
+  const stringFieldError = assignOptionalStringFields(obj, input);
+  if (stringFieldError !== null) return { id, error: stringFieldError };
   return input;
 }
 

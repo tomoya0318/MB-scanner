@@ -42,6 +42,8 @@ class Oracle(StrEnum):
     ARGUMENT_MUTATION = "argument_mutation"
     EXCEPTION = "exception"
     EXTERNAL_OBSERVATION = "external_observation"
+    DOM_MUTATION = "dom_mutation"
+    INTERACTION_TRACE = "interaction_trace"
 
 
 class ExecutionEnvironment(StrEnum):
@@ -64,6 +66,10 @@ class EquivalenceInput(BaseModel):
 
     ``environment`` 省略時は ``vm``。``module_base_dir`` は ``jsdom`` 環境で相対 ``require('./x')``
     を解決する基準ディレクトリ (通常 issue ディレクトリの絶対パス)。
+
+    ``mount_html`` は ``jsdom`` 環境で mount する HTML (``<body>`` の中身)。
+    ``aspect`` / ``candidate_kind`` / ``enclosure_type`` は preprocess 由来の hint で、後段の
+    oracle 選択・記録 Proxy で包む対象を決めるのに使う (値の集合は preprocessing 契約と揃える)。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -75,6 +81,10 @@ class EquivalenceInput(BaseModel):
     timeout_ms: int = Field(default=DEFAULT_TIMEOUT_MS, ge=MIN_TIMEOUT_MS, le=MAX_TIMEOUT_MS)
     environment: ExecutionEnvironment | None = None
     module_base_dir: str | None = None
+    mount_html: str | None = None
+    aspect: str | None = None
+    candidate_kind: str | None = None
+    enclosure_type: str | None = None
 
 
 class OracleObservation(BaseModel):

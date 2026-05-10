@@ -8,9 +8,9 @@
  *   - console か new_globals のいずれかに差分 → not_equal（detail に差分カテゴリ）
  */
 import { describe, expect, it } from "vitest";
-import { checkExternalObservation } from "../../../src/equivalence-checker/oracles/external-observation";
-import type { ConsoleCall } from "../../../src/equivalence-checker/sandbox/stabilizer";
-import { capture } from "../../fixtures/capture";
+import { checkExternalObservation } from "../../../../../src/equivalence-checker/common/comparison/oracles/external-observation";
+import type { ConsoleCall } from "../../../../../src/equivalence-checker/common/sandbox/capture/types";
+import { capture } from "../../../../fixtures/capture";
 
 const logA: ConsoleCall = { method: "log", args: ["a", 1] };
 const logB: ConsoleCall = { method: "log", args: ["b"] };

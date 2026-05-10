@@ -9,9 +9,9 @@
  *   - serialize された文字列が完全一致 → equal
  */
 import { describe, expect, it } from "vitest";
-import { checkReturnValue } from "../../../src/equivalence-checker/oracles/return-value";
-import { UNSERIALIZABLE_MARKER } from "../../../src/equivalence-checker/sandbox/executor";
-import { capture } from "../../fixtures/capture";
+import { checkReturnValue } from "../../../../../src/equivalence-checker/common/comparison/oracles/return-value";
+import { UNSERIALIZABLE_MARKER } from "../../../../../src/equivalence-checker/common/sandbox/capture/snapshot";
+import { capture } from "../../../../fixtures/capture";
 
 describe("checkReturnValue", () => {
   it("両側同値 → equal", () => {

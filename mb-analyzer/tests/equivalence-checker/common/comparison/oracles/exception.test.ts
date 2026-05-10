@@ -8,8 +8,8 @@
  *   - 片方だけ例外 → not_equal
  */
 import { describe, expect, it } from "vitest";
-import { checkException } from "../../../src/equivalence-checker/oracles/exception";
-import { capture } from "../../fixtures/capture";
+import { checkException } from "../../../../../src/equivalence-checker/common/comparison/oracles/exception";
+import { capture } from "../../../../fixtures/capture";
 
 describe("checkException", () => {
   it("両側正常終了 → not_applicable", () => {

@@ -11,6 +11,8 @@ import globals from "globals";
 // - preprocessing/ は pipeline 上 equivalence-checker / pruning の前段だが、機能的には
 //   独立 (CLI で順次呼び出すだけ)。preprocessing/common は preprocessing/selakovic を
 //   import してはならない (ドメイン非依存層、@angular/common 流の命名)
+// - equivalence-checker/common も同様: dataset 非依存層なので equivalence-checker/selakovic を
+//   import してはならない (preprocessing/common ↔ selakovic と対称)
 // - cli/ のみ composition root として全機能を import できる
 const DEPENDENCY_ZONES = [
   {
@@ -57,6 +59,10 @@ const DEPENDENCY_ZONES = [
       "./src/eslint-rule-codegen",
       "./src/cli",
     ],
+  },
+  {
+    target: "./src/equivalence-checker/common",
+    from: ["./src/equivalence-checker/selakovic", "./src/preprocessing"],
   },
   {
     target: "./src/equivalence-checker",

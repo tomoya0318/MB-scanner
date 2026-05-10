@@ -1,7 +1,6 @@
-import { ORACLE, ORACLE_VERDICT, type OracleObservation } from "../../contracts/equivalence-contracts";
-import { serializeValue, SerializationError } from "../sandbox/serializer";
-import type { ExecutionCapture } from "../sandbox/executor";
-import type { ConsoleCall } from "../sandbox/stabilizer";
+import { ORACLE, ORACLE_VERDICT, type OracleObservation } from "../../../../contracts/equivalence-contracts";
+import { serializeValue, SerializationError } from "../../serializer";
+import type { ConsoleCall, ExecutionCapture } from "../../sandbox/capture/types";
 
 /**
  * O4: console 呼び出し列 + 新規 global key の diff。
