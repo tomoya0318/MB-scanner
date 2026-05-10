@@ -2,4 +2,6 @@
 export { checkReturnValue } from "./return-value";
 export { checkArgumentMutation } from "./argument-mutation";
 export { checkException } from "./exception";
-export { checkExternalObservation } from "./external-observation";
+export { checkExternalObservation, type ExternalObservationProfile } from "./external-observation";
+export { checkDomMutation, type DomNormalizeProfile } from "./dom-mutation";
+export { checkInteractionTrace, type InteractionTraceProfile } from "./interaction-trace";

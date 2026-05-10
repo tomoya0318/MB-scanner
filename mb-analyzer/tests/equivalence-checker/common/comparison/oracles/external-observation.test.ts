@@ -55,4 +55,17 @@ describe("checkExternalObservation", () => {
     const f = capture({ console_log: [{ method: "log", args: ["x"] }] });
     expect(checkExternalObservation(s, f).verdict).toBe("error");
   });
+
+  it("ignoreNewGlobalPatterns で framework 内部 global (ng*) を除外する (angular-7759_4 の偽 not_equal 解消)", () => {
+    const s = capture({ new_globals: ["ngContext", "ngScope", "result"] });
+    const f = capture({ new_globals: ["result"] });
+    expect(checkExternalObservation(s, f).verdict).toBe("not_equal"); // 素だと ng* の差で not_equal
+    expect(checkExternalObservation(s, f, { ignoreNewGlobalPatterns: [/^ng/] }).verdict).toBe("equal");
+  });
+
+  it("ignoreNewGlobalPatterns で全部消えて両側 console/global 空 → not_applicable", () => {
+    const s = capture({ new_globals: ["ngFoo"] });
+    const f = capture({ new_globals: ["ngBar"] });
+    expect(checkExternalObservation(s, f, { ignoreNewGlobalPatterns: [/^ng/] }).verdict).toBe("not_applicable");
+  });
 });

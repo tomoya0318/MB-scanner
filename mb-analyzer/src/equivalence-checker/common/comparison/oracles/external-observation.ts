@@ -2,6 +2,14 @@ import { ORACLE, ORACLE_VERDICT, type OracleObservation } from "../../../../cont
 import { serializeValue, SerializationError } from "../../serializer";
 import type { ConsoleCall, ExecutionCapture } from "../../sandbox/capture/types";
 
+/** O4 (= C3 console + C4 新規 global key) の adapter 渡し opt。 */
+export interface ExternalObservationProfile {
+  /** `new_globals` からこの正規表現群のいずれかにマッチする key を除外する (例: AngularJS の `ng*` 内部 global → angular-7759_4 の偽 not_equal 解消)。 */
+  ignoreNewGlobalPatterns?: readonly RegExp[];
+}
+
+const EMPTY_PROFILE: ExternalObservationProfile = {};
+
 /**
  * O4: console 呼び出し列 + 新規 global key の diff。
  * - console 列が空かつ両側とも new_globals 空 → not_applicable
@@ -12,14 +20,19 @@ import type { ConsoleCall, ExecutionCapture } from "../../sandbox/capture/types"
 export function checkExternalObservation(
   slow: ExecutionCapture,
   fast: ExecutionCapture,
+  profile: ExternalObservationProfile = EMPTY_PROFILE,
 ): OracleObservation {
   const oracle = ORACLE.EXTERNAL_OBSERVATION;
+  const ignorePatterns = profile.ignoreNewGlobalPatterns ?? [];
+  const keepGlobal = (k: string): boolean => !ignorePatterns.some((re) => re.test(k));
+  const slowGlobalsRaw = slow.new_globals.filter(keepGlobal);
+  const fastGlobalsRaw = fast.new_globals.filter(keepGlobal);
 
   const noSideEffects =
     slow.console_log.length === 0 &&
     fast.console_log.length === 0 &&
-    slow.new_globals.length === 0 &&
-    fast.new_globals.length === 0;
+    slowGlobalsRaw.length === 0 &&
+    fastGlobalsRaw.length === 0;
   if (noSideEffects) {
     return { oracle, verdict: ORACLE_VERDICT.NOT_APPLICABLE };
   }
@@ -46,8 +59,8 @@ export function checkExternalObservation(
 
   const consoleEqual = slowConsoleSig === fastConsoleSig;
 
-  const slowGlobals = [...new Set(slow.new_globals)].sort();
-  const fastGlobals = [...new Set(fast.new_globals)].sort();
+  const slowGlobals = [...new Set(slowGlobalsRaw)].sort();
+  const fastGlobals = [...new Set(fastGlobalsRaw)].sort();
   const globalsEqual =
     slowGlobals.length === fastGlobals.length &&
     slowGlobals.every((k, i) => k === fastGlobals[i]);
