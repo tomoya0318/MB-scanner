@@ -21,15 +21,17 @@ import { freezeContextNonDeterminism } from "../transforms/non-determinism";
 
 /**
  * `jsdom` の window/document を持つ VM context で 1 スクリプトを実行し `ExecutionCapture` を返す
- * (ADR-0012 の「jsdom 環境」の **最小版** — Playwright fallback も観測 channel ルーティングも無し、
- * Phase 2b で DOM oracle / 記録 Proxy / iteration-cap を順次足す)。
+ * (ADR-0012 の「jsdom 環境」。Phase 2b で記録 Proxy / iteration-cap を順次足す)。
  *
  * - `runScripts: "outside-only"` で素の jsdom + `getInternalVMContext()` を使う (= `<script>` は実行しないが
  *   外から `vm.runInContext` で同じ realm に注入できる)。AngularJS / jQuery 等の browser ライブラリが
  *   `window` / `document` を参照しても動く (Phase 1.0 スパイクで AngularJS 950KB の load+bootstrap を実証)。
  * - server `test_case_*.js` の `require('./<lib>_*.js')` 解決のため、グローバル `require` を注入する:
- *   相対パスは `module_base_dir` 起点で resolve して同 context で eval、bare npm dep は dataset の
- *   `node_modules` から host `createRequire` で解決を試みる (見つからなければ throw → `error` verdict)。
+ *   相対パスは `module_base_dir` 起点で resolve して同 context で eval (`.js` / `.json` 対応)、bare npm dep は
+ *   dataset fork の `node_modules` から host `createRequire` で解決を試みる (見つからなければ throw → `error`)。
+ * - server SUT が前提にしがちな最小 Node グローバル (`process` / `Buffer` / `global` / `setImmediate`) を注入する。
+ * - `mount_html` が来たら、その HTML (`<script>` 除去後) を `<body>` に流し込んで mount する (react-808 の `#demo*` 不在対策)。
+ * - 実行後の `dom.serialize()` を `capture.dom_html` に詰める (C2 DOM-mutation oracle の取得側)。
  * - `vm.ts` (素 vm 版) と同じ `ExecutionCapture` 形を返す (= oracle 層はこの型のみに依存)。
  */
 export interface JsdomExecuteOptions {
@@ -38,10 +40,26 @@ export interface JsdomExecuteOptions {
   timeout_ms: number;
   /** 相対 `require('./x')` を解決する基準ディレクトリ (絶対パス)。省略時は relative require が throw。 */
   module_base_dir?: string;
+  /** mount する HTML (`<body>` の中身、または `<!doctype>`/`<html>` で始まる完全な文書)。`<script>` は除去される。 */
+  mount_html?: string;
+}
+
+const DEFAULT_DOCUMENT = "<!doctype html><html><head></head><body></body></html>";
+
+function stripScriptTags(html: string): string {
+  return html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+}
+
+function buildDocument(mountHtml: string | undefined): string {
+  if (mountHtml === undefined) return DEFAULT_DOCUMENT;
+  const stripped = stripScriptTags(mountHtml);
+  const head = stripped.trimStart().slice(0, 32).toLowerCase();
+  if (head.startsWith("<!doctype") || head.startsWith("<html")) return stripped;
+  return `<!doctype html><html><head></head><body>${stripped}</body></html>`;
 }
 
 export async function executeInJsdom(options: JsdomExecuteOptions): Promise<ExecutionCapture> {
-  const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
+  const dom = new JSDOM(buildDocument(options.mount_html), {
     runScripts: "outside-only",
     url: "http://localhost/",
     pretendToBeVisual: true,
@@ -50,6 +68,7 @@ export async function executeInJsdom(options: JsdomExecuteOptions): Promise<Exec
   const consoleCalls: ConsoleCall[] = [];
   hookJsdomConsole(dom, consoleCalls);
   freezeContextNonDeterminism(context);
+  installServerGlobals(context);
   installRequire(context, options.module_base_dir, options.timeout_ms);
 
   const ctxRecord = context as unknown as Record<string, unknown>;
@@ -75,6 +94,13 @@ export async function executeInJsdom(options: JsdomExecuteOptions): Promise<Exec
     exception = captureException(e);
   }
 
+  let domHtml: string | null = null;
+  try {
+    domHtml = dom.serialize();
+  } catch {
+    domHtml = null;
+  }
+
   return {
     return_value: returnValue,
     return_is_undefined: returnIsUndefined,
@@ -83,7 +109,41 @@ export async function executeInJsdom(options: JsdomExecuteOptions): Promise<Exec
     console_log: [...consoleCalls],
     new_globals: collectNewGlobals(ctxRecord, baselineKeys, setupKeys),
     timed_out: timedOut,
+    dom_html: domHtml,
   };
+}
+
+/** server SUT が前提にしがちな最小 Node グローバルを context に注入する。 */
+function installServerGlobals(context: vm.Context): void {
+  const rec = context as unknown as Record<string, unknown>;
+  if (!("process" in rec) || rec.process === undefined) {
+    rec.process = {
+      browser: false,
+      env: {},
+      argv: [],
+      platform: process.platform,
+      version: process.version,
+      versions: { ...process.versions },
+      cwd: () => "/",
+      nextTick: (fn: (...args: unknown[]) => void, ...args: unknown[]) => {
+        queueMicrotask(() => {
+          fn(...args);
+        });
+      },
+      stdout: { isTTY: false, write: () => true },
+      stderr: { isTTY: false, write: () => true },
+    };
+  }
+  if (!("Buffer" in rec) || rec.Buffer === undefined) rec.Buffer = Buffer;
+  if (!("global" in rec) || rec.global === undefined) rec.global = rec;
+  if (!("setImmediate" in rec) || rec.setImmediate === undefined) {
+    rec.setImmediate = (fn: (...args: unknown[]) => void, ...args: unknown[]) => setTimeout(() => {
+      fn(...args);
+    }, 0);
+    rec.clearImmediate = (id: ReturnType<typeof setTimeout>) => {
+      clearTimeout(id);
+    };
+  }
 }
 
 interface ModuleRecord {
@@ -101,6 +161,12 @@ function installRequire(context: vm.Context, moduleBaseDir: string | undefined, 
         const resolved = resolveRelative(fromDir, spec);
         const cached = cache.get(resolved);
         if (cached !== undefined) return cached.exports;
+        if (resolved.endsWith(".json")) {
+          const json: unknown = JSON.parse(readFileSync(resolved, "utf-8"));
+          const record: ModuleRecord = { exports: json };
+          cache.set(resolved, record);
+          return json;
+        }
         const src = readFileSync(resolved, "utf-8");
         const record: ModuleRecord = { exports: {} };
         cache.set(resolved, record);
@@ -135,6 +201,7 @@ function installRequire(context: vm.Context, moduleBaseDir: string | undefined, 
 function resolveRelative(fromDir: string, spec: string): string {
   let resolved = isAbsolute(spec) ? spec : join(fromDir, spec);
   if (!existsSync(resolved) && existsSync(`${resolved}.js`)) resolved = `${resolved}.js`;
+  if (!existsSync(resolved) && existsSync(`${resolved}.json`)) resolved = `${resolved}.json`;
   if (existsSync(resolved) && statSync(resolved).isDirectory()) {
     const pkgPath = join(resolved, "package.json");
     const main = existsSync(pkgPath)
@@ -142,6 +209,7 @@ function resolveRelative(fromDir: string, spec: string): string {
       : "index.js";
     resolved = join(resolved, main);
     if (!existsSync(resolved) && existsSync(`${resolved}.js`)) resolved = `${resolved}.js`;
+    if (!existsSync(resolved) && existsSync(`${resolved}.json`)) resolved = `${resolved}.json`;
   }
   if (!existsSync(resolved)) throw new Error(`Cannot find module '${spec}' (resolved to ${resolved})`);
   return resolved;

@@ -32,7 +32,10 @@ describe("createConsoleHook", () => {
 describe("hookJsdomConsole", () => {
   it("jsdom window の console を上書きして呼び出しを記録する", () => {
     const dom = new JSDOM("<!doctype html><html><body></body></html>");
-    const consoleObj = dom.window.console as unknown as Record<string, (...args: unknown[]) => void>;
+    const consoleObj = dom.window.console as unknown as {
+      log: (...args: unknown[]) => void;
+      error: (...args: unknown[]) => void;
+    };
     const sink: ConsoleCall[] = [];
     hookJsdomConsole(dom, sink);
     consoleObj.log("hello", 42);

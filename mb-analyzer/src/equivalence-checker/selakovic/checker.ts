@@ -13,7 +13,12 @@ import {
   checkReturnValue,
   deriveOverallVerdict,
 } from "../common/comparison";
-import { executeInJsdom, executeSandboxed, type ExecutionCapture } from "../common/sandbox";
+import {
+  executeInJsdom,
+  executeSandboxed,
+  type ExecutionCapture,
+  type JsdomExecuteOptions,
+} from "../common/sandbox";
 
 const DEFAULT_TIMEOUT_MS = 5000;
 
@@ -32,11 +37,10 @@ export async function checkEquivalence(
   const environment: ExecutionEnvironment = input.environment ?? EXECUTION_ENVIRONMENT.VM;
   const run = (body: string): Promise<ExecutionCapture> => {
     if (environment === EXECUTION_ENVIRONMENT.JSDOM) {
-      return executeInJsdom(
-        input.module_base_dir !== undefined
-          ? { setup, body, timeout_ms, module_base_dir: input.module_base_dir }
-          : { setup, body, timeout_ms },
-      );
+      const jsdomOpts: JsdomExecuteOptions = { setup, body, timeout_ms };
+      if (input.module_base_dir !== undefined) jsdomOpts.module_base_dir = input.module_base_dir;
+      if (input.mount_html !== undefined) jsdomOpts.mount_html = input.mount_html;
+      return executeInJsdom(jsdomOpts);
     }
     return executeSandboxed({ setup, body, timeout_ms });
   };

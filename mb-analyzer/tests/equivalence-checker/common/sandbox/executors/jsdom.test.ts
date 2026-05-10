@@ -73,4 +73,41 @@ describe("executeInJsdom", () => {
     expect(cap.exception).not.toBeNull();
     expect(cap.exception?.message).toContain("module_base_dir");
   });
+
+  it(".json の相対 require を JSON.parse で解決する", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mbs-jsdom-json-"));
+    tmpDirs.push(dir);
+    writeFileSync(join(dir, "data.json"), JSON.stringify({ k: 5, nested: { v: 7 } }));
+    const cap = await executeInJsdom({ setup: "", body: "var d = require('./data.json'); d.k + d.nested.v", timeout_ms: TIMEOUT, module_base_dir: dir });
+    expect(cap.exception).toBeNull();
+    expect(cap.return_value).toBe("12");
+  });
+
+  it("server SUT 用の最小 Node グローバル (process / Buffer / global / setImmediate) が見える", async () => {
+    const cap = await executeInJsdom({
+      setup: "",
+      body: "[typeof process, process.browser, typeof Buffer, global === globalThis, typeof setImmediate]",
+      timeout_ms: TIMEOUT,
+    });
+    expect(cap.exception).toBeNull();
+    expect(cap.return_value).toBe('["object",false,"function",true,"function"]');
+  });
+
+  it("dom_html に実行後の DOM がシリアライズされる", async () => {
+    const cap = await executeInJsdom({ setup: "", body: "document.body.innerHTML = '<p id=x>hi</p>';", timeout_ms: TIMEOUT });
+    expect(cap.dom_html).toContain('<p id="x">hi</p>');
+  });
+
+  it("mount_html を渡すと <body> に流し込まれ、<script> は除去される", async () => {
+    const cap = await executeInJsdom({
+      setup: "",
+      body: "document.getElementById('demo') ? document.getElementById('demo').tagName : 'MISSING'",
+      timeout_ms: TIMEOUT,
+      mount_html: "<div id='demo'></div><script>window.__evil = 1;</script>",
+    });
+    expect(cap.return_value).toBe('"DIV"');
+    // <script> は実行も挿入もされない (runScripts: outside-only + 除去)
+    expect(cap.dom_html).not.toContain("__evil");
+    expect(cap.dom_html).not.toContain("<script");
+  });
 });
