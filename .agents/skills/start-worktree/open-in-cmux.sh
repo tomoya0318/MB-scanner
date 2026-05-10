@@ -1,6 +1,8 @@
 #!/bin/bash
 # cmuxの右ペインでセットアップ後にAI agentを起動する
 # Usage: open-in-cmux.sh <worktree-dir> <original-dir> [ai-agent]
+# 通常は open-in-terminal.sh から呼ばれる。環境変数 SETUP_COMMANDS で
+# セットアップコマンドを上書き可能（未設定時は下記デフォルト値を使う）。
 #
 # ── プロジェクトごとのカスタマイズ ────────────────────────────────────────
 # SETUP_COMMANDS にセットアップコマンドを記載してください。
@@ -16,7 +18,7 @@
 # 例（セットアップ不要な場合）:
 #   SETUP_COMMANDS=""
 # ──────────────────────────────────────────────────────────────────────────
-SETUP_COMMANDS="git submodule update --init --recursive && mise run python-deps"
+SETUP_COMMANDS="${SETUP_COMMANDS-git submodule update --init --recursive && mise run python-deps}"
 
 set -euo pipefail
 
