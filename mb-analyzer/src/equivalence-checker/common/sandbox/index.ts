@@ -2,6 +2,7 @@
 export { executeSandboxed, type ExecuteOptions } from "./executors/vm";
 export { executeInJsdom, type JsdomExecuteOptions } from "./executors/jsdom";
 export { UNSERIALIZABLE_MARKER } from "./capture/snapshot";
+export { makeRecorder, type Recorder, type WrapOptions } from "./capture/recording-proxy";
 export { applyIterationCap, type IterationCapOptions } from "./transforms/iteration-cap";
 export type {
   ArgumentSnapshot,
