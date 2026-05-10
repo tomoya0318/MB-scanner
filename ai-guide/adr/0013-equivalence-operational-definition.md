@@ -1,8 +1,21 @@
 # ADR-0013: 「意味論的等価」の operational definition — 計算結果 + 観測可能な副作用 + workload↔SUT の interaction trace、timing / 反復回数 / stack / 非同期後タスクは非観測
 
-- **Status**: proposed (Phase 1.0 スパイクで load-bearing な前提を実証済 — 5 channel + interaction trace (C6) の取得可否、`tmp/0002_phase1-adr-and-spike/spike-results.md` §5/§5.1。`accepted` 昇格は Phase 2b 着手時 — Phase 2a は既存フラット checker で検証し本 ADR の C6/C2/iteration-cap transform は未実装)
+- **Status**: proposed。前提の実証ステータスは `tmp/phase2b-adr-assumption-audit.md` §B 参照（定義そのもの = 決定事項、実装前に潰すべき賭けは C6 の取得方法 = 監査 §B-3/§D-3 のみ）。`accepted` 昇格は Phase 2b 着手前 spike (C6 汎用 Proxy wrap) 完了時。
 - **Date**: 2026-05-10
-- **Related**: ADR-0011 (preprocess 段1 の SUT 特定が interaction trace の「包む対象」を決める入力), ADR-0012 (等価検証の実行環境 — 反復回数 cap も sandbox 側), ADR-0015 (oracle 層の構造 + DOM oracle + interaction-trace oracle), `mb-analyzer/src/equivalence-checker/`, `ai-guide/code-map.md` §等価性検証器, `tmp/oracle-mapping.md` §2/§4/§6/§7, `tmp/dataset-conventions.md` §1.3/§6, `tmp/0002_phase1-adr-and-spike/spike-results.md` §5/§5.1/§7, `tmp/0002_phase1-adr-and-spike/plan.md` Phase 1.1
+- **Related**: ADR-0011 (preprocess 段1 の SUT 特定が interaction trace の「包む対象」を決める入力), ADR-0012 (実行環境 — DOM/trace の生成経路は executor 側), ADR-0015 (oracle 層の構造 + DOM oracle + interaction-trace oracle + adapter config), ADR-0017 (実行前 transform — 反復回数を非観測と決めたのは本 ADR、その帰結の iteration-cap 機構が 0017), `mb-analyzer/src/equivalence-checker/`, `ai-guide/code-map.md` §等価性検証器, `tmp/oracle-mapping.md` §2/§4/§6/§7, `tmp/dataset-conventions.md` §1.3/§6, `tmp/phase2b-adr-assumption-audit.md` §B
+
+## このADRの守備範囲
+
+このADRが決めるのは **「2 つの body が "意味論的に等価" であるとは、どの観測量がすべて一致することか」と「複数 oracle の判定をどう 1 つの verdict に合成するか」だけ** — つまり*意味論*の話。具体的には: 等価の構成要素 (C1–C6) と各々が構成要素である理由 / 等価から除外する観測量 (timing・iteration 回数・memory・stack・同期後 async・非決定性 API 生値) と除外理由 / verdict 合成の 4 規則 / oracle 評価順序 / 既知の穴と threats への書き方。
+
+**扱わないこと** (他 ADR の管轄。本 ADR は該当箇所を 1 行参照するだけ):
+- jsdom か Playwright か / `capture.dom_html`・`capture.interaction_trace` の生成経路 → **ADR-0012 (実行環境)**
+- 非決定性 API の固定 / iteration-cap transform の*アルゴリズム* → **ADR-0017 (実行前 transform)**
+- SUT lib (`<lib>_*.js`) の npm dep 解決 (vendor 方式) → **ADR-0016**
+- equivalence-checker の `common`/`selakovic` 二層化 / C2・C6 oracle のファイル配置と I/F / adapter が `common/` に渡す config (iteration-cap の値・dep vendor リスト・DOM 正規化プロファイル・包む対象リスト等) → **ADR-0015 (構造 + adapter config)**
+- 既存 oracle (O1–O4) の実装意味論 → `ai-guide/code-map.md` §等価性検証器 + `equivalence-checker/README.md`
+
+> iteration-cap・npm dep のように 1 つの話題が複数 ADR にまたがるときの分界: *なぜ等価判定がそれを無視するか/構成要素に入れるか* → 0013（ここ） / *sandbox がそれをどう処理するか（アルゴリズム・方式）* → 実行環境=0012・実行前 transform=0017・依存解決=0016 / *Selakovic の場合の具体値・どの adapter フィールドで渡すか* → 0015。
 
 ## コンテキスト
 
@@ -62,11 +75,11 @@ Selakovic & Pradel (ICSE 2016) は性能修正パッチが "semantic-preserving"
 ### 観測しない (= 「等価」の構成要素に入れない)
 
 - **timing / 実行時間**: Selakovic の性能測定軸。パッチで変わるのが目的なので等価判定からは除外 (`tmp/dataset-conventions.md` §2.6)。
-- **iteration 回数 / ループ反復回数**: 等価判定の観測対象外 (timing と同じ理由)。**preprocess は `f1`/`test()` body 内のループ反復回数 (`for (i < 50000)` 等) を*書き換えず原文どおり残す*** (= 復元可能性のため。preprocess が剥がすのは外側の計測ハーネス `execute(f1, n)`/`$.ajax({mark})` だけ — ADR-0011)。代わりに **sandbox 側に iteration-cap transform を持つ**: 実行直前に AST pass で `for (...; <var> < <numeric-literal ≥ THRESHOLD>; ...)` を `<var> < N` に clamp する (`Array(BIG)` 系も縮小)。config `{ iterationCap: N | null }` (既定 3〜5、`null` で無効化 = 原文どおり全反復実行)。これは `common/sandbox/stabilizer.ts` 系 (= 非決定性 API stub と同じ「実行を tractable にする」transform、ADR-0015) で、原文が source of truth・cap は明示的で可逆。
+- **iteration 回数 / ループ反復回数**: 等価判定の観測対象外 (timing と同じ理由 — loop bound を縮小しても等価判定の結果は変わらない、`spike-results.md` §7 で実測確認)。preprocess は `f1`/`test()` body 内のループ反復回数を書き換えず原文を残す (= 復元可能性、ADR-0011)。loop-heavy な body を tractable に走らせるための **iteration-cap transform は sandbox 側の機構 = ADR-0017** (*アルゴリズム* も 0017、*値* = 既定 N・on/off の config は ADR-0015 の adapter config)。本 ADR が言うのは「反復回数は等価の構成要素に入れない」というこの 1 点だけ。
 - **memory profile**: 同上。
 - **stack trace**: パッチ適用で行番号・内部関数名は必ず変わる。比較すると全パッチが `not_equal` になる。「**意味論的等価性の定義に stack を含めない**」は設計要件であり妥協ではない (`ai-guide/code-map.md` §等価性検証器)。
 - **body 同期終了後の非同期タスクの副作用**: sandbox は body の同期完了で観測を打ち切る。`setTimeout` / `queueMicrotask` / 未解決 Promise の後続副作用は見ない。本 dataset は同期コード主体 + 計測ハーネス除去後は `$.ajax` の async も消えるので実害は低い (`ai-guide/code-map.md` §等価性検証器の穴 3)。
-- **非決定性 API の生値**: `Date.now()` / `Math.random()` / `process.hrtime()` 等は sandbox の stabilizer で固定または遮断する (ADR-0012)。固定後の値は両側同一なので等価判定に影響しない = 実質非観測。
+- **非決定性 API の生値**: `Date.now()` / `Math.random()` / `process.hrtime()` 等は sandbox の実行前 transform で固定または遮断する (ADR-0017)。固定後の値は両側同一なので等価判定に影響しない = 実質非観測。
 
 ### verdict の合成規則
 
@@ -105,5 +118,5 @@ C5 (exception) → C1 (return) → C6 (interaction trace) → C2 (DOM) → C4 (m
 
 ## 補足
 
-- **Phase 1.0 スパイクで本 ADR の load-bearing な前提を実証済** (`tmp/0002_phase1-adr-and-spike/spike-results.md` §5/§5.1/§7。`accepted` 昇格は Phase 2b 着手時 — Phase 2a は既存フラット checker で検証し本 ADR の C6/C2/iteration-cap は未実装): 代表 7 件で C1 (return) / C2 (DOM、react-808 で innerHTML mutation を serialize 比較できた) / C3 (console、計測ハーネス除去後ゼロを確認) / C4 (scope state・init/setup snapshot) / C5 (exception) がすべて取れることを実証。さらに deep probe (#7 angular-10351 で `$scope.$eval` の戻り値ログ、#1 chalk-27a で `chalk.X(...)` の戻り値 + input-sensitivity) で C6 (interaction trace) の必要性と取得可否を実証。iteration-cap は §段「観測しない」のとおり sandbox 側 transform に確定。
+- 前提の実証ステータス (C1–C5 が jsdom で取れる / C6 の必要性 / 既知の穴) は `tmp/phase2b-adr-assumption-audit.md` §B にソース付きでまとめた。要点: C1–C5 は Phase 1.0 代表 7 件 + Phase 2a の 97 件実走で取得実証済 (`spike-results.md` §5、`tmp/0003_phase2a-preprocess-rework/verify-97-results.md`)、C6 の必要性は #10351 の deep probe で実証済 (`spike-results.md` §5.1)、ただし C6 の*取得方法*「framework global を汎用 Proxy で包む」は未検証 = Phase 2b 着手前の spike 対象 (監査 §D-3)。
 - 著者 ground-truth との突合手順: `Confirmed.md` の 10 件は「著者が確実に semantic-preserving と判断した issue」として、これらで oracle が `equal` を返さなければ我々の判定が誤検出。残り 87 件はサンプル 10〜20 件を手動レビュー (`tmp/oracle-mapping.md` §7.1)。**#10351 系 (= C6 で非等価が出る issue) は重点的にレビュー**して「checker が正しい / ラベルが正しい」の解釈を Phase 3 で確定する。

@@ -1,12 +1,24 @@
 # ADR-0012: 等価検証の実行環境を jsdom+vm 主軸 + Playwright fallback にする
 
-- **Status**: proposed (Phase 1.0 スパイクで load-bearing な前提を実証済 — 代表 7 件すべて jsdom+vm で動作、AngularJS 1.3.18 665KB の load+bootstrap・server lib の npm dep 解決を含む。`tmp/0002_phase1-adr-and-spike/spike-results.md` §1/§2/§8。`accepted` 昇格は Phase 2b 着手時 — Phase 2a は本 ADR の「最小 jsdom sandbox」部分だけ前借りする)
+- **Status**: proposed。前提の実証ステータスは `tmp/phase2b-adr-assumption-audit.md` §A/§C-1/§C-2 参照（実行主軸は Phase 1.0 + 2a で実証済 = §A-1/§A-2、残る未決は「Playwright fallback の扱いを決め直す」§C-1 のみ — fallback が 7 代表でも 97 件実走でも 0 発火）。`accepted` 昇格は §C-1 の判断 (残す / trigger 1 のみ / cut のどれか) を本 ADR に書き込んだ時点。Phase 2a は本 ADR の「最小 jsdom sandbox」部分だけ前借り済。
 - **Date**: 2026-05-10
-- **Related**: ADR-0013 (等価の operational definition — timing/反復回数 非観測), ADR-0015 (DOM oracle / interaction-trace oracle は実行環境非依存 / iteration-cap・npm dep 解決の config), `mb-analyzer/src/equivalence-checker/sandbox/`, `ai-guide/code-map.md` §等価性検証器, `tmp/oracle-mapping.md` §8, `tmp/dataset-conventions.md` §6, `tmp/0002_phase1-adr-and-spike/spike-results.md` §1/§2/§6/§8, `tmp/0002_phase1-adr-and-spike/plan.md` Phase 1.0/1.1`
+- **Related**: ADR-0013 (等価の operational definition — どの channel を観測するか / timing は非観測), ADR-0015 (equivalence-checker の構造 — DOM/interaction-trace oracle は実行環境非依存、`capture.dom_html` を見るだけ), ADR-0016 (SUT module の npm dep 解決 — sandbox はこの dep を解決した上で body を走らせる), ADR-0017 (sandbox の実行前 transform — 非決定性 API の固定 + iteration-cap), `mb-analyzer/src/equivalence-checker/sandbox/`, `ai-guide/code-map.md` §等価性検証器, `tmp/oracle-mapping.md` §8, `tmp/dataset-conventions.md` §6, `tmp/phase2b-adr-assumption-audit.md` §A/§C-1/§C-2, `tmp/0002_phase1-adr-and-spike/spike-results.md` §1/§2/§8
+
+## このADRの守備範囲
+
+このADRが決めるのは **「等価判定のために `(setup, slow, fast)` の body を*どの JS 実行環境で*走らせるか」だけ** — jsdom + `node:vm` を主軸にし、jsdom で DOM 忠実性が足りない issue だけ Playwright (chromium) で再実行する fallback を持つ。+ その帰結として「環境差を executor に閉じ込め、oracle は `capture.dom_html`/`capture.interaction_trace` を受け取るだけ = 環境非依存」という設計原則。
+
+**扱わないこと** (他 ADR の管轄。本 ADR は該当箇所を 1 行参照するだけ):
+- 何を一致と見なすか / どの channel を等価の構成要素にするか / 何を非観測にするか → **ADR-0013 (等価の定義)**
+- equivalence-checker の `common`/`selakovic` 二層化 / oracle のファイル配置と I/F / adapter config (timeout 値・正規化プロファイル等) → **ADR-0015 (構造 + adapter config)**
+- SUT lib (`<lib>_*.js`) が `require` する npm dep をどう用意するか (vendor 方式・require shim の二段解決) → **ADR-0016**
+- body 実行前に sandbox が施す transform (非決定性 API の固定 / iteration-cap = loop bound の AST clamp) → **ADR-0017**
+
+> 1 つの話題が複数 ADR にまたがるときの分界: *なぜ等価判定がそれを無視するか* → 0013（定義） / *sandbox がそれをどう処理するか（アルゴリズム・方式）* → 実行環境=0012・実行前 transform=0017・依存解決=0016 / *Selakovic の場合の具体値・どの adapter フィールドで渡すか* → 0015。
 
 ## コンテキスト
 
-等価判定は `(setup, slow, fast)` の body を sandbox 実行して 5 channel (戻り値 / DOM / console / 状態変化 / 例外 — ADR-0013) を観測する。現状の `equivalence-checker/sandbox/` は `node:vm` ベースの隔離実行で、`window` / `document` を持たない (= DOM 環境なし)。
+等価判定は `(setup, slow, fast)` の body を sandbox 実行して 6 channel (戻り値 / DOM / console / 状態変化 / 例外 / workload↔SUT の interaction trace — ADR-0013。C6 = interaction trace は Phase 1.0 スパイクで追加) を観測する。現状の `equivalence-checker/sandbox/` は `node:vm` ベースの隔離実行で、`window` / `document` を持たない (= DOM 環境なし)。
 
 Selakovic dataset は **client 系 80 件 (Angular / Ember / jQuery / React の HTML 持ち issue)** を含み、その中に `innerHTML → textContent` (React/808 の 5 連、Angular/9369)、`element.text() → textContent`、jQuery `html()` / `empty()` 系といった **DOM を触るパッチ (C2 channel、推定 5〜10 件)** がある (`tmp/oracle-mapping.md` §5.4)。`node:vm` 単体では `document` が無いのでこれらの DOM 変化を観測できず、`f1.body` の中で DOM API を呼ぶと `error` になる。
 
@@ -43,7 +55,7 @@ Selakovic dataset は **client 系 80 件 (Angular / Ember / jQuery / React の 
 
 - `sandbox/executor.ts` (= ADR-0015 の `common/sandbox/executor.ts`) が、client 系のとき jsdom の `JSDOM` から `window` / `document` を作って vm context に注入する。server 系 (DOM 不要) は jsdom 環境を作らず現状の vm のみ → `document` が無いので DOM oracle (O5) は `not_applicable` を返す。
 - body 同期実行後、`capture.dom_html` に `dom.serialize()` の結果 (正規化前の生 HTML 文字列) を詰める。
-- 非決定性 API (`Date.now()` / `Math.random()` / タイマー) は stabilizer で固定・遮断する (現状の vm 版と同じ方針を jsdom 環境にも適用)。
+- 非決定性 API (`Date.now()` / `Math.random()` / タイマー) の固定・遮断、および計測ハーネスの大反復ループの iteration-cap は、jsdom でも Playwright でも同じく sandbox の実行前 transform として適用する — 詳細は **ADR-0017**。
 
 ### fallback: Playwright (chromium のみ)
 
@@ -63,14 +75,16 @@ jsdom でも Playwright でも、oracle (特に O5 DOM oracle) が見るのは `
 
 何件が Playwright に回ったかを batch 結果に記録し、threats to validity に「N 件 (うち内訳…) は jsdom で環境不足のため Playwright (chromium) で実行した」と honest に書く。timing は等価判定の観測対象ではない (ADR-0013) ので、Playwright で実行しても等価判定の**結果**は変わらない (遅くなるだけ)。
 
-### server lib の npm dep 解決 (Phase 1.0 で判明)
+### 関連する sandbox の振る舞い (本 ADR の管轄外)
 
-server 系の `<lib>_*.js` (例 `chalk_before.js`) は `require('escape-string-regexp')` 等の npm dep を bundle しておらず、dataset の `package.json` も jsexecutor の dep しか持たない (`spike-results.md` §6)。`init()` がその lib を `require` する issue は dep を解決しないと sandbox 実行できない。→ adapter (`equivalence-checker/selakovic/` — ADR-0015) が「各 lib の元 `package.json` から install / 主要 dep を fixture として vendor / stub」のいずれかで dep を用意する (具体策は Phase 2a で確定 — 既存フラット checker に 97 件流す際に dep 不足 issue を洗い出す)。スパイクでは `ansi-styles@2`/`escape-string-regexp@1`/`strip-ansi@3`/`supports-color@2` を spike dir に install して回避し、chalk-27a を正常に実行できた。
+- **実行前 transform** (非決定性 API の固定・iteration-cap = loop bound の AST clamp) → **ADR-0017**。jsdom でも Playwright でも同じく適用する。
+- **SUT lib の npm dep 解決** (vendor 方式・require shim の二段解決) → **ADR-0016**。`init()` が `require('<lib>_*.js')` → さらに npm dep を呼ぶ issue は、この解決を経た上で sandbox 実行する。
+- **adapter config** (timeout 値・DOM 正規化プロファイル等) と **二層化の構造** (`common/sandbox/executor.ts` 等) → **ADR-0015**。
 
 ### 段階的実装 (Phase 2a → 2b)
 
-- **Phase 2a**: preprocess 改修 (ADR-0011) の検証に**既存フラットの `equivalence-checker/`** を使う。vm のみで jsdom が無いので、server 系は完全に検証できるが client 系の run 検証が弱い → ここで**最小 jsdom sandbox** (= スパイク `spike-jsdom.mjs` の production 化、Playwright fallback も channel ルーティングも無し) を前借り実装し、client preprocess 出力も run 検証できるようにする。
-- **Phase 2b**: `equivalence-checker/` を `common/`+`selakovic/` に再配置 (ADR-0015)、Playwright fallback・channel ルーティング・iteration-cap transform を完成。
+- **Phase 2a (完了)**: preprocess 改修 (ADR-0011) の検証に既存フラットの `equivalence-checker/` を使い、**最小 jsdom sandbox** (= スパイク `spike-jsdom.mjs` の production 化 = `sandbox/jsdom-executor.ts`、Playwright fallback も channel ルーティングも無し) だけ前借り実装した。
+- **Phase 2b**: `equivalence-checker/` を `common/`+`selakovic/` に再配置 (ADR-0015)、Playwright fallback (扱いは要決定 — §補足)・channel ルーティング・iteration-cap transform の AST pass 化 (ADR-0017) を完成。
 
 ## 結果 / 影響
 
@@ -94,6 +108,6 @@ server 系の `<lib>_*.js` (例 `chalk_before.js`) は `require('escape-string-r
 
 ## 補足
 
-- **Phase 1.0 スパイクで本 ADR の load-bearing な前提を実証済** (`tmp/0002_phase1-adr-and-spike/spike-results.md` §1/§2/§8。`accepted` 昇格は Phase 2b 着手時 — Phase 2a は最小 jsdom sandbox だけ前借り): 代表 7 件 (chalk 27a / Angular 4359 / Angular 9067 lib・body / Mocha 701 / React 808 / **Angular 10351 = AngularJS 950KB を jsdom で load+bootstrap+`f1()` 実行**) を **jsdom+vm で全件動作**させた。AngularJS 1.3.18 (665KB) を jsdom で load し `angular.injector(['ng','myApp']).get('$controller')` で controller を実体化して `f1()` を `$scope.$eval` 込みで実行できることを実証 (= 本 ADR の最大リスクだった「jsdom が AngularJS でほぼ動かない」は否定)。C2 (DOM) も react-808 で取れた。**fallback トリガー 1〜3 に該当する issue は本 7 代表には無かった** → Playwright fallback は「DOM 忠実性が要る patch (`getBoundingClientRect` / レイアウト依存 / CSS 計算等) で jsdom が失敗した場合」の文書化された機構として残すが、本代表では未発火。発火条件の最終確定は Phase 2a (= 既存フラット checker に 97 件流して `error`/`not_equal` の理由を見る) で行う。
-- スパイク script は `mb-analyzer/src/` 無変更の使い捨て (`tmp/0002_phase1-adr-and-spike/spike/`)。Phase 2a の最小 jsdom sandbox はこれを production 化する種にする (`spike-results.md` §8、本 ADR §段階的実装)。
-- 「DOM oracle が既存 sandbox に潜在していないか」の再確認も実施済 — `sandbox/{executor,serializer,stabilizer}.ts` に DOM 取得機能は無い (Phase 2 で `executor.ts` に jsdom 環境構築 + `capture.dom_html` + `capture.interaction_trace` を足す — ADR-0015)。
+- 前提の実証ステータスは `tmp/phase2b-adr-assumption-audit.md` §A/§C にソース付き。要点: jsdom+vm 主軸は Phase 1.0 代表 7 件 (AngularJS 1.3.18 665KB の load+bootstrap+`f1()` 実行を含む) + Phase 2a の 97 件実走で実証済 (`spike-results.md` §1/§2、`tmp/0003_phase2a-preprocess-rework/verify-97-results.md`)。「jsdom が AngularJS でほぼ動かない」という最大リスクは否定済、C2 (DOM) も react-808 で取れた。**Playwright fallback は代表 7 件でも 97 件実走でも 0 発火** = 「fallback が要る patch がある」という前提に現状エビデンスがない → Phase 2b で「documented-but-untested として残す / trigger 1 (runtime error) のみに絞る / 完全に cut し jsdom で落ちたら excluded にする」のどれかを決め直す (監査 §C-1。最小 stub だけ先に入れて C2/C6 込みの再走後に確定でもよい)。
+- Phase 1.0 スパイク script は `mb-analyzer/src/` 無変更の使い捨て (`tmp/0002_phase1-adr-and-spike/spike/`)。Phase 2a の最小 jsdom sandbox はこれを production 化したもの (`equivalence-checker/sandbox/jsdom-executor.ts`)。
+- 既存 sandbox に DOM 取得機能は無い (`sandbox/{executor,serializer,stabilizer}.ts`) — Phase 2b で `executor.ts` に jsdom 環境構築 + `capture.dom_html` + `capture.interaction_trace` を足す (ADR-0015)。
