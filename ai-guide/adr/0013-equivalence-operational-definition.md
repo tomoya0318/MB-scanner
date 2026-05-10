@@ -1,6 +1,6 @@
 # ADR-0013: 「意味論的等価」の operational definition — 計算結果 + 観測可能な副作用 + workload↔SUT の interaction trace、timing / 反復回数 / stack / 非同期後タスクは非観測
 
-- **Status**: proposed。前提の実証ステータスは `tmp/phase2b-adr-assumption-audit.md` §B 参照（定義そのもの = 決定事項、実装前に潰すべき賭けは C6 の取得方法 = 監査 §B-3/§D-3 のみ）。`accepted` 昇格は Phase 2b 着手前 spike (C6 汎用 Proxy wrap) 完了時。
+- **Status**: accepted。前提の実証ステータスは `tmp/phase2b-adr-assumption-audit.md` §B 参照（C6 の取得方法 = 汎用記録 Proxy で実装可能であることを spike で実証 — `tmp/0005_phase2b-c6-proxy-spike/spike-results.md`。Proxy は `get`/`set`/`apply`/`construct` トラップ + 戻り値の再帰 wrap の形が要る、を ADR-0015 §interaction-trace に反映済）。
 - **Date**: 2026-05-10
 - **Related**: ADR-0011 (preprocess 段1 の SUT 特定が interaction trace の「包む対象」を決める入力), ADR-0012 (実行環境 — DOM/trace の生成経路は executor 側), ADR-0015 (oracle 層の構造 + DOM oracle + interaction-trace oracle + adapter config), ADR-0017 (実行前 transform — 反復回数を非観測と決めたのは本 ADR、その帰結の iteration-cap 機構が 0017), `mb-analyzer/src/equivalence-checker/`, `ai-guide/code-map.md` §等価性検証器, `tmp/oracle-mapping.md` §2/§4/§6/§7, `tmp/dataset-conventions.md` §1.3/§6, `tmp/phase2b-adr-assumption-audit.md` §B
 
@@ -11,8 +11,8 @@
 **扱わないこと** (他 ADR の管轄。本 ADR は該当箇所を 1 行参照するだけ):
 - jsdom か Playwright か / `capture.dom_html`・`capture.interaction_trace` の生成経路 → **ADR-0012 (実行環境)**
 - 非決定性 API の固定 / iteration-cap transform の*アルゴリズム* → **ADR-0017 (実行前 transform)**
-- SUT lib (`<lib>_*.js`) の npm dep 解決 (vendor 方式) → **ADR-0016**
-- equivalence-checker の `common`/`selakovic` 二層化 / C2・C6 oracle のファイル配置と I/F / adapter が `common/` に渡す config (iteration-cap の値・dep vendor リスト・DOM 正規化プロファイル・包む対象リスト等) → **ADR-0015 (構造 + adapter config)**
+- SUT lib (`<lib>_*.js`) の npm dep 解決 (= 上流が宣言しない dep を dataset fork に lockfile で宣言) → **ADR-0016**
+- equivalence-checker の `common`/`selakovic` 二層化 / C2・C6 oracle のファイル配置と I/F / adapter が `common/` に渡す config (iteration-cap の値・DOM 正規化プロファイル・包む対象リスト等) → **ADR-0015 (構造 + adapter config)**
 - 既存 oracle (O1–O4) の実装意味論 → `ai-guide/code-map.md` §等価性検証器 + `equivalence-checker/README.md`
 
 > iteration-cap・npm dep のように 1 つの話題が複数 ADR にまたがるときの分界: *なぜ等価判定がそれを無視するか/構成要素に入れるか* → 0013（ここ） / *sandbox がそれをどう処理するか（アルゴリズム・方式）* → 実行環境=0012・実行前 transform=0017・依存解決=0016 / *Selakovic の場合の具体値・どの adapter フィールドで渡すか* → 0015。
@@ -118,5 +118,5 @@ C5 (exception) → C1 (return) → C6 (interaction trace) → C2 (DOM) → C4 (m
 
 ## 補足
 
-- 前提の実証ステータス (C1–C5 が jsdom で取れる / C6 の必要性 / 既知の穴) は `tmp/phase2b-adr-assumption-audit.md` §B にソース付きでまとめた。要点: C1–C5 は Phase 1.0 代表 7 件 + Phase 2a の 97 件実走で取得実証済 (`spike-results.md` §5、`tmp/0003_phase2a-preprocess-rework/verify-97-results.md`)、C6 の必要性は #10351 の deep probe で実証済 (`spike-results.md` §5.1)、ただし C6 の*取得方法*「framework global を汎用 Proxy で包む」は未検証 = Phase 2b 着手前の spike 対象 (監査 §D-3)。
+- 前提の実証ステータス (C1–C5 が jsdom で取れる / C6 の必要性 / C6 の取得方法 / 既知の穴) は `tmp/phase2b-adr-assumption-audit.md` §B にソース付きでまとめた。要点: C1–C5 は Phase 1.0 代表 7 件 + Phase 2a の 97 件実走で取得実証済 (`tmp/0002_phase1-adr-and-spike/spike-results.md` §5、`tmp/0003_phase2a-preprocess-rework/verify-97-results.md`)、C6 の必要性は #10351 の deep probe で実証済 (同 §5.1)、C6 の*取得方法*「SUT (= server なら `init`/`setupTest` 戻り値、client なら controller 注入 service + workload が叩く framework global) を汎用記録 Proxy で包む」も spike で実証済 (`tmp/0005_phase2b-c6-proxy-spike/spike-results.md` — angular/chalk/cheerio/node-lru-cache/moment/jQuery/underscore = 7 SUT で完走 & 内部ノイズなし。Proxy の機構は ADR-0015 §interaction-trace oracle の実装方針 参照)。
 - 著者 ground-truth との突合手順: `Confirmed.md` の 10 件は「著者が確実に semantic-preserving と判断した issue」として、これらで oracle が `equal` を返さなければ我々の判定が誤検出。残り 87 件はサンプル 10〜20 件を手動レビュー (`tmp/oracle-mapping.md` §7.1)。**#10351 系 (= C6 で非等価が出る issue) は重点的にレビュー**して「checker が正しい / ラベルが正しい」の解釈を Phase 3 で確定する。

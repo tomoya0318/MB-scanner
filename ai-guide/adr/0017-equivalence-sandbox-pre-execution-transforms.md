@@ -1,6 +1,6 @@
 # ADR-0017: 等価検証 sandbox の実行前 transform — 非決定性 API の固定 + iteration-cap (loop bound の AST clamp)
 
-- **Status**: proposed。前提の実証ステータスは `tmp/phase2b-adr-assumption-audit.md` §A-4/§A-5/§C-3/§C-4 参照（非決定性 API の凍結は Phase 2a の jsdom 最小版で実装・実証済、iteration-cap は Phase 1.0 で regex 代用で実証済 — 本実装の AST pass 化は実装詳細）。`accepted` 昇格はレビュー合意時（検証 phase は不要）。
+- **Status**: accepted (2026-05-10、ユーザ確認済 — 方針 OK)。前提の実証ステータスは `tmp/phase2b-adr-assumption-audit.md` §A-4/§A-5/§C-3/§C-4（非決定性 API の凍結は Phase 2a の jsdom 最小版で実装・実証済、iteration-cap は Phase 1.0 で regex 代用で実証済 — 本実装の AST pass 化は実装詳細、検証 phase 不要）。実コード（iteration-cap の AST pass 化）は Phase 2b。
 - **Date**: 2026-05-10
 - **Related**: ADR-0011 (preprocess は `f1`/`test()` body 内の loop bound を書き換えず原文を残す — 本 ADR の前提), ADR-0013 (timing / iteration 回数 / 非決定性 API 生値 を等価の構成要素に入れない — なぜ transform が要るかの根拠), ADR-0012 (実行環境 — どの環境でもこの transform を適用する), ADR-0015 (iteration-cap の既定 N と on/off は adapter config / transform の置き場 `common/sandbox/stabilizer.ts` は構造の話), `mb-analyzer/src/equivalence-checker/sandbox/stabilizer.ts`, `tmp/phase2b-adr-assumption-audit.md` §A-4/§A-5/§C-3/§C-4, `tmp/0002_phase1-adr-and-spike/spike-results.md` §7
 

@@ -2,7 +2,7 @@
 
 - **Status**: proposed。前提の実証ステータスは `tmp/phase2b-adr-assumption-audit.md` §A/§C-1/§C-2 参照（実行主軸は Phase 1.0 + 2a で実証済 = §A-1/§A-2、残る未決は「Playwright fallback の扱いを決め直す」§C-1 のみ — fallback が 7 代表でも 97 件実走でも 0 発火）。`accepted` 昇格は §C-1 の判断 (残す / trigger 1 のみ / cut のどれか) を本 ADR に書き込んだ時点。Phase 2a は本 ADR の「最小 jsdom sandbox」部分だけ前借り済。
 - **Date**: 2026-05-10
-- **Related**: ADR-0013 (等価の operational definition — どの channel を観測するか / timing は非観測), ADR-0015 (equivalence-checker の構造 — DOM/interaction-trace oracle は実行環境非依存、`capture.dom_html` を見るだけ), ADR-0016 (SUT module の npm dep 解決 — sandbox はこの dep を解決した上で body を走らせる), ADR-0017 (sandbox の実行前 transform — 非決定性 API の固定 + iteration-cap), `mb-analyzer/src/equivalence-checker/sandbox/`, `ai-guide/code-map.md` §等価性検証器, `tmp/oracle-mapping.md` §8, `tmp/dataset-conventions.md` §6, `tmp/phase2b-adr-assumption-audit.md` §A/§C-1/§C-2, `tmp/0002_phase1-adr-and-spike/spike-results.md` §1/§2/§8
+- **Related**: ADR-0013 (等価の operational definition — どの channel を観測するか / timing は非観測), ADR-0015 (equivalence-checker の構造 — DOM/interaction-trace oracle は実行環境非依存、`capture.dom_html` を見るだけ), ADR-0016 (SUT module の npm dep 解決 — 上流が宣言しない dep を dataset fork に lockfile で宣言。sandbox はそれが install 済みで `createRequire` で引ける状態で body を走らせる), ADR-0017 (sandbox の実行前 transform — 非決定性 API の固定 + iteration-cap), `mb-analyzer/src/equivalence-checker/sandbox/`, `ai-guide/code-map.md` §等価性検証器, `tmp/oracle-mapping.md` §8, `tmp/dataset-conventions.md` §6, `tmp/phase2b-adr-assumption-audit.md` §A/§C-1/§C-2, `tmp/0002_phase1-adr-and-spike/spike-results.md` §1/§2/§8
 
 ## このADRの守備範囲
 
@@ -11,7 +11,7 @@
 **扱わないこと** (他 ADR の管轄。本 ADR は該当箇所を 1 行参照するだけ):
 - 何を一致と見なすか / どの channel を等価の構成要素にするか / 何を非観測にするか → **ADR-0013 (等価の定義)**
 - equivalence-checker の `common`/`selakovic` 二層化 / oracle のファイル配置と I/F / adapter config (timeout 値・正規化プロファイル等) → **ADR-0015 (構造 + adapter config)**
-- SUT lib (`<lib>_*.js`) が `require` する npm dep をどう用意するか (vendor 方式・require shim の二段解決) → **ADR-0016**
+- SUT lib (`<lib>_*.js`) が `require` する npm dep をどう用意するか (= 上流 dataset が宣言しない dep を dataset fork に lockfile で宣言、`pnpm install` で再生成。checker 側の解決は `createRequire(moduleBaseDir)` のまま) → **ADR-0016**
 - body 実行前に sandbox が施す transform (非決定性 API の固定 / iteration-cap = loop bound の AST clamp) → **ADR-0017**
 
 > 1 つの話題が複数 ADR にまたがるときの分界: *なぜ等価判定がそれを無視するか* → 0013（定義） / *sandbox がそれをどう処理するか（アルゴリズム・方式）* → 実行環境=0012・実行前 transform=0017・依存解決=0016 / *Selakovic の場合の具体値・どの adapter フィールドで渡すか* → 0015。
@@ -51,9 +51,8 @@ Selakovic dataset は **client 系 80 件 (Angular / Ember / jQuery / React の 
 
 **D (jsdom+vm 主軸 + Playwright fallback) を採用する。**
 
-### 主軸: jsdom + `node:vm`
-
 - `sandbox/executor.ts` (= ADR-0015 の `common/sandbox/executor.ts`) が、client 系のとき jsdom の `JSDOM` から `window` / `document` を作って vm context に注入する。server 系 (DOM 不要) は jsdom 環境を作らず現状の vm のみ → `document` が無いので DOM oracle (O5) は `not_applicable` を返す。
+- **server 系 SUT 用に最小 Node グローバルを vm context に用意する**: `process` (`{ browser: false, env: {}, nextTick, stdout: { isTTY: false } }` 等の最小スタブ) / `Buffer` / `global` / `setImmediate`。SUT lib (cheerio 等) が `process.browser` / `process.env` / `Buffer` を参照するため。また相対 `require('<path>.json')` は vm で eval せず `JSON.parse` で解決する (SUT lib が `require('../package.json')` 等でバージョンを読む)。これらが無いと SUT lib が `ReferenceError: process is not defined` / `SyntaxError` で落ち、`test()` が走らず両側同じエラー = trivial equal になる (監査 §C-5 の trivial-equal バケツの一因 — ADR-0016 の npm dep vendor と合わせて潰す)。Phase 2b 着手前 spike で確認 (`tmp/0005_phase2b-c6-proxy-spike/spike-results.md` §7)。
 - body 同期実行後、`capture.dom_html` に `dom.serialize()` の結果 (正規化前の生 HTML 文字列) を詰める。
 - 非決定性 API (`Date.now()` / `Math.random()` / タイマー) の固定・遮断、および計測ハーネスの大反復ループの iteration-cap は、jsdom でも Playwright でも同じく sandbox の実行前 transform として適用する — 詳細は **ADR-0017**。
 
@@ -78,7 +77,7 @@ jsdom でも Playwright でも、oracle (特に O5 DOM oracle) が見るのは `
 ### 関連する sandbox の振る舞い (本 ADR の管轄外)
 
 - **実行前 transform** (非決定性 API の固定・iteration-cap = loop bound の AST clamp) → **ADR-0017**。jsdom でも Playwright でも同じく適用する。
-- **SUT lib の npm dep 解決** (vendor 方式・require shim の二段解決) → **ADR-0016**。`init()` が `require('<lib>_*.js')` → さらに npm dep を呼ぶ issue は、この解決を経た上で sandbox 実行する。
+- **SUT lib の npm dep 解決** (= 上流 dataset が宣言しない dep を dataset fork に lockfile で宣言、checker 側の解決ロジックは追加なし) → **ADR-0016**。`init()` が `require('<lib>_*.js')` → さらに npm dep を呼ぶ issue は、fork が宣言し install 済みの dep が `createRequire(moduleBaseDir)` で引ける状態で sandbox 実行する。
 - **adapter config** (timeout 値・DOM 正規化プロファイル等) と **二層化の構造** (`common/sandbox/executor.ts` 等) → **ADR-0015**。
 
 ### 段階的実装 (Phase 2a → 2b)
