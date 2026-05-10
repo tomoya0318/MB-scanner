@@ -1,10 +1,14 @@
+import { wrapBoundaryVarsStatement } from "./recorder-hooks";
+
 /**
  * Angular controller-wrapper の `f1` を「lib を load → module/controller を再構成 (計測ハーネス除去済)
  * → controller を実体化 → f1() を 1 回実行 → 観測値を return」する自己完結 IIFE に組み立てる
  * (ADR-0011 §段2)。
  *
  * sandbox executor の body として実行される前提 (= 最後の式の完了値が return_value oracle に乗る)。
- * f1 body 内のループ反復回数は書き換えない (ADR-0017)。
+ * f1 body 内のループ反復回数は書き換えない (ADR-0017)。controller fn 内で f1 定義後・呼び出し前に
+ * `globalThis.__recorder` があれば注入 service (= ctrlParams) を記録 Proxy で包む (C6 — `recorder-hooks.ts`)。
+ * `globalThis.__selakovic_scope` は wrap 前の生 scope を保持 (scopeState の snapshot で trace を汚さないため)。
  */
 export interface AngularRunnableOptions {
   /** load する lib 全文 (`<lib>_before.js` or `<lib>_after.js`)。 */
@@ -19,8 +23,9 @@ export interface AngularRunnableOptions {
 }
 
 export function buildAngularRunnable(opts: AngularRunnableOptions): string {
-  const params = opts.ctrlParams.length > 0 ? opts.ctrlParams.join(", ") : "$scope";
-  const scopeParam = opts.ctrlParams[0] ?? "$scope";
+  const wrappedParams = opts.ctrlParams.length > 0 ? [...opts.ctrlParams] : ["$scope"];
+  const params = wrappedParams.join(", ");
+  const scopeParam = wrappedParams[0] ?? "$scope";
   const moduleNameJson = JSON.stringify(opts.moduleName);
   const ctrlNameJson = JSON.stringify(opts.ctrlName);
   return [
@@ -37,6 +42,7 @@ export function buildAngularRunnable(opts: AngularRunnableOptions): string {
     opts.f1BodyCode,
     "};",
     `globalThis.__selakovic_f1 = f1; globalThis.__selakovic_scope = ${scopeParam};`,
+    wrapBoundaryVarsStatement(wrappedParams.map((p) => [p, p] as const)),
     "});",
     `var __selakovic_inj = angular.injector(['ng', ${moduleNameJson}]);`,
     "var __selakovic_root = __selakovic_inj.get('$rootScope').$new();",
@@ -74,6 +80,9 @@ if (import.meta.vitest) {
       expect(code).toContain(base.preF1Code); // f1 より前の非ハーネス statement
       expect(code).toContain(`var f1 = function () {\n${base.f1BodyCode}\n};`); // f1 body は反復回数そのまま (ADR-0013)
       expect(code).toContain("__selakovic_inj.get('$controller')(\"Ctrl\", { $scope: __selakovic_root });"); // 実体化
+      // f1 定義後・呼び出し前に注入 service (ctrlParams) を記録 Proxy で包む (C6)
+      expect(code).toContain('$scope = globalThis.__recorder.wrap($scope, "$scope", { recurse: true });');
+      expect(code).toContain('$http = globalThis.__recorder.wrap($http, "$http", { recurse: true });');
       // 計測ハーネス (execute / $.ajax / mark) は一切埋め込まれない
       expect(code).not.toContain("execute");
       expect(code).not.toContain("$.ajax");

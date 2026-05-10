@@ -6,6 +6,7 @@ import vm from "node:vm";
 import { JSDOM } from "jsdom";
 
 import { hookJsdomConsole } from "../capture/console-hook";
+import { makeRecorder, RECORDER_GLOBAL, type Recorder } from "../capture/recording-proxy";
 import {
   captureException,
   collectArgSnapshots,
@@ -32,6 +33,9 @@ import { freezeContextNonDeterminism } from "../transforms/non-determinism";
  * - server SUT が前提にしがちな最小 Node グローバル (`process` / `Buffer` / `global` / `setImmediate`) を注入する。
  * - `mount_html` が来たら、その HTML (`<script>` 除去後) を `<body>` に流し込んで mount する (react-808 の `#demo*` 不在対策)。
  * - 実行後の `dom.serialize()` を `capture.dom_html` に詰める (C2 DOM-mutation oracle の取得側)。
+ * - `recordInteractions` が真なら記録 Proxy を `globalThis.__recorder` として context に注入し、body 実行後に
+ *   `recorder.trace` を `capture.interaction_trace` に詰める (C6 の取得側)。runnable 側が `globalThis.__recorder` を見て
+ *   workload が叩く境界オブジェクトを wrap する (`preprocessing/selakovic/assemble/*`)。注入しなければ runnable は素通り。
  * - `vm.ts` (素 vm 版) と同じ `ExecutionCapture` 形を返す (= oracle 層はこの型のみに依存)。
  */
 export interface JsdomExecuteOptions {
@@ -42,6 +46,8 @@ export interface JsdomExecuteOptions {
   module_base_dir?: string;
   /** mount する HTML (`<body>` の中身、または `<!doctype>`/`<html>` で始まる完全な文書)。`<script>` は除去される。 */
   mount_html?: string;
+  /** 真なら記録 Proxy を `globalThis.__recorder` として注入し、body 実行後の `recorder.trace` を `capture.interaction_trace` に詰める。 */
+  recordInteractions?: boolean;
 }
 
 const DEFAULT_DOCUMENT = "<!doctype html><html><head></head><body></body></html>";
@@ -72,6 +78,11 @@ export async function executeInJsdom(options: JsdomExecuteOptions): Promise<Exec
   installRequire(context, options.module_base_dir, options.timeout_ms);
 
   const ctxRecord = context as unknown as Record<string, unknown>;
+  let recorder: Recorder | null = null;
+  if (options.recordInteractions === true) {
+    recorder = makeRecorder();
+    ctxRecord[RECORDER_GLOBAL] = recorder;
+  }
   const baselineKeys = new Set(Object.keys(ctxRecord));
 
   if (options.setup.length > 0) {
@@ -101,7 +112,7 @@ export async function executeInJsdom(options: JsdomExecuteOptions): Promise<Exec
     domHtml = null;
   }
 
-  return {
+  const capture: ExecutionCapture = {
     return_value: returnValue,
     return_is_undefined: returnIsUndefined,
     arg_snapshots: collectArgSnapshots(ctxRecord, trackedKeys, preSnapshots),
@@ -111,6 +122,8 @@ export async function executeInJsdom(options: JsdomExecuteOptions): Promise<Exec
     timed_out: timedOut,
     dom_html: domHtml,
   };
+  if (recorder !== null) capture.interaction_trace = recorder.trace;
+  return capture;
 }
 
 /** server SUT が前提にしがちな最小 Node グローバルを context に注入する。 */

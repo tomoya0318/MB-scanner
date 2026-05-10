@@ -18,6 +18,14 @@
  */
 import type { TraceEntry } from "./types";
 
+/**
+ * jsdom executor が `recordInteractions` で記録 Proxy を context に置くときの global 名。
+ * runnable (= `preprocessing/selakovic/assemble/*` が生成) は `globalThis.__recorder` を見て、あれば
+ * workload が叩く境界オブジェクトを `.wrap(...)` してから SUT を呼ぶ。preprocessing 側はこの文字列を
+ * (依存方向の都合で import できないので) ハードコードする — 変更時は両方を揃えること。
+ */
+export const RECORDER_GLOBAL = "__recorder";
+
 const MAX_DEPTH = 8;
 const SKIP_KEY_PREFIX = "$$";
 

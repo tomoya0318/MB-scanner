@@ -110,4 +110,27 @@ describe("executeInJsdom", () => {
     expect(cap.dom_html).not.toContain("__evil");
     expect(cap.dom_html).not.toContain("<script");
   });
+
+  it("recordInteractions: true で globalThis.__recorder を注入し interaction_trace を詰める", async () => {
+    const cap = await executeInJsdom({
+      setup: "",
+      body: "var o = globalThis.__recorder.wrap({ f: function (x) { return x + 1; } }, 'o'); o.f(41)",
+      timeout_ms: TIMEOUT,
+      recordInteractions: true,
+    });
+    expect(cap.return_value).toBe("42");
+    expect(cap.interaction_trace).toEqual([{ path: "o.f", op: "call", args: ["41"], result: "42" }]);
+    // __recorder は baseline 扱いなので new_globals に出ない
+    expect(cap.new_globals).not.toContain("__recorder");
+  });
+
+  it("recordInteractions なしなら interaction_trace は付かない (runnable は globalThis.__recorder を見て素通り)", async () => {
+    const cap = await executeInJsdom({
+      setup: "",
+      body: "var used = (typeof globalThis.__recorder === 'object' && globalThis.__recorder) ? 'yes' : 'no'; used",
+      timeout_ms: TIMEOUT,
+    });
+    expect(cap.return_value).toBe('"no"');
+    expect(cap.interaction_trace).toBeUndefined();
+  });
 });

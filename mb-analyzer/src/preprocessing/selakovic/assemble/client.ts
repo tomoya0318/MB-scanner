@@ -8,6 +8,7 @@ import {
 import { statementsToCode } from "../../common/setup-cleanup";
 import type { F1Decomposition } from "../decompose/f1";
 import { buildAngularRunnable } from "./angular";
+import { wrapClientLibGlobalsStatement } from "./recorder-hooks";
 
 /**
  * clientIssues の `(setup, slow, fast)` candidate を作用点 (A / B / A+B) × wrapper kind
@@ -40,8 +41,8 @@ export function buildClientLibCandidate(
   return {
     layout: LAYOUT_KIND.CLIENT,
     setup: "",
-    slow: flatRunnable(libSourceBefore, preF1, f1BodyWrapped(f1Before)),
-    fast: flatRunnable(libSourceAfter, preF1, f1BodyWrapped(f1Before)),
+    slow: flatRunnable(libSourceBefore, preF1, f1BodyWrapped(f1Before), clientRecorderHook(libSourceBefore)),
+    fast: flatRunnable(libSourceAfter, preF1, f1BodyWrapped(f1Before), clientRecorderHook(libSourceAfter)),
     enclosure_type: "lib-file",
     candidate_kind: kind,
     environment: ENV_JSDOM,
@@ -108,27 +109,37 @@ export function buildClientCombinedCandidate(
   return {
     layout: LAYOUT_KIND.CLIENT,
     setup: "",
-    slow: flatRunnable(libSourceBefore, preF1, f1BodyWrapped(f1Before)),
-    fast: flatRunnable(libSourceAfter, preF1, f1BodyWrapped(f1After)),
+    slow: flatRunnable(libSourceBefore, preF1, f1BodyWrapped(f1Before), clientRecorderHook(libSourceBefore)),
+    fast: flatRunnable(libSourceAfter, preF1, f1BodyWrapped(f1After), clientRecorderHook(libSourceAfter)),
     enclosure_type: "lib-file+f1-body",
     candidate_kind: CANDIDATE_KIND.SINGLE,
     environment: ENV_JSDOM,
   };
 }
 
-/** `[libSource]\n;\n[preF1]\n;\n[bodyCode]` を 1 つの実行可能スクリプトに連結する (top-level f1 用)。 */
-function flatRunnable(libSource: string, preF1Code: string, bodyCode: string): string {
+/**
+ * `[libSource]\n;\n[recorderHook]\n[preF1]\n;\n[bodyCode]` を 1 つの実行可能スクリプトに連結する (top-level f1 用)。
+ * `recorderHook` は `lib-file` 系で `globalThis.__recorder` があれば lib グローバルを記録 Proxy で包む文
+ * (`recorder-hooks.ts`)。lib を持たない場合は空文字を渡す。
+ */
+function flatRunnable(libSource: string, preF1Code: string, bodyCode: string, recorderHook = ""): string {
   const parts: string[] = [];
   if (libSource.length > 0) {
     parts.push(libSource);
     parts.push(";");
   }
+  if (recorderHook.length > 0) parts.push(recorderHook);
   if (preF1Code.length > 0) {
     parts.push(preF1Code);
     parts.push(";");
   }
   parts.push(bodyCode);
   return parts.join("\n");
+}
+
+/** `flatRunnable` の `recorderHook` 引数。lib があれば lib グローバルを wrap する文、無ければ空文字。 */
+function clientRecorderHook(libSource: string): string {
+  return libSource.length > 0 ? wrapClientLibGlobalsStatement() : "";
 }
 
 /**

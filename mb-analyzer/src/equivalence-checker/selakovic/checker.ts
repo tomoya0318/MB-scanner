@@ -40,11 +40,10 @@ const DEFAULT_TIMEOUT_MS = 5000;
  *
  * - `environment === "vm"` (デフォルト / pruning): 素 vm + 非決定性遮断。oracle は C1/C4/C5/C3 の 4 本 (Phase 2a と同一)。
  * - `environment === "jsdom"` (Selakovic の client/server candidate): jsdom window/document + require shim + server vm globals。
- *   body には iteration-cap (ADR-0017) をかける。oracle は上記 4 本 + C2 (DOM) + C6 (interaction-trace)。
+ *   body には iteration-cap (ADR-0017) をかける。記録 Proxy を `globalThis.__recorder` として注入する
+ *   (runnable が `preprocessing/selakovic/assemble/*` 由来で `globalThis.__recorder` を見て workload が叩く境界オブジェクトを
+ *   wrap してから SUT を呼ぶ → `capture.interaction_trace` が埋まる)。oracle は上記 4 本 + C2 (DOM) + C6 (interaction-trace)。
  *   C2/C6 のチャネルが空なら oracle 自身が `not_applicable` を返す。`mount_html` も plumb する。
- *
- * 記録 Proxy (C6 の取得側) の executor への注入はまだ繋いでいない (= runnable が recorder-aware である必要があり
- * preprocessing 側の設計判断待ち。`wrap-targets.ts` 参照)。よって現状 C6 は常に `not_applicable`。
  */
 export async function checkEquivalence(input: EquivalenceInput): Promise<EquivalenceCheckResult> {
   const setup = input.setup ?? "";
@@ -57,7 +56,7 @@ export async function checkEquivalence(input: EquivalenceInput): Promise<Equival
 
   const run = (body: string): Promise<ExecutionCapture> => {
     if (isJsdom) {
-      const jsdomOpts: JsdomExecuteOptions = { setup, body, timeout_ms };
+      const jsdomOpts: JsdomExecuteOptions = { setup, body, timeout_ms, recordInteractions: true };
       if (input.module_base_dir !== undefined) jsdomOpts.module_base_dir = input.module_base_dir;
       if (input.mount_html !== undefined) jsdomOpts.mount_html = input.mount_html;
       return executeInJsdom(jsdomOpts);

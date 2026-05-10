@@ -120,4 +120,20 @@ describe("checkEquivalence", () => {
     expect(c2?.verdict).toBe("not_equal");
     expect(result.verdict).toBe("not_equal");
   });
+
+  it("jsdom 環境で runnable が globalThis.__recorder を使うと C6 (interaction_trace) が verdict を出す", async () => {
+    // preprocess の runnable が `globalThis.__recorder` を見て境界オブジェクトを wrap するのを模した body
+    const mkBody = (mult: number): string =>
+      `var __r = (typeof globalThis.__recorder === 'object' && globalThis.__recorder) ? globalThis.__recorder : null;` +
+      `var o = { f: function (x) { return x * ${mult}; } };` +
+      `if (__r) o = __r.wrap(o, 'sut', { recurse: true });` +
+      `o.f(3)`;
+    const same = await checkEquivalence({ slow: mkBody(2), fast: mkBody(2), environment: "jsdom", timeout_ms: 5000 });
+    expect(same.observations.find((o) => o.oracle === "interaction_trace")?.verdict).toBe("equal");
+    expect(same.verdict).toBe("equal");
+
+    const diff = await checkEquivalence({ slow: mkBody(2), fast: mkBody(5), environment: "jsdom", timeout_ms: 5000 });
+    expect(diff.observations.find((o) => o.oracle === "interaction_trace")?.verdict).toBe("not_equal");
+    expect(diff.verdict).toBe("not_equal");
+  });
 });
