@@ -9,7 +9,7 @@ import type { DetectedLayout } from "./layout";
  *
  * client でも server でも同じ手で取れる (`detectLayout()` が `serverDirs` / `serverFiles` として
  * 既に検出している)。`<script src>` / `require` の参照とは独立 — client の inline `<script>` が
- * `<script src="angular_before.js">` を持たなくても `angular_before.js` は dir にある (Phase 1.0 で確認)。
+ * `<script src="angular_before.js">` を持たなくても `angular_before.js` は dir にある。
  *
  * `<lib>_*` が見つからない issue は `null` (= 後段は body diff だけで処理する)。
  *

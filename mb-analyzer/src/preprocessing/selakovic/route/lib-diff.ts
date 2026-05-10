@@ -1,13 +1,11 @@
 /**
  * `<lib>_before` / `<lib>_after` の差分が「実コード変化」かを判定する (ADR-0011 §段2 の入力)。
  *
- * Phase 2a では行ベースの multiset 差分で「license header / version 文字列 / 整形差を除いて
- * 実コード行が残るか」を見る (= ルーティング判定に十分)。AST diff ベースの正確な narrowing
- * (= 変更関数の特定 + call site 到達可能性) は Phase 2a フェーズ E の `lib-narrowing.ts` で行う。
- *
- * lib ファイルは AngularJS (665KB) のように巨大なので、まず byte 一致で高速 short-circuit し、
- * 差がある共通ファイルだけ行差分する。multiset 差分は行の並べ替え (= 意味論変化なし) を相殺する
- * 一方、実コード行の変化は (両方の旧/新行が他所に重複しない限り) 検出する。
+ * 行ベースの multiset 差分で「license header / version 文字列 / 整形差を除いて実コード行が残るか」を見る
+ * (= 作用点ルーティングに十分な近似。変更関数の AST レベル特定 + call site 到達可能性による narrowing は
+ * 未実装)。lib ファイルは AngularJS (665KB) のように巨大なので、まず byte 一致で高速 short-circuit し、
+ * 差がある共通ファイルだけ行差分する。multiset 差分は行の並べ替え (= 意味論変化なし) を相殺する一方、
+ * 実コード行の変化は (両方の旧/新行が他所に重複しない限り) 検出する。
  */
 
 const LICENSE_NOISE =
@@ -21,7 +19,7 @@ export interface LibChangeSummary {
   readonly changedFiles: readonly string[];
   /**
    * 変化があった行の近傍 (= 直前の `function NAME` / `NAME = function` 等) から拾った関数名の集合。
-   * ADR-0014 の co-evolution 交差判定 (`I ∩ F`) の `F` の近似。AST ベースの正確な特定は Phase 2a〜2b。
+   * ADR-0014 の co-evolution 交差判定 (`I ∩ F`) の `F` の近似 (行近傍ベース、AST レベルではない)。
    */
   readonly changedFunctionNames: ReadonlySet<string>;
 }

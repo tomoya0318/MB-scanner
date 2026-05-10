@@ -4,14 +4,12 @@ import { walkNodes } from "../../../ast/walk";
 
 /**
  * ADR-0014: A+B (lib も body も変化) にルートされた issue について、body (`f1.body` / `test.body`)
- * の参照 identifier 集合 `I` と lib 側 changed_functions 名集合 `F` の交差を取り、
+ * の参照 identifier 集合 `I` と lib 側 changed-function 名集合 `F` (`diffLibPair` の近似) の交差を取り、
  *
  * - `I ∩ F = ∅` (交差なし) → independent → 2 candidate に分割 (lib candidate / body candidate)
  * - `I ∩ F ≠ ∅` (交差あり) → co-evolution の疑い → 分割しない (1 candidate のまま)
  *
- * を判定する。`F` が空 (= lib の変更関数名を特定できない) のときは「干渉なし」とみなして split する
- * (本 dataset はケース III 4 件が全件 independent / co-evolution 0 件 — Phase 0-A 実測)。
- * `F` の精度向上は Phase 2a フェーズ E の `lib-narrowing.ts` で行う。
+ * を判定する。`F` が空 (lib の変更関数名を特定できない) のときは「干渉なし」とみなして split する。
  *
  * `I` はプロパティ名・object key も含めて保守的に集める (= 偽 co-evolution = 分割しない 側に倒れ、
  * 誤分割による `error` を避ける — ADR-0014「迷ったら 1 candidate」)。

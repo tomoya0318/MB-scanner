@@ -21,21 +21,10 @@ import { isIndependent } from "./route/case-split";
 import { diffLibPair } from "./route/lib-diff";
 
 /**
- * Selakovic 1 issue 分の前処理 — issue のファイル内容を `(setup, slow, fast)` candidate に変換する
- * (ADR-0011 の Tier 2 = Selakovic adapter)。`io → decompose → route → assemble` を順に通すパイプライン
- * (fallback 経路は `assemble/fallback.ts`)。
- *
- * **段 1 (役割分解 + 計測ハーネス除去)** — ADR-0011 §段1 / `decompose/`:
- * - ① `<lib>_before/after` ペア (dir scan、`preprocess()` には CLI が `io/` 経由で読んだ map で渡る)
- * - ② ベンチマーク関数 body ペア (client: inline `<script>` の `f1` body / server: `test_case_*.js` の `test()` body)
- * - 計測ハーネス (`execute(f1,n)` 以降 / `$.ajax({mark,mean})` / `init`/`setupTest`) は setup へ回すか破棄
- * - body 内のループ反復回数は書き換えない (= 復元可能性のため。反復縮小は等価検証側 — ADR-0013)
- *
- * **段 2 (作用点ルーティング)** — ADR-0011 §段2 / `route/`:
- * - ①② の実コード差分で A (lib のみ) / B (body のみ) / A+B (両方) / fallback に振り分け
- * - A / B → candidate 1 個。A+B → ADR-0014 の identifier 交差判定で independent なら 2 candidate
- *   (lib candidate / body candidate)、co-evolution の疑いなら 1 candidate
- * - fallback (どちらにも実コード差なし / 規約外フォーマット) → Tier 1 の素の top-level diff (`assemble/fallback.ts`)
+ * Selakovic 1 issue 分の前処理 — issue のファイル内容を `(setup, slow, fast)` candidate に変換する純関数
+ * (ADR-0011 Tier 2)。`io → decompose → route → assemble` の 4 層を通し、`f1`/`test()` が規約外フォーマット
+ * なら `assemble/fallback.ts` の素の top-level diff にフォールバックする。各層と作用点ルーティングの
+ * 詳細は `preprocessing/README.md` §抽出パイプライン。
  */
 
 export type SelakovicPreprocessInput =
@@ -67,10 +56,6 @@ export function preprocess(input: SelakovicPreprocessInput): PreprocessingResult
   if (input.kind === "client") return preprocessClient(input);
   return preprocessServer(input);
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// client (inline `<script>` の f1)
-// ─────────────────────────────────────────────────────────────────────────────
 
 function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "client" }>): PreprocessingResult[] {
   const f1Before = extractF1(input.before_inline);
@@ -104,8 +89,8 @@ function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "clie
   } else if (aspect === ASPECT.BODY) {
     candidates = [buildClientBodyCandidate(f1Before, f1After, libSourceBefore, libNeededInSetup, CANDIDATE_KIND.SINGLE)];
   } else {
-    // A+B → ADR-0014: body の参照 identifier と lib の変化関数名 (lib-diff の近似) の交差で判定。
-    // 交差なし (independent) → lib candidate / body candidate に分割、交差あり → 1 candidate (co-evolution の疑い)。
+    // A+B: body の参照 identifier と lib の変化関数名 (diffLibPair の近似) が交差しなければ
+    // independent → lib candidate / body candidate に分割、交差すれば co-evolution の疑いで 1 candidate (ADR-0014)。
     if (isIndependent(f1Before.f1Body.body, libChange.changedFunctionNames)) {
       candidates = [
         buildClientLibCandidate(f1Before, libSourceBefore, libSourceAfter, CANDIDATE_KIND.LIB),
@@ -118,10 +103,6 @@ function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "clie
 
   return candidates.map((c) => ({ ...c, aspect, before_node_count: beforeNodeCount, after_node_count: afterNodeCount }));
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// server (test_case_*.js の test())
-// ─────────────────────────────────────────────────────────────────────────────
 
 function preprocessServer(input: Extract<SelakovicPreprocessInput, { kind: "server" }>): PreprocessingResult[] {
   const fallback = (): PreprocessingResult[] =>
@@ -138,8 +119,8 @@ function preprocessServer(input: Extract<SelakovicPreprocessInput, { kind: "serv
   const aspect = routeAspect(libHasRealChange, bodyHasRealChange);
   if (aspect === ASPECT.FALLBACK) return fallback();
 
-  // server は A / B / A+B いずれも 1 candidate (ADR-0014: ケース IV-B は暫定的に 1 candidate 扱い)。
-  // slow/fast = test_case_{before,after} の runnable program。aspect A なら init() の require が
+  // server は作用点に関わらず 1 candidate (ADR-0014 のケース IV-B は暫定 1 candidate 扱い)。
+  // slow/fast = test_case_{before,after} の runnable program — aspect A なら init() の require が
   // `_before` ↔ `_after` で切り替わり、aspect B なら test() body が切り替わる。
   const beforeNodeCount = safeCount(input.before_test_case);
   const afterNodeCount = safeCount(input.after_test_case);
@@ -158,10 +139,6 @@ function preprocessServer(input: Extract<SelakovicPreprocessInput, { kind: "serv
     },
   ];
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** lib file map から「単一の lib ソース」を取り出す (clientIssues の lib は単一ファイル形式)。 */
 function singleLibSource(files: Record<string, string>): string {

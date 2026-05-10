@@ -10,9 +10,9 @@ import type { F1Decomposition } from "../decompose/f1";
 import { buildAngularRunnable } from "./angular";
 
 /**
- * clientIssues の `(setup, slow, fast)` candidate を「作用点 (A / B / A+B)」に応じて組み立てる
- * (ADR-0011 §段2 / ADR-0014 のケース III)。`f1` body 内のループ反復回数は書き換えない
- * (反復縮小は等価検証側の transform — ADR-0013)。
+ * clientIssues の `(setup, slow, fast)` candidate を作用点 (A / B / A+B) × wrapper kind
+ * (top-level f1 / Angular controller-wrapper) で組み立てる (ADR-0011 §段2 / ADR-0014)。
+ * `f1` body 内のループ反復回数は書き換えない (ADR-0017)。
  */
 
 const ENV_JSDOM: ExecutionEnvironmentHint = "jsdom";
@@ -115,10 +115,6 @@ export function buildClientCombinedCandidate(
     environment: ENV_JSDOM,
   };
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// runnable program helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** `[libSource]\n;\n[preF1]\n;\n[bodyCode]` を 1 つの実行可能スクリプトに連結する (top-level f1 用)。 */
 function flatRunnable(libSource: string, preF1Code: string, bodyCode: string): string {

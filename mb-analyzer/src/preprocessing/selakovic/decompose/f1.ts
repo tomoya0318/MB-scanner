@@ -17,14 +17,13 @@ import { walkNodes } from "../../../ast/walk";
  * その body と「f1 定義より前の非ハーネス statement」「計測ハーネス statement」に役割分解する
  * (ADR-0011 §段1②)。
  *
- * `f1` の AST 親パスは実質 2 種 (`tmp/inline-layout-catalog.md`):
+ * `f1` の AST 親パスは実質 2 種:
  * - **top-level 直書き**: `var f1 = function(){...}` / `function f1(){...}` が Program 直下
  * - **Angular controller wrapper**: `app.controller("Ctrl", function($scope){ ...; var f1 = ...; ... })`
  *   (`.controller` / `.directive` / `.service` / `.factory` のいずれか)
  *
  * 計測ハーネス = `var a = execute(f1, n)` / `jStat(a).mean()` / `console.log(mean)` /
- * `$.ajax({mark, mean})` 等。f1 body 内のループ反復回数 (`for (i<50000)`) は書き換えない
- * (= 復元可能性のため、反復縮小は等価検証側の transform に委ねる — ADR-0013)。
+ * `$.ajax({mark, mean})` 等。f1 body 内のループ反復回数 (`for (i<50000)`) は書き換えない (ADR-0017)。
  *
  * 規約外フォーマット (f1 が見つからない / arrow 式 body 等) は `null` を返し、呼び出し側が
  * Tier 1 の素の top-level diff にフォールバックする。

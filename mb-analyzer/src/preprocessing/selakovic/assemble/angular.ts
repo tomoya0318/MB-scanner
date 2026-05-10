@@ -1,10 +1,10 @@
 /**
  * Angular controller-wrapper の `f1` を「lib を load → module/controller を再構成 (計測ハーネス除去済)
  * → controller を実体化 → f1() を 1 回実行 → 観測値を return」する自己完結 IIFE に組み立てる
- * (ADR-0011 §段2 / Phase 1.0 スパイク `buildAngularProgram` の production 版)。
+ * (ADR-0011 §段2)。
  *
- * `executeSandboxed` の body として使う前提 (= 最後の式の完了値が return_value oracle に乗る)。
- * f1 body 内のループ反復回数は書き換えない (ADR-0013 — 反復縮小は等価検証側の transform)。
+ * sandbox executor の body として実行される前提 (= 最後の式の完了値が return_value oracle に乗る)。
+ * f1 body 内のループ反復回数は書き換えない (ADR-0017)。
  */
 export interface AngularRunnableOptions {
   /** load する lib 全文 (`<lib>_before.js` or `<lib>_after.js`)。 */
