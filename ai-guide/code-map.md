@@ -12,8 +12,9 @@ ai-guide 全体での位置づけと他軸との住み分けは [`doc-strategy/i
   - [観測軸: slow/fast と pre/post](#観測軸-slowfast-と-prepost)
   - [4 オラクルの責務分担](#4-オラクルの責務分担)
   - [オラクル間の排他ルールと `not_applicable` の意義](#オラクル間の排他ルールと-not_applicable-の意義)
+  - [観測できない事象（既知の限界）](#観測できない事象既知の限界)
 - [Pruning エンジン](#pruning-エンジン)
-  - [ファイル構成](#ファイル構成)
+  - [モジュール責務](#モジュール責務)
   - [データフロー](#データフロー)
   - [試行回数 (iterations) と budget の関係](#試行回数-iterations-と-budget-の関係)
   - [候補ノード決定の 4 段フィルタ](#候補ノード決定の-4-段フィルタ)
@@ -30,8 +31,11 @@ ai-guide 全体での位置づけと他軸との住み分けは [`doc-strategy/i
   - [clientServer フォールバック](#clientserver-フォールバック)
   - [除外理由の意味論](#除外理由の意味論)
   - [既知の運用上の落とし穴 (Node CLI の stdout flush)](#既知の運用上の落とし穴-node-cli-の-stdout-flush)
+  - [既知の運用上の落とし穴 (VM cross-realm Error)](#既知の運用上の落とし穴-vm-cross-realm-error)
+  - [既知の運用上の落とし穴 (pnpm shared install と相対 require の不整合, Phase C-1)](#既知の運用上の落とし穴-pnpm-shared-install-と相対-require-の不整合-phase-c-1)
+  - [Selakovic データセットでの実測](#selakovic-データセットでの実測)
 
-（sandbox パイプライン / verdict 合成 / Python↔Node JSON 往復 の詳細は今後追加予定）
+（sandbox パイプライン / Python↔Node JSON 往復 の詳細は今後追加予定）
 
 ---
 
@@ -67,22 +71,22 @@ fast サイド    fast.snapshots.pre  fast.snapshots.post
 
 ### 4 オラクルの責務分担
 
-JS で観測可能な差異は 4 方向に落ち、各オラクルが 1 軸ずつ担当します。
+JS で観測可能な差異は基本 4 方向に落ち、各オラクルが 1 軸ずつ担当します（Selakovic adapter ではこれに C2 / C6 を追加で配線する — [後述](#selakovic-adapter-で追加される-2-オラクル-c2--c6)）。実装は `mb-analyzer/src/equivalence-checker/common/comparison/oracles/` 配下。
 
 ```
 body 実行
-├─ 戻り値として出てくる       → O1 (return_value)
-├─ 引数が破壊的に変わる        → O2 (argument_mutation)
-├─ 例外として throw される      → O3 (exception)
-└─ 外界に漏れ出す (console / global) → O4 (external_observation)
+├─ 戻り値として出てくる       → O1 / C1 (return_value)
+├─ 引数が破壊的に変わる        → O2 / C4 (argument_mutation)
+├─ 例外として throw される      → O3 / C5 (exception)
+└─ 外界に漏れ出す (console / global) → O4 / C3+C4 (external_observation)
 ```
 
-| # | Oracle | 比較対象 | 比較方法 | 実装 |
+| # | Oracle | 比較対象 | 比較方法 | 実装 (`common/comparison/oracles/`) |
 |---|---|---|---|---|
-| O1 | `return_value` | body の**戻り値** | serialize 済み文字列の完全一致 | `oracles/return-value.ts` |
-| O2 | `argument_mutation` | setup 由来 object/array の **body 後の状態** | key 毎に `slow.post` vs `fast.post` を比較 | `oracles/argument-mutation.ts` |
-| O3 | `exception` | body が投げた**例外** | `ctor` + `message` の一致 | `oracles/exception.ts` |
-| O4 | `external_observation` | **console 呼び出し列** + **新規 global 変数** | console: method/args の順序込み／globals: key 集合 | `oracles/external-observation.ts` |
+| O1 (C1) | `return_value` | body の**戻り値** | serialize 済み文字列の完全一致 | `return-value.ts` |
+| O2 (C4) | `argument_mutation` | setup 由来 object/array の **body 後の状態** | key 毎に `slow.post` vs `fast.post` を比較 | `argument-mutation.ts` |
+| O3 (C5) | `exception` | body が投げた**例外** | `ctor` + `message` の一致 | `exception.ts` |
+| O4 (C3+C4) | `external_observation` | **console 呼び出し列** + **新規 global 変数** | console: method/args の順序込み／globals: key 集合 | `external-observation.ts` |
 
 #### O1: `return_value`
 
@@ -104,7 +108,7 @@ O3 は設計上 3 つの観測を **していない**。それぞれの判断を
 |---|---|---|
 | stack trace の比較 | **要件（比較しない）** | パッチ適用で行番号・内部関数名は必ず変わる。stack を比較すると Selakovic の全パッチが `not_equal` になり、検証器として成立しない。**「意味論的等価性の定義に stack を含めない」** は設計要件であり妥協ではない |
 | message 内の動的値（変数名・プロパティ名）に由来する揺れ | **許容（偽陽性にならない）** | (setup, slow, fast) は **同一プロセス・同一 V8 realm** で実行され、setup が共通なら埋め込まれる動的値も両側で一致する。V8 バージョン差による文言書き換え（例: `"Cannot read property"` → `"Cannot read properties of"`）は CI の Node バージョン固定 (`mise`) で対処する |
-| 例外発生までの中間状態 | **限界ではない（O2/O4 で補完済み）** | `executor.ts:82-90` は try/catch 通過後に post snapshot / console 列を確定するため、throw 直前までの副作用は **O2 (arg_snapshots) / O4 (console_log, new_globals) が自動的に拾う**。O3 単体で partial state が見えない点は oracle 間の協調で解決済み |
+| 例外発生までの中間状態 | **限界ではない（O2/O4 で補完済み）** | executor (`common/sandbox/executors/{vm,jsdom}.ts`) は try/catch 通過後に post snapshot / console 列を確定するため、throw 直前までの副作用は **O2 (arg_snapshots) / O4 (console_log, new_globals) が自動的に拾う**。O3 単体で partial state が見えない点は oracle 間の協調で解決済み |
 
 **結論: O3 の設計上の非観測はすべて許容しうる。** 特に stack trace 非比較は「**意味論的等価性の定義上 stack を含めない**」という研究上の要件であり、拡張して比較可能にしても FP が爆発するだけなので採用しない。
 
@@ -117,6 +121,17 @@ O3 は設計上 3 つの観測を **していない**。それぞれの判断を
 
 代表的な検出対象: デバッグ出力の意図しない削除、global への無名リーク（`var`/`let` 忘れ）、DOM/I/O 系パターンの副作用差分。
 
+#### Selakovic adapter で追加される 2 オラクル (C2 / C6)
+
+上記 4 つは dataset 非依存の基本軸。Selakovic adapter (`selakovic/oracle-routing.ts` + `selakovic/profiles.ts`) は workload の種類 (DOM 直接操作 / jQuery interaction / Angular controller 等) に応じて、これにさらに 2 つを配線する:
+
+| # | Oracle | 観測対象 | 比較方法 | 実装 (`common/comparison/oracles/`) |
+|---|---|---|---|---|
+| C2 | `dom_mutation` | jsdom 実行後の **DOM-HTML** (`capture.dom_html`) | adapter 渡しの `DomNormalizeProfile` (framework ノイズ属性/class/コメント除去・空白 collapse・属性 sort) で正規化してから文字列比較。**両側とも `dom_changed === false`（DOM 不変）なら N/A** (Phase C-2 — positive evidence 格上げの前提) | `dom-mutation.ts` |
+| C6 | `interaction_trace` | 記録 Proxy が取った **workload→SUT の呼び出し列** (`capture.interaction_trace`) | adapter 渡しの `InteractionTraceProfile` (boot-phase prefix 無視 / get 無視) でフィルタしてから列の完全一致。両側とも trace 空 (Proxy 未注入 or 何も呼ばなかった) なら N/A | `interaction-trace.ts` |
+
+正規化規則・無視 prefix は dataset 知識なので `profile` として adapter から渡す。oracle 本体 (DOM ノード判定・空白 collapse / trace 列比較) は汎用 (`common/`)。記録 Proxy 自体は `common/sandbox/capture/recording-proxy.ts`、profile 配線は `selakovic/profiles.ts`。C2 / C6 はともに **positive-evidence oracle**（[後述ルール 3](#ルール-3-overall-verdict-の合成-adr-0018--phase-c-2)）。
+
 ---
 
 ### オラクル間の排他ルールと `not_applicable` の意義
@@ -125,7 +140,7 @@ O3 は設計上 3 つの観測を **していない**。それぞれの判断を
 
 #### ルール 1: 例外時は O1 が身を引く
 
-`oracles/return-value.ts` L18-20:
+`common/comparison/oracles/return-value.ts`:
 
 ```ts
 if (slow.exception !== null || fast.exception !== null) {
@@ -146,23 +161,26 @@ if (slow.exception !== null || fast.exception !== null) {
 
 `not_applicable` は「検査しない」ではなく「**この軸ではこのトリプルを判定しない（他軸に任せる）**」という**責務移譲のシグナル**として機能している。
 
-#### ルール 3: overall verdict の合成 (ADR-0018 の新 5 規則)
+#### ルール 3: overall verdict の合成 (ADR-0018 + Phase C-2)
 
-`deriveOverallVerdict`（`verdict.ts`、Python ミラーは `equivalence_verification.py`）は以下の優先順位で合成する:
+`deriveOverallVerdict`（`common/comparison/verdict.ts`、Python ミラーは `equivalence_verification.py`）は以下の優先順位で合成する:
 
 1. いずれかの oracle が `not_equal` → **`not_equal`**
 2. いずれかの oracle が `error` → **`error`**
 3. 全 oracle が `not_applicable` → **`inconclusive`**（観測チャネルゼロ。`verdict_reason = "no-observable-channel"`）
-4. `not_equal`/`error` 無し かつ **positive-evidence oracle**（= `{return_value (C1), argument_mutation (C4-mutation), interaction_trace (C6)}`）がすべて `not_applicable` → **`inconclusive`**（差は観測されなかったが「同じ値を返した / 同じ引数変化をした / 同じ呼び出し列だった」という積極的等価エビデンスが無い = 中身を exercise できていない可能性が高い。`verdict_reason` = `exception` oracle が `equal` なら `"both-sides-threw"`、それ以外なら `"no-positive-evidence"`）
-5. それ以外 → **`equal`**（positive-evidence oracle に non-N/A が 1 つ以上）
+4. `not_equal`/`error` 無し かつ **positive-evidence oracle**（= `{return_value (C1), argument_mutation (C4-mutation), interaction_trace (C6), dom_mutation (C2)}`）がすべて `not_applicable` → **`inconclusive`**（差は観測されなかったが「同じ値を返した / 同じ引数変化をした / 同じ呼び出し列だった / 少なくとも片側が DOM を変更してそれが両側一致した」という積極的等価エビデンスが無い = 中身を exercise できていない可能性が高い。`verdict_reason` = `exception` oracle が `equal` なら `"both-sides-threw"`、それ以外なら `"no-positive-evidence"`）
+5. 上記 4 を通った後、**`exception` oracle が `equal`（= 両側が同じ例外で落ちた）かつ唯一の positive evidence が `dom_mutation` のみ** → **`inconclusive`**（その DOM 変化は workload 実行ではなく runnable の bootstrap = Angular の compile step 等で生じた可能性が高く「patch を exercise していない」弱い equal。`return_value` は exception 時に必ず N/A なので、`argument_mutation` / `interaction_trace` のどちらかが non-N/A なら workload が部分的にでも exercise されたと見なし `equal` を保つ。`verdict_reason = "both-sides-threw"`）
+6. それ以外 → **`equal`**（positive-evidence oracle に non-N/A が 1 つ以上 — 単独 dom_mutation かつ両側クラッシュは除く）
 
-`EquivalenceCheckResult.verdict_reason?: string | null` は `inconclusive` のとき上記の理由、`error` の executor crash / setup throw のとき `"executor-error"`、`equal`/`not_equal` のとき `null`。詳細は [ADR-0018](adr/0018-equivalence-verdict-conservative.md)。
+`dom_mutation` が positive evidence になる前提（Phase C-2）: jsdom executor が body 実行前の初期 mount HTML を覚えておき実行後と素の文字列比較して `ExecutionCapture.dom_changed` をセットする。`dom_mutation` oracle は **両側とも `dom_changed === false`（= 両側とも DOM を一切変更しなかった）なら `not_applicable` を返す** ので、non-N/A は「少なくとも片側が DOM を実際に変更した」を意味する（→ その変化が両側一致なら積極的等価エビデンス）。これが無いと「両側に同じ初期 HTML を流したので比較は常に equal」を等価エビデンスに誤認する。
+
+`EquivalenceCheckResult.verdict_reason?: string | null` は `inconclusive` のとき上記の理由（`no-observable-channel` / `both-sides-threw` / `no-positive-evidence`）、`error` のとき `"executor-error"`、`equal`/`not_equal` のとき `null`。`"executor-error"` は **executor crash / setup throw / serialize 失敗だけでなく、Python Gateway 側の error（subprocess spawn 失敗 / 出力 JSON 解釈失敗 / timeout）と batch CLI の行パース失敗（slow/fast 欠落 / `timeout_ms` 不正 / 非 JSON）でも付く** — いずれも「使える verdict が出せなかった」同分類なので Node 側 outer catch と揃えてある。詳細は [ADR-0018](adr/0018-equivalence-verdict-conservative.md)。
 
 設計上の含意:
 
 - **`not_equal` が最強**: 実際に差異が観測されたら、他軸で error や not_applicable が出ていても **not_equal を信じる**。「観測できた非等価」は「観測できなかった軸」より優先。
-- **`error` は executor crash 専用**: シリアライズ不能 (循環参照) / timeout / setup throw 等で観測パイプライン自体が壊れたとき。観測はできたが等価エビデンスが無い場合は `error` でなく `inconclusive`。
-- **`equal` は「中身を exercise した上で一致」だけ**: 「両方同じくクラッシュ」「DOM が初期から変化なし」「scaffolding global しか無い」は単独では `equal` にしない (→ `inconclusive`)。RQ では `equal`+`not_equal` の確認済み分を「検証器が著者判断と一致した」の分母にし、`inconclusive` は別途「検証カバレッジ」指標。
+- **`error` は「使える verdict が出せなかった」専用**: シリアライズ不能 (循環参照) / timeout / setup throw で観測パイプラインが壊れたとき + Gateway/CLI 層のパイプライン失敗 (spawn / JSON / 行パース)。観測はできたが等価エビデンスが無い場合は `error` でなく `inconclusive`。
+- **`equal` は「中身を exercise した上で一致」だけ**: 「両方同じくクラッシュ」「両側とも DOM 初期から不変 (→ dom_mutation N/A)」「両方クラッシュ + bootstrap で DOM だけ変化」「scaffolding global しか無い」は単独では `equal` にしない (→ `inconclusive`)。RQ では `equal`+`not_equal` の確認済み分を「検証器が著者判断と一致した」の分母にし、`inconclusive` は別途「検証カバレッジ」指標。
 - **pruning は `inconclusive` を等価扱い**: Hydra 式 pruning (`pruning/engine.ts`) の縮約可否判定は `equal ∪ inconclusive`。`inconclusive` の保守的区別は等価検証アーティファクトのためで、パターン縮約の健全性とは別軸 (ADR-0018)。
 
 ---
@@ -173,10 +191,10 @@ if (slow.exception !== null || fast.exception !== null) {
 
 | # | 観測されない事象 | 原因（実装箇所） | Selakovic での影響度 |
 |---|---|---|---|
-| 1 | setup で定義された **primitive 変数の最終値** | `executor.ts:50-59` は `typeof val === "object"` の変数のみ trackedKeys に入れる。number / string / boolean は post snapshot の対象外 | **低** — Selakovic パターンは collection 操作主体で、カウンタ変数等の primitive 変更は稀 |
-| 2 | body で新規作成された **global 変数の値** | `external-observation.ts:50-54` は `new_globals` のキー集合のみ比較。値は比較しない | **中** — `var` 忘れ等の global リークはあるが、値の差まで問題になる例は少ない |
+| 1 | setup で定義された **primitive 変数の最終値** | `common/sandbox/capture/snapshot.ts` の setup snapshot は `typeof val === "object"` の変数のみ trackedKeys に入れる。number / string / boolean は post snapshot の対象外 | **低** — Selakovic パターンは collection 操作主体で、カウンタ変数等の primitive 変更は稀 |
+| 2 | body で新規作成された **global 変数の値** | `common/comparison/oracles/external-observation.ts` は `new_globals` のキー集合のみ比較。値は比較しない | **中** — `var` 忘れ等の global リークはあるが、値の差まで問題になる例は少ない |
 | 3 | body 同期終了**後**に実行される非同期タスク | sandbox は body 同期完了で観測打ち切り。`setTimeout` / `queueMicrotask` / 未解決 Promise の副作用は見えない | **低** — Selakovic パターンは同期コード主体 |
-| 4 | `null` で初期化された変数の **null → object 変化** | `executor.ts:55` の `val !== null` により、setup で null の場合は trackedKeys に入らない。body で object 化されても pre snapshot が無く不完全 | **非常に低** — setup で null を置く使い方はほぼ無い |
+| 4 | `null` で初期化された変数の **null → object 変化** | `common/sandbox/capture/snapshot.ts` の setup snapshot は `val !== null` 条件があり、setup で null の場合は trackedKeys に入らない。body で object 化されても pre snapshot が無く不完全 | **非常に低** — setup で null を置く使い方はほぼ無い |
 
 #### 判断と対処
 
@@ -196,9 +214,9 @@ if (slow.exception !== null || fast.exception !== null) {
 | 領域 | 責務 |
 |---|---|
 | `engine.ts` | 公開 `prune` + 1 パス試行 `tryPruneCandidates`。Hydra 反復ループの本体 + mutate / revert (savepoint パターン) |
-| `candidates.ts` | AST 走査 + ルール適用で候補列挙 (placeholder 除外 / whitelist / blacklist / FastSubtreeSet の 4 段フィルタ) |
+| `candidates.ts` | AST 走査 + ルール適用で候補列挙 (placeholder 除外 / whitelist / blacklist / SubtreeSet の 4 段フィルタ) |
 | `rules/` | pruning の対象と戦略の宣言データ集 (whitelist / blacklist / replacement) |
-| `ast/*` | Babel AST 汎用 toolbox (parser / inspect / diff)。pruning 固有の知識を持たない |
+| `ast/parser.ts` | `src/ast/parser` の汎用 parse に `rules/whitelist.ts` の `PARSER_PLUGINS` を渡す薄ラッパー (pruning 固有はこれだけ — 走査 / inspect / subtree-hash 等の AST toolbox 本体は `src/ast/` に集約) |
 
 ファイル単位の詳細責務 / 依存方向 / 関連 ADR は [`mb-analyzer/src/pruning/README.md`](../mb-analyzer/src/pruning/README.md) に集約 (drift 面のローカル化)。
 
@@ -208,24 +226,24 @@ if (slow.exception !== null || fast.exception !== null) {
 
 `prune` は **2 段ループ構造**:
 
-- **外側ループ (`prune`)**: AST が変わるたびに FastSubtreeSet と候補リストを再計算する。1 パスで 1 ノードが prune できれば AST を更新して次パスへ。
+- **外側ループ (`prune`)**: AST が変わるたびに SubtreeSet と候補リストを再計算する。1 パスで 1 ノードが prune できれば AST を更新して次パスへ。
 - **内側ループ (`tryPruneCandidates`)**: 現在の候補を size 降順で順に試し、**最初に成功した 1 候補で return**。残った候補は次パスで再列挙される。
 
 ```
 PruningInput (slow, fast, setup, timeout_ms, max_iterations)
        ↓
-    parse(slow) / parse(fast)                    ← ast/parser.ts
+    parse(slow) / parse(fast)                    ← pruning/ast/parser.ts (= src/ast/parser + PARSER_PLUGINS)
        ↓
     Phase 1: 初回等価性検証
     checkEquivalence(setup, slow, fast)
        ├─ not_equal → verdict = initial_mismatch で終了
        ├─ error     → verdict = error で終了
        └─ equal     ↓
-    countNodes(slow) → node_count_before          ← ast/inspect.ts
+    countNodes(slow) → node_count_before          ← src/ast/inspect.ts
        ↓
     Phase 2: 反復 pruning
   ┌─ 外側ループ: iterations < max_iterations かつ wall-time 内 ───────────┐
-  │   FastSubtreeSet(fast)                    ← ast/subtrees.ts: 再計算    │
+  │   SubtreeSet(fast)                    ← src/ast/subtree-hash.ts: 再計算 │
   │   enumerateCandidates(slow, diff)            ← candidates.ts          │
   │   候補が空 → 終了                                                      │
   │   ↓                                                                    │
@@ -285,7 +303,7 @@ total_budget_ms: timeout_ms * max_iterations
 | 1 | placeholder 自身の除外 | 前 iteration で挿入した `Identifier($Pn)` / `ExpressionStatement(Identifier($Pn))` を再候補化すると pruning ループが破綻するため除外 (ADR-0009) | `pruning/candidates.ts` の `isPlaceholderNode` |
 | 2 | 型 whitelist | pruning 可能な AST 型 (Statement / Expression / Identifier の 3 分類) のみ残す。**`@babel/types` の Statement / Expression alias から自動導出** (ADR-0006) | `pruning/rules/whitelist.ts` の `WHITELIST_CATEGORIES` keys |
 | 3 | 親子位置 blacklist | 親 field validator が置換後の型を受理しない位置を**文法由来で自動判定**し除外 (ADR-0005) | `pruning/rules/blacklist.ts` の `BLACKLIST_CATEGORIES` |
-| 4 | AST 差分フィルタ | fast に同型ノードが存在する「共通ノード」のみに絞る (差分ノードは必須扱いで保護) | `pruning/ast/subtrees.ts` の `FastSubtreeSet.has` |
+| 4 | AST 差分フィルタ | fast に同型ノードが存在する「共通ノード」のみに絞る (差分ノードは必須扱いで保護) | `src/ast/subtree-hash.ts` の `SubtreeSet.has` |
 
 候補は **`end - start` 降順 (大きいノード優先)** でソートして返す (`candidates.ts:nodeSize`)。size 降順で試す方が、成功時に一度に縮む量が大きく、外側ループ反復数が減るという経験則。
 
@@ -523,7 +541,7 @@ Selakovic データセットは 3 カテゴリ (clientIssues / serverIssues / cl
 | `layout-unknown` | `v_*.html` も `<libname>_*/` も `<libname>_*.js` も無いディレクトリ | データ固有、個別対応が必要 |
 | `missing-files` | 期待ファイル欠落 / I/O 失敗 | データ固有、個別対応が必要 |
 
-実測 (Phase 2a の Selakovic 97 issue → 108 candidate): 抽出済 107 / excluded 1 (`parse-error` = inline `<script>` が JSX を含む 1 件)。`ExclusionReason` enum 自体は ADR-0011 改修後も不変だが、Tier 2 で `f1`/`test()` が規約外フォーマットの場合は exclude せず fallback (Tier 1 素の diff) に回るようになったので、上表の理由は実質 fallback 経路でのみ発生する。等価検証まで流した結果は `tmp/0003_phase2a-preprocess-rework/verify-97-results.md` (101 equal / 5 not_equal / 1 error / 1 excluded、jsdom 最小版 — ADR-0012)。threats to validity への記述方針: 各除外・各 not_equal を **「データセット / 等価検証器の限界として明示」** し、論文非依存性を主張する論理 (= 主軸 pruning は論文非依存) を保つ。
+実測 (Phase 2a の Selakovic 97 issue → 108 candidate): 抽出済 107 / excluded 1 (`parse-error` = inline `<script>` が JSX を含む 1 件)。`ExclusionReason` enum 自体は ADR-0011 改修後も不変だが、Tier 2 で `f1`/`test()` が規約外フォーマットの場合は exclude せず fallback (Tier 1 素の diff) に回るようになったので、上表の理由は実質 fallback 経路でのみ発生する。これら抽出済 candidate を等価検証まで流した最新の verdict 内訳は本文書の [§Selakovic データセットでの実測](#selakovic-データセットでの実測) (= ADR-0016 dep lockfile + ADR-0018 verdict 保守化後の `equal` 71 / `not_equal` 6 / `inconclusive` 29) を参照。threats to validity への記述方針: 各除外・各 not_equal を **「データセット / 等価検証器の限界として明示」** し、論文非依存性を主張する論理 (= 主軸 pruning は論文非依存) を保つ。
 
 ### 既知の運用上の落とし穴 (Node CLI の stdout flush)
 
@@ -546,7 +564,7 @@ main()
 
 `vm.runInContext` で throw された `Error` は **VM context (別 realm) の Error コンストラクタで生成**されるため、outer realm から `e instanceof Error` で判定すると **常に false になる**。これは Node.js の vm モジュール固有の挙動で、ライブラリ作者が頻繁に踏む落とし穴。
 
-旧実装 (`mb-analyzer/src/equivalence-checker/checker.ts`):
+旧実装 (Phase 2b.1 リファクタ前の `equivalence-checker/checker.ts`):
 
 ```ts
 const message = e instanceof Error ? e.message : "unexpected non-Error thrown";
@@ -554,7 +572,7 @@ const message = e instanceof Error ? e.message : "unexpected non-Error thrown";
 
 → VM 内で `ReferenceError: angular is not defined` が throw されても `instanceof Error` が false で本来のメッセージが捨てられ、全件「unexpected non-Error thrown」として report されていた。
 
-修正後 (duck typing):
+修正後 (duck typing、現在は `selakovic/checker.ts` の `extractErrorMessage`):
 
 ```ts
 function extractErrorMessage(e: unknown): string {
@@ -573,26 +591,12 @@ function extractErrorMessage(e: unknown): string {
 
 `.constructor.name` で型名 (`ReferenceError` / `TypeError` / `SyntaxError`) を、`.message` で詳細を拾う。これで VM 内 throw でも本来のエラー種別とメッセージが outer に伝わる。
 
-なお `executor.ts` の `captureException` は元々 duck typing で実装されている (oracle 用の exception field キャプチャ)。本修正は **executor 外で起きる throw** (= setup の `vm.runInContext` 直接 throw) を outer try/catch で受ける際の同パターン適用。
+なお `common/sandbox/capture/snapshot.ts` の `captureException` は元々 duck typing で実装されている (oracle 用の exception field キャプチャ)。本修正は **executor 外で起きる throw** (= setup の `vm.runInContext` 直接 throw) を `selakovic/checker.ts` の outer try/catch で受ける際の同パターン適用 (`error_message` 用)。
 
-### Selakovic データセットでの実測 (Phase 4.3 一次観測)
+### 既知の運用上の落とし穴 (pnpm shared install と相対 require の不整合, Phase C-1)
 
-97 件の抽出済 issue (= 112 結果) に対する `check-equivalence-batch` 実行結果:
+Selakovic dataset fork は SUT lib の npm dep を lockfile で宣言し pnpm でインストールする (ADR-0016)。pnpm の **shared install** は実体を上位 dir の `node_modules/` に置くため、`<issueDir>/<lib>/node_modules/<dep>/` のような物理パスは存在しない。ところが dataset の一部 `test_case_*.js` (Selakovic 2016 の Backbone 系) は lib の transitive dep を `require('./<lib>/node_modules/underscore')` のように **hardcode 相対パス**で参照する。jsdom executor の require shim はまず素直に相対解決を試み、失敗したら **末尾 `/node_modules/<dep>` パターンを bare module 名として抜き出し `createRequire` 経由で再解決する** (`common/sandbox/executors/jsdom.ts` の `installRequire`)。bare 解決も失敗したら元の `ENOENT` を投げて Phase F の error 分類で可視化する。これにより Node の relative 解決では辿れない pnpm shared dep を救う。
 
-```
-total: 112  equal: 15  not_equal: 0  error: 97
-```
+### Selakovic データセットでの実測
 
-`error` 96 件 (1 件は別エラー) は **すべてフレームワーク / Node CommonJS / DOM / jsperf 計測ハーネスのグローバル識別子未定義**:
-
-| 識別子 | 件数 | 種類 |
-|---|---|---|
-| `execute` | 34 | jsperf 計測ハーネス (`var a = execute(f1, 10)`) |
-| `angular` | 19 | Angular |
-| `require` | 19 | Node CommonJS |
-| `Ember` | 7 | Ember.js |
-| その他 | 17 | document / $ / exports / window / jQuery / _ / React / f1 |
-
-これらは **抽出器のミスではなく VM sandbox 環境の制約**。本来両側 (slow/fast) が同じ throw → 等価判定すべきだが、現状は setup throw が全体 error verdict に畳まれる仕様。
-
-対処: **Proxy-based undefined stub を VM sandbox に仕込む** (PR #5 で対応予定)。未定義 globalThis アクセスを「何でも吸収する stub」に自動置換し、両側で同じ動作にして等価判定を成立させる。本 PR スコープ外。
+Selakovic 97 issue → 108 candidate (Phase 2a 抽出: 抽出済 107 / excluded 1) に対し、ADR-0016 (dep lockfile) + ADR-0012 (jsdom 実行環境) + ADR-0017 (実行前 transform) + ADR-0018 (verdict 保守化 + Phase C-2 の `dom_changed`) を経た再走の verdict 内訳: **`equal` 71 / `not_equal` 6 / `inconclusive` 29 / `error` 1 / `excluded` 1** (検証カバレッジ 71.3% = `equal`+`not_equal` の確認済み分 77 / 全 candidate 108)。`error` はフレームワーク bootstrap / dep / DOM の未対応に由来し、`inconclusive` は「両側同じくクラッシュ」「DOM 不変」「scaffolding global のみ」等の弱い equal。**詳細な内訳・突合・分析は [ADR-0018](adr/0018-equivalence-verdict-conservative.md) の §トリガー / 各 phase の追記、および `tmp/0007_equivalence-verdict-conservative-reclassification/` を参照** (code-map 側はスナップショットを 1 行で持つだけ。RQ の主張への結び付け方は [`current-research.md` §妥当性の脅威](current-research.md))。

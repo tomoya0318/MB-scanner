@@ -43,15 +43,17 @@ export const VERDICT_REASON = {
 export type VerdictReason = (typeof VERDICT_REASON)[keyof typeof VERDICT_REASON];
 
 /**
- * oracle observation 集合から全体 verdict を導出する純粋関数 (ADR-0018, 5 規則)。
+ * oracle observation 集合から全体 verdict を導出する純粋関数 (ADR-0018 + Phase C-2)。
  *
  * 1. いずれかの oracle が not_equal → not_equal
  * 2. いずれかの oracle が error → error
  * 3. 全 oracle が not_applicable → inconclusive（観測チャネルゼロ）
  * 4. not_equal/error 無し かつ positive-evidence oracle ({return_value, argument_mutation,
- *    interaction_trace}) がすべて not_applicable → inconclusive（差は観測されなかったが
+ *    interaction_trace, dom_mutation}) がすべて not_applicable → inconclusive（差は観測されなかったが
  *    積極的等価エビデンスが無い = 中身を exercise できていない可能性が高い）
- * 5. それ以外 → equal
+ * 5. exception=equal（両側同じく落ちた）かつ唯一の positive evidence が dom_mutation のみ → inconclusive
+ *    （その DOM 変化は workload でなく bootstrap 由来の可能性が高い = 弱い equal）
+ * 6. それ以外 → equal
  */
 export function deriveOverallVerdict(observations: OracleObservation[]): Verdict {
   const verdicts = observations.map((o) => o.verdict);

@@ -27,11 +27,14 @@ _POSITIVE_EVIDENCE_ORACLES = frozenset(
     {Oracle.RETURN_VALUE, Oracle.ARGUMENT_MUTATION, Oracle.INTERACTION_TRACE, Oracle.DOM_MUTATION},
 )
 
-# inconclusive verdict の理由文字列 (ADR-0018)。equal / not_equal では None。
+# inconclusive verdict の理由文字列 (ADR-0018 + Phase C-2)。equal / not_equal では None。
 # - no-observable-channel: 全 oracle が not_applicable
-# - both-sides-threw     : exception oracle が equal (= 両側が同じ例外で落ちた) で positive evidence 無し
-# - no-positive-evidence : 例外も無く positive evidence 無し (dom_mutation / external_observation だけが equal 等)
-# executor-error は executor crash / setup throw 由来の error verdict 用で、Node 側 checker が直接セットする。
+# - both-sides-threw     : exception oracle が equal (= 両側が同じ例外で落ちた)。positive evidence 無し、
+#                          または唯一の positive evidence が dom_mutation だけ (bootstrap 由来とみなす)
+# - no-positive-evidence : 例外も無く positive-evidence oracle (return_value/argument_mutation/interaction_trace/
+#                          dom_mutation) がすべて not_applicable (external_observation だけが equal 等)
+# executor-error は executor crash / setup throw / Gateway・CLI 層の pipeline 失敗由来の error verdict 用で、
+# checker / Gateway / batch CLI が直接セットする (derive_verdict_reason は返さない)。
 VERDICT_REASON_NO_OBSERVABLE_CHANNEL = "no-observable-channel"
 VERDICT_REASON_BOTH_SIDES_THREW = "both-sides-threw"
 VERDICT_REASON_NO_POSITIVE_EVIDENCE = "no-positive-evidence"
@@ -39,16 +42,18 @@ VERDICT_REASON_EXECUTOR_ERROR = "executor-error"
 
 
 def derive_overall_verdict(observations: list[OracleObservation]) -> Verdict:
-    """Oracle observation から全体 verdict を導く純粋関数 (ADR-0018, 5 規則)
+    """Oracle observation から全体 verdict を導く純粋関数 (ADR-0018 + Phase C-2)
 
     優先順位:
         1. not_equal が 1 つでもある → not_equal
         2. error が 1 つでもある → error
         3. 全 oracle が not_applicable → inconclusive（観測チャネルゼロ）
         4. not_equal/error 無し かつ positive-evidence oracle
-           ({return_value, argument_mutation, interaction_trace}) がすべて not_applicable
+           ({return_value, argument_mutation, interaction_trace, dom_mutation}) がすべて not_applicable
            → inconclusive（差は観測されなかったが積極的等価エビデンスが無い）
-        5. それ以外 → equal
+        5. exception=equal（両側同じく落ちた）かつ唯一の positive evidence が dom_mutation のみ
+           → inconclusive（その DOM 変化は workload でなく bootstrap 由来の可能性が高い = 弱い equal）
+        6. それ以外 → equal
     """
     verdicts = [o.verdict for o in observations]
     if OracleVerdict.NOT_EQUAL in verdicts:

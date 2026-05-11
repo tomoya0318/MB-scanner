@@ -26,7 +26,7 @@ MB-Scanner は、GitHub 上の多数の JavaScript リポジトリに対して C
 両コードベースとも Clean Architecture を採用し、依存方向が外側 → 内側に向かう構造を取ります。
 
 - **Python 側**: `domain → use_cases → adapters → infrastructure` の 4 層を `import-linter` で機械強制
-- **TypeScript 側**: `shared → equivalence-checker → pruning → ... → cli` のゾーン構造を ESLint `import/no-restricted-paths` で機械強制
+- **TypeScript 側**: `{contracts, ast} (末端層) → preprocessing → equivalence-checker → pruning → … → cli (composition root)` のゾーン構造を ESLint `import/no-restricted-paths` で機械強制 (各機能の `common/` は `selakovic/` を import 禁止 = dataset 非依存層)
 
 詳細な契約は言語別ドキュメント参照。
 

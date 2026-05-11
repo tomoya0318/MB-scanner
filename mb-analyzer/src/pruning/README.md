@@ -4,7 +4,7 @@
 
 ## 入出力契約
 
-公開 API は `index.ts` の re-export (`prune` 関数 + 型定義) のみ。型は `mb-analyzer/src/shared/pruning-contracts.ts` で定義され、Python 側 (`mb_scanner/domain/entities/pruning.py`) と JSON シリアライゼーション互換を保つ。
+公開 API は `index.ts` の re-export (`prune` 関数 + 型定義) のみ。型は `mb-analyzer/src/contracts/pruning-contracts.ts` で定義され、Python 側 (`mb_scanner/domain/entities/pruning.py`) と JSON シリアライゼーション互換を保つ。
 
 CLI ラッパは `mb-analyzer/src/cli/prune.ts` (`prune` / `prune-batch` サブコマンド) で、本モジュールの `prune()` を JSON でラップして stdin/stdout を中継する薄い層になっている。Python 側 `mb_scanner/adapters/cli/pruning.py` (`mbs prune` / `mbs prune-batch`) が subprocess 経由でこの CLI を起動する。**入出力データの意味論はここ (本 README) を一次ソースとし、CLI 側には CLI 固有の引数 / stderr 規約 / 終了コードのみ書く**方針。
 
@@ -81,27 +81,34 @@ warning: input (slow) contains identifier "$P0" which collides with internal pla
 ```
 src/pruning/
 ├── engine.ts            ← 公開 prune + tryPruneCandidates (mutate + revert / savepoint パターン)
-├── candidates.ts        ← enumerateCandidates (3 段フィルタ + size 降順)
+├── candidates.ts        ← enumerateCandidates (4 段フィルタ + size 降順)
 ├── index.ts             ← 公開 re-export
 ├── rules/               ← pruning が扱う対象と戦略の宣言データ集
 │   ├── index.ts            ← barrel
 │   ├── whitelist.ts        ← WHITELIST_CATEGORIES (型 → カテゴリ) + PARSER_PLUGINS
 │   ├── blacklist.ts        ← BLACKLIST_CATEGORIES (`@babel/types` 文法メタから自動導出)
-│   └── replacement.ts      ← REPLACEMENTS (カテゴリ → placeholderKind + buildNode)
-└── ast/                 ← Babel AST 汎用 toolbox (pruning 知識ゼロ)
-    ├── parser.ts           ← parse / generate / tryGenerateNode (Babel ラッパ)
-    ├── walk.ts             ← walkNodes / isNode (VISITOR_KEYS ベースの DFS 走査)
-    ├── inspect.ts          ← countNodes / snippetOfNode (read-only AST 検査)
-    └── subtrees.ts         ← FastSubtreeSet (top-down subtree hash で fast 所属判定)
+│   └── replacement.ts      ← REPLACEMENTS (カテゴリ → placeholderKind + buildNode) + PLACEHOLDER_NAME_PATTERN
+└── ast/
+    └── parser.ts           ← `src/ast/parser` の汎用 parse に `rules/whitelist.ts:PARSER_PLUGINS` を渡す薄ラッパ (pruning 固有はこれだけ; +generate/tryGenerateNode を再export)
 ```
 
-3 層の役割分担:
+AST toolbox 本体は **`src/ast/`** に集約 (機能間で共有、pruning 知識ゼロ — リネーム前は `pruning/ast/` 配下にあった):
+
+| `src/ast/` | 役割 |
+|---|---|
+| `parser.ts` | parse / generate / tryGenerateNode (Babel ラッパ) |
+| `walk.ts` | walkNodes / isNode (VISITOR_KEYS ベースの DFS 走査) |
+| `inspect.ts` | countNodes / nodeSize / snippetOfNode (read-only AST 検査) |
+| `subtree-hash.ts` | `SubtreeSet` (top-down subtree hash で fast 所属判定) + `canonicalHash` |
+
+層の役割分担:
 
 | 層 | 中身 | pruning 知識 | 入れ替え可能性 |
 |---|---|---|---|
 | ルート (engine, candidates) | アルゴリズム本体 | あり | このプロジェクト固有 |
 | `rules/` | 宣言データのみ (whitelist / blacklist / replacement) | あり | データ差し替え可能 |
-| `ast/` | parser / walk / inspect / subtrees (Babel AST toolbox) | なし | 別プロジェクトに切り出し可能 |
+| `ast/parser.ts` | whitelist-aware parse の薄ラッパ | plugin 構成のみ | — |
+| `src/ast/` (共有) | parser / walk / inspect / subtree-hash (Babel AST toolbox) | なし | 別プロジェクトに切り出し可能 |
 
 ## 依存方向
 
@@ -109,20 +116,22 @@ src/pruning/
 engine.ts
  ├─ candidates.ts ──┬─ rules/whitelist.ts
  │                  ├─ rules/blacklist.ts ── rules/whitelist.ts
- │                  ├─ ast/subtrees.ts ── ast/walk.ts
- │                  └─ ast/walk.ts
+ │                  ├─ rules/replacement.ts (PLACEHOLDER_NAME_PATTERN)
+ │                  ├─ src/ast/subtree-hash.ts ── src/ast/walk.ts
+ │                  ├─ src/ast/walk.ts
+ │                  └─ src/ast/inspect.ts ── src/ast/walk.ts
  ├─ rules/replacement.ts ── rules/whitelist.ts
- ├─ ast/parser.ts ── rules/whitelist.ts (PARSER_PLUGINS)
- ├─ ast/inspect.ts ── ast/walk.ts
- └─ ../equivalence-checker (上層モジュール)
+ ├─ ast/parser.ts ── src/ast/parser.ts + rules/whitelist.ts (PARSER_PLUGINS)
+ ├─ src/ast/{inspect,subtree-hash,walk}.ts
+ └─ ../equivalence-checker (上層モジュール — checkEquivalence)
 ```
 
-葉ノードは `rules/whitelist.ts` / `ast/parser.ts` / `ast/walk.ts` (Babel のみに依存)。
+葉ノードは `rules/whitelist.ts` / `src/ast/parser.ts` / `src/ast/walk.ts` (Babel のみに依存)。
 
 ## 関連 ADR
 
-- [ADR-0001](../../../ai-guide/adr/0001-pruning-ast-traversal.md): AST 走査に `VISITOR_KEYS` 再帰を採用 (`ast/walk.ts`)
-- [ADR-0002](../../../ai-guide/adr/0002-babel-topdown-subtree-hash.md): AST 差分判定に Babel + top-down subtree hash を自作 (`ast/subtrees.ts`)
+- [ADR-0001](../../../ai-guide/adr/0001-pruning-ast-traversal.md): AST 走査に `VISITOR_KEYS` 再帰を採用 (`src/ast/walk.ts`)
+- [ADR-0002](../../../ai-guide/adr/0002-babel-topdown-subtree-hash.md): AST 差分判定に Babel + top-down subtree hash を自作 (`src/ast/subtree-hash.ts`)
 - [ADR-0003](../../../ai-guide/adr/0003-bottom-up-mapping-deferred.md): bottom-up mapping を第 2 段階以降に遅延
 - [ADR-0004](../../../ai-guide/adr/0004-pruning-setup-single.md): `PruningInput.setup` を単数 string にする
 - [ADR-0005](../../../ai-guide/adr/0005-grammar-derived-blacklist.md): 候補位置 blacklist を文法メタから自動導出 (`rules/blacklist.ts`)

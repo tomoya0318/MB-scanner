@@ -58,25 +58,30 @@ mb-analyzer/                  # === TypeScript CLI (現行実装) ===
 │   │   ├── equivalence-contracts.ts    # Python `equivalence.py` と JSON 互換
 │   │   ├── pruning-contracts.ts        # Python `pruning.py` と JSON 互換
 │   │   └── preprocessing-contracts.ts  # Python `preprocessing.py` と JSON 互換
-│   ├── equivalence-checker/  # 等価性検証器（pruning/ 等を import 禁止）
-│   │   ├── checker.ts        # checkEquivalence() 本体 (environment で vm / jsdom を振り分け — ADR-0012)
-│   │   ├── verdict.ts        # 全体 verdict 判定ロジック (deriveOverallVerdict)
-│   │   ├── oracles/          # 4 oracle (return-value / argument-mutation / exception / external-observation)
-│   │   └── sandbox/          # 実行環境
-│   │       ├── stabilizer.ts # vm 環境: Date / Math.random / console の decoupling
-│   │       ├── executor.ts   # vm 環境: runInContext で slow / fast を実行
-│   │       ├── jsdom-executor.ts # jsdom 環境 (ADR-0012 最小版): window/document + 相対 require 解決
-│   │       └── serializer.ts # 副作用を含む値を文字列化
+│   ├── equivalence-checker/  # 等価性検証器（pruning/ 等を import 禁止; common→selakovic 一方向 DI を ESLint 強制）
+│   │   ├── common/           # dataset 非依存 (ADR-0015)
+│   │   │   ├── sandbox/      # (setup,slow,fast) を実行して ExecutionCapture を作る
+│   │   │   │   ├── executors/{vm,jsdom}.ts        # vm = 素 node:vm / jsdom = window+document+require shim
+│   │   │   │   ├── capture/{types,snapshot,console-hook,recording-proxy}.ts  # capture 型 + 値/例外/global snapshot + console hook + 記録 Proxy(C6)
+│   │   │   │   └── transforms/{non-determinism,iteration-cap}.ts  # Date/Math.random/timer 凍結 (ADR-0012) + 計測ループ clamp (ADR-0017)
+│   │   │   ├── comparison/   # ExecutionCapture ×2 → Verdict
+│   │   │   │   ├── oracles/{return-value,argument-mutation,exception,external-observation,dom-mutation,interaction-trace}.ts  # C1/C4/C5/C3+C4/C2/C6
+│   │   │   │   └── verdict.ts # deriveOverallVerdict / deriveVerdictReason / VERDICT_REASON (ADR-0013 / ADR-0018)
+│   │   │   └── serializer.ts # host-realm 用 canonical 値 → 文字列
+│   │   └── selakovic/        # dataset 依存 adapter (ADR-0015)
+│   │       ├── checker.ts    # checkEquivalence() 本体 (environment で vm / jsdom を振り分け — ADR-0012)
+│   │       ├── oracle-routing.ts # 環境ごとの oracle 集合 + 評価順
+│   │       └── profiles.ts   # Selakovic 固有の正規化「値」(DOM/exception/external/interaction profile + iteration-cap)
 │   ├── preprocessing/        # データセット前処理 (1 issue → (setup, slow, fast) 抽出)
 │   │   ├── common/           # Tier 1 (ADR-0011): ast-diff / enclosure / setup-cleanup
 │   │   └── selakovic/        # Tier 2 (ADR-0011): io/{layout,lib-pair} (FS I/O) →
 │   │                         #   decompose/{inline-script,f1,test-case} (段1) →
 │   │                         #   route/{aspect,lib-diff,case-split} (段2) →
-│   │                         #   assemble/{angular,client,server,fallback} ((setup,slow,fast)) /
+│   │                         #   assemble/{angular,client,server,fallback,recorder-hooks} ((setup,slow,fast)+C6 hooks) /
 │   │                         #   pipeline.ts (段1·段2 統括) / index.ts (薄い barrel)
-│   ├── pruning/              # 第 1 段階 pruning エンジン
-│   │   ├── ast/parser.ts     # ast/parser を PARSER_PLUGINS で注入する薄ラッパー (ADR-0006)
-│   │   ├── candidates.ts / engine.ts / index.ts / inspect.ts
+│   ├── pruning/              # 第 1 段階 pruning エンジン (AST toolbox 本体は src/ast/ に集約)
+│   │   ├── ast/parser.ts     # src/ast/parser を PARSER_PLUGINS で注入する薄ラッパー (ADR-0006)
+│   │   ├── candidates.ts / engine.ts / index.ts
 │   │   └── rules/            # whitelist / blacklist / replacement
 │   └── cli/                  # composition root (全機能を import 可能)
 │       ├── index.ts          # サブコマンドディスパッチ + 大量出力 stdout flush 待ち
@@ -85,9 +90,9 @@ mb-analyzer/                  # === TypeScript CLI (現行実装) ===
 │       └── preprocess-selakovic.ts
 ├── tests/                    # vitest (`tests/{cli,equivalence-checker,pruning,contracts,preprocessing}/**` + property + integration)
 │   ├── cli/
-│   ├── equivalence-checker/  # checker / oracles / sandbox (jsdom-executor.test.ts 含む)
+│   ├── equivalence-checker/  # common/{comparison/oracles,comparison/verdict,sandbox/...,serializer} + selakovic/{checker,oracle-routing}
 │   ├── preprocessing/        # selakovic.test.ts (公開 API preprocess() のみ; モジュール内ヘルパは各 src ファイルの in-source — ADR-0007)
-│   ├── pruning/
+│   ├── pruning/              # engine.test.ts (モジュール内ヘルパ candidates / rules / ast/parser は各 src ファイルの in-source)
 │   ├── property/
 │   ├── integration/          # selakovic-2016.test.ts
 │   └── contracts/
@@ -138,16 +143,16 @@ mb-analyzer-legacy/           # [DEPRECATED] 旧 pnpm workspace monorepo
 
 ### 1. 新しい oracle の追加
 
-1. `mb-analyzer/src/equivalence-checker/oracles/` に新 oracle を作成 (`check*(slow, fast): OracleObservation` を export)
-2. `equivalence-checker/checker.ts` の observations リストに追加
-3. `mb_scanner/domain/entities/equivalence.py` の `Oracle` 列挙値に対応する文字列を追加 (Python ↔ TS で完全一致)
-4. `verdict.ts` / `use_cases/equivalence_verification.py` の `derive_overall_verdict` 優先順位を見直し
-5. テスト追加 (`mb-analyzer/tests/equivalence-checker/oracles/*.test.ts` と Python 側 use case テスト)
+1. `mb-analyzer/src/equivalence-checker/common/comparison/oracles/` に新 oracle を作成 (`check*(slow, fast, profile?): OracleObservation` を export) し `oracles/index.ts` に re-export
+2. `mb_scanner/domain/entities/equivalence.py` の `Oracle` 列挙値に対応する文字列を追加 (Python ↔ TS で完全一致; TS 側は `contracts/equivalence-contracts.ts` の `ORACLE`)
+3. `selakovic/oracle-routing.ts` の環境別 oracle 集合 + `selakovic/checker.ts` の `runOracle` switch に追加。dataset 固有の正規化値は `selakovic/profiles.ts` に置いて `common/` に直書きしない
+4. positive evidence にするか / verdict 合成への影響を `common/comparison/verdict.ts` と `use_cases/equivalence_verification.py` (`derive_overall_verdict` / `derive_verdict_reason`、両者ミラー) で見直し
+5. テスト追加 (`mb-analyzer/tests/equivalence-checker/common/comparison/oracles/*.test.ts` + verdict.test.ts と Python 側 use case テスト)
 
 ### 2. サンドボックス環境のカスタマイズ
 
-- **安定化処理の追加**: `mb-analyzer/src/equivalence-checker/sandbox/stabilizer.ts` に新しい固定化ロジックを追加 (Date, Math.random, console などの decoupling)
-- **サンドボックスへの統合**: 同階層の `executor.ts` で安定化処理を適用
+- **実行前 transform の追加** (非決定性凍結 / iteration-cap 系): `mb-analyzer/src/equivalence-checker/common/sandbox/transforms/` に追加 (ADR-0017)。dataset 固有の閾値は `selakovic/profiles.ts` 経由で渡す
+- **executor への統合**: `common/sandbox/executors/{vm,jsdom}.ts` で transform を body に適用してから実行
 
 ### 3. バッチ API の拡張
 
