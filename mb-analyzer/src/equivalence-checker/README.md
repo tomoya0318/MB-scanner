@@ -13,6 +13,66 @@
   `common/` の primitive に渡す config (oracle 選択・評価順 / 正規化プロファイル / iteration-cap 値) を構成して
   オーケストレーションする。
 
+## 入出力契約
+
+公開 API は `index.ts` (package barrel) の `checkEquivalence(input: EquivalenceInput): Promise<EquivalenceCheckResult>` + verdict 合成ヘルパ (`deriveOverallVerdict` / `deriveVerdictReason` / `VERDICT_REASON`) + contract 型のみ。内部構成 (`selakovic/` の oracle 配線 / `common/` の sandbox・comparison) は外に出さない。
+
+`EquivalenceInput` / `EquivalenceCheckResult` (および `Verdict` / `OracleVerdict` / `Oracle` / `ExecutionEnvironment` 列挙) は `mb-analyzer/src/contracts/equivalence-contracts.ts` で定義され、Python 側 (`mb_scanner/domain/entities/equivalence.py`) と JSON シリアライゼーション互換を保つ (列挙値の文字列・フィールド名 snake_case を両言語で厳密に揃える。変更は paired-change)。`aspect` / `candidate_kind` / `enclosure_type` hint は `preprocessing-contracts.ts` の対応列挙と値域を揃える (両 contract を独立した leaf に保つため型は loose な `string`)。CLI ラッパは `mb-analyzer/src/cli/check-equivalence.ts` (`check-equivalence` / `check-equivalence-batch` サブコマンド) で、stdin から JSON / JSONL を読んで純関数 `checkEquivalence()` を呼び、結果を stdout に出す薄い層 (CLI 固有の引数 / 終了コード / stderr 規約は [`cli/README.md`](../cli/README.md))。Python 側 `mb_scanner/adapters/cli/equivalence.py` (`mbs check-equivalence[-batch]`) と Gateway (`mb_scanner/adapters/gateways/equivalence/node_runner_gateway.py`) が subprocess 経由で起動し、batch は Python 側 `ThreadPoolExecutor` で並列化 (Node 側 1 subprocess = 逐次)。**入出力データの意味論はここ (本 README) と [code-map.md §等価性検証器](../../../ai-guide/code-map.md#等価性検証器) を一次ソースとし、CLI 側には CLI 固有の引数 / stderr 規約 / 終了コードのみ書く**方針。
+
+### `EquivalenceInput`
+
+```ts
+interface EquivalenceInput {
+  id?: string;                  // バッチ API での順序追跡用 (省略可)
+  setup?: string;               // 両側共通の事前定義コード (preprocess の setup をそのまま渡す)
+  slow: string;                 // before 側 candidate (検証対象)
+  fast: string;                 // after  側 candidate
+  timeout_ms?: number;          // 1 実行あたりの上限。単発 API は省略時 DEFAULT (=5000)、batch API は必須
+  environment?: "vm" | "jsdom"; // 省略時 "vm"。jsdom = browser ライブラリ / server test_case で DOM・require が要る (ADR-0012)
+  module_base_dir?: string;     // jsdom 環境で相対 require('./x') を解決する基準ディレクトリ (= 通常 issue ディレクトリの絶対パス)
+  mount_html?: string;          // jsdom 環境で mount する HTML (<body> の中身)。`#demo*` 要素不在の解消用
+  aspect?: string;              // preprocess 由来 hint (ASPECT と同値域) — oracle 選択 / 記録 Proxy の wrap 対象決定に使う
+  candidate_kind?: string;      // preprocess 由来 hint (CANDIDATE_KIND と同値域)
+  enclosure_type?: string;      // preprocess 由来 hint (PreprocessingResult.enclosure_type と同値域)
+}
+```
+
+通常 `(id, setup, slow, fast, enclosure_type, aspect, candidate_kind, environment)` は preprocess の `PreprocessingResult` をそのままマップしたもの。`timeout_ms` / `module_base_dir` / `mount_html` は呼び出し側 (pruning エンジン / CLI) が補う。
+
+### `EquivalenceCheckResult`
+
+```ts
+interface EquivalenceCheckResult {
+  id?: string;                  // 入力 id をエコーバック
+  verdict: "equal" | "not_equal" | "inconclusive" | "error";
+  observations: OracleObservation[];  // 走らせた各 oracle の結果 (下記)
+  verdict_reason?: string | null;     // inconclusive / error のときの理由分類 (下記)、equal / not_equal では null
+  error_message?: string | null;      // verdict === "error" のとき executor crash / setup throw / serialize 失敗等の内容
+  effective_timeout_ms?: number;      // 実際に適用した timeout (clamp 後)
+}
+
+interface OracleObservation {
+  oracle: "return_value" | "argument_mutation" | "exception" |
+          "external_observation" | "dom_mutation" | "interaction_trace";
+  verdict: "equal" | "not_equal" | "not_applicable" | "error";
+  slow_value?: string | null;   // 観測値の canonical 文字列 (差分提示用)
+  fast_value?: string | null;
+  detail?: string | null;       // 人間可読な補足
+}
+```
+
+#### `verdict` の合成と `verdict_reason`
+
+`deriveOverallVerdict` は **`not_equal`/`error` 優先 → positive-evidence oracle (`return_value` / `argument_mutation` / `interaction_trace` / `dom_mutation`) が全て `not_applicable` なら `inconclusive` → それ以外は `equal`** の順で合成する (詳細・優先順位の正確な規則は [code-map.md §等価性検証器](../../../ai-guide/code-map.md#等価性検証器) と ADR-0018)。
+
+| `verdict` | `verdict_reason` |
+|---|---|
+| `equal` / `not_equal` | `null` |
+| `inconclusive` | `"no-observable-channel"` (oracle が 1 つも適用できない) / `"both-sides-threw"` (`exception` oracle が `equal` = 両側同じ例外) / `"no-positive-evidence"` (それ以外) |
+| `error` | `"executor-error"` (executor crash / setup throw / serialize 失敗、加えて Python Gateway 側の spawn/JSON/timeout 失敗・batch CLI の行パース失敗もこれに揃える) |
+
+各 oracle (C1〜C6) の責務分担・排他ルール (例外時は `return_value` が `not_applicable` に身を引く 等) は [code-map.md §等価性検証器](../../../ai-guide/code-map.md#等価性検証器)。
+
 ## ファイル index
 
 ```
