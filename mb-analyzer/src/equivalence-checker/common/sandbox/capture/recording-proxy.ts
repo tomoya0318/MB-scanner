@@ -26,8 +26,21 @@ import type { TraceEntry } from "./types";
  */
 export const RECORDER_GLOBAL = "__recorder";
 
-const MAX_DEPTH = 8;
+const MAX_DEPTH = 6;
 const SKIP_KEY_PREFIX = "$$";
+/** 1 つの値の serialize で辿る配列要素 / オブジェクトキーの最大数 (それ以上は `…(+N more)` に畳む)。 */
+const MAX_BREADTH = 24;
+/** 1 つの値の serialize 結果の最大文字数 (これを超えたら `<truncated>`)。深さ×幅だけでは爆発しうるため総量でも縛る。 */
+const VALUE_BUDGET_CHARS = 16_384;
+/** DOM ノード短縮表現に含める textContent の最大文字数。 */
+const DOM_TEXT_MAX = 200;
+/**
+ * trace に積む最大エントリ数 (それ以上は捨てる + 末尾に 1 件だけ `<trace-truncated>` を残す)。
+ * react-895 系 (workload が 1000 ノード規模の component tree を構築し、`recurse:true` で wrap した
+ * lib グローバルの呼び出し列が膨れる) で V8 の文字列上限を超えてプロセスごと落ちるのを防ぐ。
+ * slow/fast 両方が同じ閾値で打ち切られるので、prefix が一致すれば C6 は `equal`、差があれば `not_equal` のまま。
+ */
+const MAX_TRACE_ENTRIES = 2_000;
 
 export interface WrapOptions {
   /** traced call/construct の戻り値を再帰 wrap するか (true = 無制限, 数値 = 深さ, 既定 0 = 境界 1 段だけ)。 */
@@ -58,10 +71,14 @@ function serializeNumber(n: number): string {
   return String(n);
 }
 
+function clampText(s: string): string {
+  return s.length > DOM_TEXT_MAX ? `${s.slice(0, DOM_TEXT_MAX)}…` : s;
+}
+
 function domNodeRepr(obj: object): string | null {
   const node = obj as { nodeType?: unknown; nodeName?: unknown; id?: unknown; className?: unknown; textContent?: unknown };
   if (typeof node.nodeType !== "number" || typeof node.nodeName !== "string") return null;
-  const text = typeof node.textContent === "string" ? node.textContent : "";
+  const text = typeof node.textContent === "string" ? clampText(node.textContent) : "";
   switch (node.nodeType) {
     case 1: {
       const id = typeof node.id === "string" && node.id.length > 0 ? `#${node.id}` : "";
@@ -82,12 +99,42 @@ function domNodeRepr(obj: object): string | null {
   }
 }
 
-/** cross-realm 耐性のあるタグベース canonical serializer (trace の args/result 用)。 */
-function serializeForTrace(value: unknown, stack: object[] = [], depth = 0): string {
+interface SerBudget {
+  /** 残り予算 (文字数)。0 以下で打ち切り。 */
+  n: number;
+}
+
+/** `items` を `MAX_BREADTH` 件まで serialize し、それ以上は `…(+N more)` に畳む。 */
+function serializeItems(items: readonly unknown[], stack: object[], depth: number, budget: SerBudget): string[] {
+  const out: string[] = [];
+  const shown = Math.min(items.length, MAX_BREADTH);
+  for (let i = 0; i < shown; i++) {
+    if (budget.n <= 0) {
+      out.push("<truncated>");
+      return out;
+    }
+    out.push(serializeForTrace(items[i], stack, depth + 1, budget));
+  }
+  if (items.length > shown) out.push(`…(+${items.length - shown} more)`);
+  return out;
+}
+
+/** cross-realm 耐性のあるタグベース canonical serializer (trace の args/result 用)。深さ・幅・総量に上限を持つ。 */
+function serializeForTrace(value: unknown, stack: object[] = [], depth = 0, budget: SerBudget = { n: VALUE_BUDGET_CHARS }): string {
+  if (budget.n <= 0) return "<truncated>";
+  const out = serializeForTraceInner(value, stack, depth, budget);
+  budget.n -= out.length;
+  return out;
+}
+
+function serializeForTraceInner(value: unknown, stack: object[], depth: number, budget: SerBudget): string {
   if (value === undefined) return "undefined";
   if (value === null) return "null";
   const t = typeof value;
-  if (t === "string") return JSON.stringify(value);
+  if (t === "string") {
+    const s = value as string;
+    return JSON.stringify(s.length > VALUE_BUDGET_CHARS ? `${s.slice(0, VALUE_BUDGET_CHARS)}…` : s);
+  }
   if (t === "boolean") return value ? "true" : "false";
   if (t === "bigint") return `${(value as bigint).toString()}n`;
   if (t === "symbol") return `<symbol:${(value as symbol).description ?? ""}>`;
@@ -104,7 +151,7 @@ function serializeForTrace(value: unknown, stack: object[] = [], depth = 0): str
   try {
     const tag = Object.prototype.toString.call(obj);
     if (Array.isArray(obj)) {
-      return `[${obj.map((x) => serializeForTrace(x, stack, depth + 1)).join(",")}]`;
+      return `[${serializeItems(obj, stack, depth, budget).join(",")}]`;
     }
     if (tag === "[object Date]") {
       try {
@@ -123,8 +170,10 @@ function serializeForTrace(value: unknown, stack: object[] = [], depth = 0): str
     if (tag === "[object Map]") {
       const entries: Array<[string, string]> = [];
       try {
+        let i = 0;
         (obj as Map<unknown, unknown>).forEach((v, k) => {
-          entries.push([serializeForTrace(k, stack, depth + 1), serializeForTrace(v, stack, depth + 1)]);
+          if (i++ >= MAX_BREADTH || budget.n <= 0) return;
+          entries.push([serializeForTrace(k, stack, depth + 1, budget), serializeForTrace(v, stack, depth + 1, budget)]);
         });
       } catch {
         /* iteration が壊れていても部分結果で続行 */
@@ -135,8 +184,10 @@ function serializeForTrace(value: unknown, stack: object[] = [], depth = 0): str
     if (tag === "[object Set]") {
       const items: string[] = [];
       try {
+        let i = 0;
         (obj as Set<unknown>).forEach((v) => {
-          items.push(serializeForTrace(v, stack, depth + 1));
+          if (i++ >= MAX_BREADTH || budget.n <= 0) return;
+          items.push(serializeForTrace(v, stack, depth + 1, budget));
         });
       } catch {
         /* 同上 */
@@ -151,8 +202,15 @@ function serializeForTrace(value: unknown, stack: object[] = [], depth = 0): str
       keys = [];
     }
     keys = keys.filter((k) => !k.startsWith(SKIP_KEY_PREFIX)).sort();
+    const shown = Math.min(keys.length, MAX_BREADTH);
     const parts: string[] = [];
-    for (const k of keys) {
+    for (let i = 0; i < shown; i++) {
+      if (budget.n <= 0) {
+        parts.push("<truncated>");
+        break;
+      }
+      const k = keys[i];
+      if (k === undefined) break;
       let v: unknown;
       try {
         v = (obj as Record<string, unknown>)[k];
@@ -160,8 +218,9 @@ function serializeForTrace(value: unknown, stack: object[] = [], depth = 0): str
         parts.push(`${JSON.stringify(k)}:"<getter-threw>"`);
         continue;
       }
-      parts.push(`${JSON.stringify(k)}:${serializeForTrace(v, stack, depth + 1)}`);
+      parts.push(`${JSON.stringify(k)}:${serializeForTrace(v, stack, depth + 1, budget)}`);
     }
+    if (keys.length > shown) parts.push(`…(+${keys.length - shown} more)`);
     return `{${parts.join(",")}}`;
   } finally {
     stack.pop();
@@ -191,6 +250,20 @@ function stringifyPrimitive(value: unknown): string {
 export function makeRecorder(): Recorder {
   const trace: TraceEntry[] = [];
   let cache = new WeakMap<object, object>();
+  let truncated = false;
+
+  /** `MAX_TRACE_ENTRIES` を超えたら捨て、末尾に 1 件だけ番兵を残す。戻り値 = まだ受け付けるか。 */
+  const pushTrace = (entry: TraceEntry): void => {
+    if (trace.length >= MAX_TRACE_ENTRIES) {
+      if (!truncated) {
+        trace.push({ path: "<trace-truncated>", op: "call", result: `<exceeded ${MAX_TRACE_ENTRIES} entries>` });
+        truncated = true;
+      }
+      return;
+    }
+    trace.push(entry);
+  };
+  const traceFull = (): boolean => trace.length >= MAX_TRACE_ENTRIES;
 
   function wrap<T>(target: T, path: string, options: WrapOptions = {}): T {
     if (!isWrappable(target)) return target;
@@ -214,17 +287,23 @@ export function makeRecorder(): Recorder {
       thisArg: unknown,
       args: unknown[],
     ): unknown => {
+      // trace が満杯なら entry を組まずに素通しで forward (巨大 args の serialize も避ける)。
+      if (traceFull()) {
+        pushTrace({ path: callPath, op: "call" });
+        const r = Reflect.apply(fn, thisArg, args);
+        return maybeWrapResult(r, `${callPath}()`);
+      }
       const entry: TraceEntry = { path: callPath, op: "call", args: args.map((a) => serializeForTrace(a)) };
       let result: unknown;
       try {
         result = Reflect.apply(fn, thisArg, args);
       } catch (e) {
         entry.thrown = serializeThrown(e);
-        trace.push(entry);
+        pushTrace(entry);
         throw e;
       }
       entry.result = serializeForTrace(result);
-      trace.push(entry);
+      pushTrace(entry);
       return maybeWrapResult(result, `${callPath}()`);
     };
 
@@ -234,7 +313,7 @@ export function makeRecorder(): Recorder {
         try {
           v = Reflect.get(tgt, prop, tgt);
         } catch (e) {
-          if (typeof prop === "string") trace.push({ path: `${path}.${prop}`, op: "get", thrown: serializeThrown(e) });
+          if (typeof prop === "string") pushTrace({ path: `${path}.${prop}`, op: "get", thrown: serializeThrown(e) });
           throw e;
         }
         if (typeof v === "function") {
@@ -242,8 +321,15 @@ export function makeRecorder(): Recorder {
           const methodPath = `${path}.${String(prop)}`;
           return (...callArgs: unknown[]): unknown => recordCall(methodPath, fn, tgt, callArgs);
         }
-        if (recordGets && typeof prop === "string" && prop !== "constructor" && prop !== "prototype" && prop !== "then") {
-          trace.push({ path: `${path}.${prop}`, op: "get", result: serializeForTrace(v) });
+        if (
+          recordGets &&
+          !traceFull() &&
+          typeof prop === "string" &&
+          prop !== "constructor" &&
+          prop !== "prototype" &&
+          prop !== "then"
+        ) {
+          pushTrace({ path: `${path}.${prop}`, op: "get", result: serializeForTrace(v) });
         }
         return v;
       },
@@ -254,17 +340,22 @@ export function makeRecorder(): Recorder {
         return recordCall(`${path}()`, tgt as (...a: unknown[]) => unknown, thisArg, args);
       },
       construct(tgt, args): object {
+        if (traceFull()) {
+          pushTrace({ path: `new ${path}`, op: "construct" });
+          const r = Reflect.construct(tgt as new (...a: unknown[]) => object, args);
+          return maybeWrapResult(r, `new ${path}`) as object;
+        }
         const entry: TraceEntry = { path: `new ${path}`, op: "construct", args: args.map((a) => serializeForTrace(a)) };
         let inst: object;
         try {
           inst = Reflect.construct(tgt as new (...a: unknown[]) => object, args);
         } catch (e) {
           entry.thrown = serializeThrown(e);
-          trace.push(entry);
+          pushTrace(entry);
           throw e;
         }
         entry.result = serializeForTrace(inst);
-        trace.push(entry);
+        pushTrace(entry);
         return maybeWrapResult(inst, `new ${path}`) as object;
       },
     });
@@ -278,6 +369,7 @@ export function makeRecorder(): Recorder {
     reset() {
       trace.length = 0;
       cache = new WeakMap();
+      truncated = false;
     },
   };
 }
