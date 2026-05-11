@@ -190,31 +190,49 @@ function installRequire(context: vm.Context, moduleBaseDir: string | undefined, 
   const makeRequire = (fromDir: string) => {
     const requireFn = (spec: string): unknown => {
       if (spec.startsWith("./") || spec.startsWith("../")) {
-        const resolved = resolveRelative(fromDir, spec);
-        const cached = cache.get(resolved);
-        if (cached !== undefined) return cached.exports;
-        if (resolved.endsWith(".json")) {
-          const json: unknown = JSON.parse(readFileSync(resolved, "utf-8"));
-          const record: ModuleRecord = { exports: json };
+        try {
+          const resolved = resolveRelative(fromDir, spec);
+          const cached = cache.get(resolved);
+          if (cached !== undefined) return cached.exports;
+          if (resolved.endsWith(".json")) {
+            const json: unknown = JSON.parse(readFileSync(resolved, "utf-8"));
+            const record: ModuleRecord = { exports: json };
+            cache.set(resolved, record);
+            return json;
+          }
+          const src = readFileSync(resolved, "utf-8");
+          const record: ModuleRecord = { exports: {} };
           cache.set(resolved, record);
-          return json;
+          const wrapper: unknown = vm.runInContext(
+            `(function (module, exports, require, __dirname, __filename) {\n${src}\n})`,
+            context,
+            { timeout: timeoutMs, displayErrors: false },
+          );
+          (wrapper as (m: ModuleRecord, e: unknown, r: unknown, d: string, f: string) => void)(
+            record,
+            record.exports,
+            makeRequire(dirname(resolved)),
+            dirname(resolved),
+            resolved,
+          );
+          return record.exports;
+        } catch (e) {
+          // フォールバック: 相対パスに `/node_modules/<x>` パターンがあれば、その最後のセグメントを
+          // bare module として shared lockfile (ADR-0016) から解決を試す。dataset の test_case が
+          // `require('./<lib>/node_modules/<dep>')` のように lib の transitive dep を hardcode パスで
+          // 参照する Selakovic 2016 の Backbone 系パターンを救う。pnpm の shared install (上位 dir の
+          // node_modules) は Node の relative 解決では辿れないため。bare 解決も失敗したら元の例外を投げる。
+          const m = /\/node_modules\/([^/]+)\/?$/.exec(spec);
+          const depName = m?.[1];
+          if (depName !== undefined && baseRequire !== null) {
+            try {
+              return baseRequire(depName) as unknown;
+            } catch {
+              /* bare 解決も失敗 → 下の throw e */
+            }
+          }
+          throw e;
         }
-        const src = readFileSync(resolved, "utf-8");
-        const record: ModuleRecord = { exports: {} };
-        cache.set(resolved, record);
-        const wrapper: unknown = vm.runInContext(
-          `(function (module, exports, require, __dirname, __filename) {\n${src}\n})`,
-          context,
-          { timeout: timeoutMs, displayErrors: false },
-        );
-        (wrapper as (m: ModuleRecord, e: unknown, r: unknown, d: string, f: string) => void)(
-          record,
-          record.exports,
-          makeRequire(dirname(resolved)),
-          dirname(resolved),
-          resolved,
-        );
-        return record.exports;
       }
       // bare npm dep — Selakovic dataset fork は SUT lib の依存を lockfile 同梱で vendor 済 (ADR-0016)。
       // host の dataset node_modules から解決を試み、無ければ throw (= Phase F の error 分類で可視化)。
