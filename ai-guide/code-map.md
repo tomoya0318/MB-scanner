@@ -181,7 +181,7 @@ if (slow.exception !== null || fast.exception !== null) {
 - **`not_equal` が最強**: 実際に差異が観測されたら、他軸で error や not_applicable が出ていても **not_equal を信じる**。「観測できた非等価」は「観測できなかった軸」より優先。
 - **`error` は「使える verdict が出せなかった」専用**: シリアライズ不能 (循環参照) / timeout / setup throw で観測パイプラインが壊れたとき + Gateway/CLI 層のパイプライン失敗 (spawn / JSON / 行パース)。観測はできたが等価エビデンスが無い場合は `error` でなく `inconclusive`。
 - **`equal` は「中身を exercise した上で一致」だけ**: 「両方同じくクラッシュ」「両側とも DOM 初期から不変 (→ dom_mutation N/A)」「両方クラッシュ + bootstrap で DOM だけ変化」「scaffolding global しか無い」は単独では `equal` にしない (→ `inconclusive`)。RQ では `equal`+`not_equal` の確認済み分を「検証器が著者判断と一致した」の分母にし、`inconclusive` は別途「検証カバレッジ」指標。
-- **pruning は `inconclusive` を等価扱い**: Hydra 式 pruning (`pruning/engine.ts`) の縮約可否判定は `equal ∪ inconclusive`。`inconclusive` の保守的区別は等価検証アーティファクトのためで、パターン縮約の健全性とは別軸 (ADR-0018)。
+- **pruning は `inconclusive` を等価扱い**: Hydra 式 pruning (`pruning/common/engine.ts`) の縮約可否判定は `equal ∪ inconclusive`。`inconclusive` の保守的区別は等価検証アーティファクトのためで、パターン縮約の健全性とは別軸 (ADR-0018)。
 
 ---
 
@@ -209,18 +209,21 @@ if (slow.exception !== null || fast.exception !== null) {
 
 第 1 段階 (構造パターン導出) の本体。`(slow, fast, setup)` トリプルから **ワイルドカード付きの最小構造パターン** を出力する。実装は `mb-analyzer/src/pruning/` 配下、ファイル単位の詳細は [`mb-analyzer/src/pruning/README.md`](../mb-analyzer/src/pruning/README.md)。**TS 側の公開 API (PruningInput / PruningResult / placeholders) の入出力契約**もそちらの §入出力契約 に集約。研究方針は [`current-research.md` §第 1 段階](current-research.md#第-1-段階-実行ベース-hydra-式-pruning) を参照。
 
-### モジュール責務
+### モジュール構成 (二層: `common/` + `selakovic/`)
+
+`equivalence-checker/` ・ `preprocessing/` と対称の二層構成 (ESLint `import/no-restricted-paths` で機械強制)。pruning が「主軸 = 論文 / dataset 非依存」というルールを構造で担保するための分割。
 
 | 領域 | 責務 |
 |---|---|
-| `engine.ts` | 公開 `prune` + 1 パス試行 `tryPruneCandidates`。Hydra 反復ループの本体 + mutate / revert (savepoint パターン) |
-| `candidates.ts` | AST 走査 + ルール適用で候補列挙 (placeholder 除外 / whitelist / blacklist / SubtreeSet の 4 段フィルタ) |
-| `rules/` | pruning の対象と戦略の宣言データ集 (whitelist / blacklist / replacement) |
-| `ast/parser.ts` | `src/ast/parser` の汎用 parse に `rules/whitelist.ts` の `PARSER_PLUGINS` を渡す薄ラッパー (pruning 固有はこれだけ — 走査 / inspect / subtree-hash 等の AST toolbox 本体は `src/ast/` に集約) |
+| `selakovic/pruner.ts` | dataset adapter。`equivalence-checker` の `checkEquivalence` を bind して `common/engine.prune` に注入する薄い層。等価検証の実行環境 (`environment` / `module_base_dir` / `mount_html`) や oracle routing hint (`aspect` / `candidate_kind` / `enclosure_type`) はこの層が closure に閉じ込める。`equivalence-checker` を import するのは pruning 内でここだけ |
+| `common/engine.ts` | dataset 非依存の Hydra 反復ループ本体 + 1 パス試行 `tryPruneCandidates` + mutate / revert (savepoint パターン)。等価検証は `prune(input, deps)` の `deps.checkEquivalence` で **DI で受ける** — `equivalence-checker` も `selakovic/` も知らない |
+| `common/candidates.ts` | AST 走査 + ルール適用で候補列挙 (placeholder 除外 / whitelist / blacklist / SubtreeSet の 4 段フィルタ) |
+| `common/rules/` | pruning の対象と戦略の宣言データ集 (whitelist / blacklist / replacement)。文法だけで決まる |
+| `common/ast/parser.ts` | `src/ast/parser` の汎用 parse に `common/rules/whitelist.ts` の `PARSER_PLUGINS` を渡す薄ラッパー (pruning 固有はこれだけ — 走査 / inspect / subtree-hash 等の AST toolbox 本体は `src/ast/` に集約) |
 
 ファイル単位の詳細責務 / 依存方向 / 関連 ADR は [`mb-analyzer/src/pruning/README.md`](../mb-analyzer/src/pruning/README.md) に集約 (drift 面のローカル化)。
 
-新しい placeholder kind を追加するときの drift 面は **`rules/whitelist.ts:WHITELIST_CATEGORIES` (型 → カテゴリ) と `rules/replacement.ts:REPLACEMENTS` (カテゴリ → placeholderKind + buildNode) の 2 ファイル**に集約してある。`buildNode` がカテゴリごとの「化かし方 (`ExpressionStatement(Identifier)` / `Identifier` / `StringLiteral` 生成)」を直接持つので、置換戦略の名前は引数 (string mode) として残らず、関数値として表現される。
+新しい placeholder kind を追加するときの drift 面は **`common/rules/whitelist.ts:WHITELIST_CATEGORIES` (型 → カテゴリ) と `common/rules/replacement.ts:REPLACEMENTS` (カテゴリ → placeholderKind + buildNode) の 2 ファイル**に集約してある。`buildNode` がカテゴリごとの「化かし方 (`ExpressionStatement(Identifier)` / `Identifier` / `StringLiteral` 生成)」を直接持つので、置換戦略の名前は引数 (string mode) として残らず、関数値として表現される。
 
 ### データフロー
 
@@ -229,27 +232,29 @@ if (slow.exception !== null || fast.exception !== null) {
 - **外側ループ (`prune`)**: AST が変わるたびに SubtreeSet と候補リストを再計算する。1 パスで 1 ノードが prune できれば AST を更新して次パスへ。
 - **内側ループ (`tryPruneCandidates`)**: 現在の候補を size 降順で順に試し、**最初に成功した 1 候補で return**。残った候補は次パスで再列挙される。
 
+`prune(input, deps)` の `deps.checkEquivalence` は `pruning/selakovic/pruner.ts` が `equivalence-checker` の `checkEquivalence` を `environment`/`module_base_dir`/`mount_html`/`aspect`/`candidate_kind`/`enclosure_type` 込みで bind して渡す (`common/` 側は実行環境を知らない)。
+
 ```
-PruningInput (slow, fast, setup, timeout_ms, max_iterations)
+PruningInput (slow, fast, setup, timeout_ms, max_iterations, [environment, module_base_dir, ...])
        ↓
-    parse(slow) / parse(fast)                    ← pruning/ast/parser.ts (= src/ast/parser + PARSER_PLUGINS)
+    parse(slow) / parse(fast)                    ← pruning/common/ast/parser.ts (= src/ast/parser + PARSER_PLUGINS)
        ↓
     Phase 1: 初回等価性検証
-    checkEquivalence(setup, slow, fast)
+    deps.checkEquivalence(setup, slow, fast)     ← selakovic/pruner が equivalence-checker を bind
        ├─ not_equal → verdict = initial_mismatch で終了
        ├─ error     → verdict = error で終了
-       └─ equal     ↓
+       └─ equal/inconclusive ↓
     countNodes(slow) → node_count_before          ← src/ast/inspect.ts
        ↓
     Phase 2: 反復 pruning
   ┌─ 外側ループ: iterations < max_iterations かつ wall-time 内 ───────────┐
   │   SubtreeSet(fast)                    ← src/ast/subtree-hash.ts: 再計算 │
-  │   enumerateCandidates(slow, diff)            ← candidates.ts          │
+  │   enumerateCandidates(slow, diff)            ← common/candidates.ts    │
   │   候補が空 → 終了                                                      │
   │   ↓                                                                    │
   │ ┌─ 内側ループ tryPruneCandidates: size 降順に試行 ─────────────────┐ │
   │ │   replacementFor(node) → placeholderKind + buildNode             │ │
-  │ │                                              ← rules/replacement │ │
+  │ │                                       ← common/rules/replacement │ │
   │ │     null (whitelist 外) → 次候補                                 │ │
   │ │   ↓                                                              │ │
   │ │   saved = readAt(parent, key, idx)         ← savepoint           │ │
@@ -258,7 +263,7 @@ PruningInput (slow, fast, setup, timeout_ms, max_iterations)
   │ │     generate(slow) → parse                 ← L3 round-trip       │ │
   │ │       throw → continue (finally で revert)                       │ │
   │ │     iterations += 1 ← ここで初めて budget を消費                 │ │
-  │ │     checkEquivalence(setup, slow', fast)   ← L4 (Hydra 実行)     │ │
+  │ │     deps.checkEquivalence(setup, slow', fast) ← L4 (Hydra 実行)  │ │
   │ │     equal → succeeded=true, placeholders.push, return パス成功   │ │
   │ │     それ以外 → continue                                          │ │
   │ │   } finally {                                                    │ │
@@ -300,12 +305,12 @@ total_budget_ms: timeout_ms * max_iterations
 
 | # | フィルタ | 目的 | 実装 |
 |---|---|---|---|
-| 1 | placeholder 自身の除外 | 前 iteration で挿入した `Identifier($Pn)` / `ExpressionStatement(Identifier($Pn))` を再候補化すると pruning ループが破綻するため除外 (ADR-0009) | `pruning/candidates.ts` の `isPlaceholderNode` |
-| 2 | 型 whitelist | pruning 可能な AST 型 (Statement / Expression / Identifier の 3 分類) のみ残す。**`@babel/types` の Statement / Expression alias から自動導出** (ADR-0006) | `pruning/rules/whitelist.ts` の `WHITELIST_CATEGORIES` keys |
-| 3 | 親子位置 blacklist | 親 field validator が置換後の型を受理しない位置を**文法由来で自動判定**し除外 (ADR-0005) | `pruning/rules/blacklist.ts` の `BLACKLIST_CATEGORIES` |
+| 1 | placeholder 自身の除外 | 前 iteration で挿入した `Identifier($Pn)` / `ExpressionStatement(Identifier($Pn))` を再候補化すると pruning ループが破綻するため除外 (ADR-0009) | `pruning/common/candidates.ts` の `isPlaceholderNode` |
+| 2 | 型 whitelist | pruning 可能な AST 型 (Statement / Expression / Identifier の 3 分類) のみ残す。**`@babel/types` の Statement / Expression alias から自動導出** (ADR-0006) | `pruning/common/rules/whitelist.ts` の `WHITELIST_CATEGORIES` keys |
+| 3 | 親子位置 blacklist | 親 field validator が置換後の型を受理しない位置を**文法由来で自動判定**し除外 (ADR-0005) | `pruning/common/rules/blacklist.ts` の `BLACKLIST_CATEGORIES` |
 | 4 | AST 差分フィルタ | fast に同型ノードが存在する「共通ノード」のみに絞る (差分ノードは必須扱いで保護) | `src/ast/subtree-hash.ts` の `SubtreeSet.has` |
 
-候補は **`end - start` 降順 (大きいノード優先)** でソートして返す (`candidates.ts:nodeSize`)。size 降順で試す方が、成功時に一度に縮む量が大きく、外側ループ反復数が減るという経験則。
+候補は **`end - start` 降順 (大きいノード優先)** でソートして返す (`common/candidates.ts:nodeSize`)。size 降順で試す方が、成功時に一度に縮む量が大きく、外側ループ反復数が減るという経験則。
 
 #### whitelist のカバレッジ (ADR-0006)
 
@@ -324,14 +329,14 @@ total_budget_ms: timeout_ms * max_iterations
 
 dataset に新しい言語が含まれる場合は **paired-change** で対応する:
 
-1. `pruning/rules/whitelist.ts:PARSER_PLUGINS` に対応 plugin を追加 (例: `["typescript"]`)
-2. (新カテゴリの場合のみ) `pruning/rules/replacement.ts:REPLACEMENTS` に「カテゴリ → placeholderKind + buildNode」を追加
+1. `pruning/common/rules/whitelist.ts:PARSER_PLUGINS` に対応 plugin を追加 (例: `["typescript"]`)
+2. (新カテゴリの場合のみ) `pruning/common/rules/replacement.ts:REPLACEMENTS` に「カテゴリ → placeholderKind + buildNode」を追加
 
 L1 blacklist (ADR-0005) も alias-derived なので **plugin 追加に応じて自動で親子位置除外が効く** (再実装不要)。詳細は ADR-0006 §対象言語拡張で扱える dataset 例。
 
 ### 置換操作の粒度 (3 カテゴリ統一のワイルドカード化)
 
-候補ノードのカテゴリで置換動作が 1:1 に決まる (`rules/replacement.ts:REPLACEMENTS`)。3 カテゴリすべてで「**`$Pn` という名前の placeholder で wildcard 化**」する点は共通だが、文法的に置換可能な型が異なるため出力 AST は別形になる。
+候補ノードのカテゴリで置換動作が 1:1 に決まる (`common/rules/replacement.ts:REPLACEMENTS`)。3 カテゴリすべてで「**`$Pn` という名前の placeholder で wildcard 化**」する点は共通だが、文法的に置換可能な型が異なるため出力 AST は別形になる。
 
 | カテゴリ | `buildNode` の出力 | `pattern_code` 上の見た目 | 公開 PlaceholderKind | 機械処理での識別 |
 |---|---|---|---|---|
@@ -353,7 +358,7 @@ statement カテゴリの対象型は `Statement` alias から `EmptyStatement` 
 
 ### 再列挙とクロスパス重複
 
-外側ループは prune 成功のたびに `enumerateCandidates` を**再呼び出し**する (slow AST が変わったため、size 順や差分判定がやり直しになる)。成功時は `engine.ts` 内で `parse(generate(slow))` した reparsed AST に置き換えるので、新 AST のノード参照は完全に置き換わり、**前パスで失敗した候補が次パスで再試行される可能性がある** (構造的に同型なら blacklist / diff も再度通過する)。
+外側ループは prune 成功のたびに `enumerateCandidates` を**再呼び出し**する (slow AST が変わったため、size 順や差分判定がやり直しになる)。成功時は `common/engine.ts` 内で `parse(generate(slow))` した reparsed AST に置き換えるので、新 AST のノード参照は完全に置き換わり、**前パスで失敗した候補が次パスで再試行される可能性がある** (構造的に同型なら blacklist / diff も再度通過する)。
 
 これは現状の単純さを優先した割り切りで、性能上のロスのみ (機能的問題なし)。本格的に dedup したい場合は canonical hash (例: `type + start + end`) ベースの set を導入する余地がある (将来の最適化)。
 
@@ -380,7 +385,7 @@ statement カテゴリの対象型は `Statement` alias から `EmptyStatement` 
 
 ### 文法由来 blacklist の網羅性
 
-L1 blacklist は `@babel/types` の `NODE_FIELDS[parent][key].validate` introspection (`oneOfNodeTypes` / `chainOf` / `NODE_UNION_SHAPES__PRIVATE`) から起動時 1 回だけ計算される (ADR-0005; `rules/blacklist.ts`)。ルールは 3 カテゴリ (statement / identifier / expression) 別に、親 × 子位置で自動生成される。
+L1 blacklist は `@babel/types` の `NODE_FIELDS[parent][key].validate` introspection (`oneOfNodeTypes` / `chainOf` / `NODE_UNION_SHAPES__PRIVATE`) から起動時 1 回だけ計算される (ADR-0005; `common/rules/blacklist.ts`)。ルールは 3 カテゴリ (statement / identifier / expression) 別に、親 × 子位置で自動生成される。
 
 カバーされる位置の例 (列挙は自動):
 

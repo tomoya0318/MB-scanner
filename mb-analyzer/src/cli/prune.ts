@@ -1,5 +1,9 @@
 import { prune } from "../pruning";
-import type { PruningInput, PruningResult } from "../contracts/pruning-contracts";
+import type {
+  ExecutionEnvironmentHint,
+  PruningInput,
+  PruningResult,
+} from "../contracts/pruning-contracts";
 
 const EXIT_PRUNED = 0;
 const EXIT_INITIAL_MISMATCH = 1;
@@ -33,6 +37,45 @@ function validateMaxIterations(value: unknown): number | string {
     return `'max_iterations' field must be in [${MIN_MAX_ITERATIONS}, ${MAX_MAX_ITERATIONS}]`;
   }
   return value;
+}
+
+const ENVIRONMENT_VALUES = ["vm", "jsdom"] as const;
+const EQUIV_CONTEXT_STRING_KEYS = [
+  "module_base_dir",
+  "mount_html",
+  "aspect",
+  "candidate_kind",
+  "enclosure_type",
+] as const;
+
+/**
+ * `PruningInput` 由来の等価検証コンテキスト (`environment` / `module_base_dir` / `mount_html` /
+ * `aspect` / `candidate_kind` / `enclosure_type`) を `obj` から `input` へ転記する。
+ * pruning 本体は解釈しない pass-through (selakovic/pruner が checkEquivalence にそのまま渡す) なので
+ * 最小限の型チェックのみ — `environment` は `"vm" | "jsdom"`、残りは string。
+ * 問題があればエラーメッセージ文字列を返す (`null` なら OK)。
+ *
+ * `null` は「未指定」として扱う (= 無視): Python 側 Gateway は `model_dump_json(exclude_none=False)` で
+ * 送るため、未設定の optional フィールドが `"mount_html": null` のように届く。これを「present だが不正」と
+ * 誤判定しないようにする。
+ */
+function applyEquivalenceContext(obj: Record<string, unknown>, input: PruningInput): string | null {
+  if (obj.environment !== undefined && obj.environment !== null) {
+    if (
+      typeof obj.environment !== "string" ||
+      !(ENVIRONMENT_VALUES as readonly string[]).includes(obj.environment)
+    ) {
+      return `'environment' field must be one of ${ENVIRONMENT_VALUES.join(" | ")} when present`;
+    }
+    input.environment = obj.environment as ExecutionEnvironmentHint;
+  }
+  for (const key of EQUIV_CONTEXT_STRING_KEYS) {
+    const value = obj[key];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "string") return `'${key}' field must be a string when present`;
+    input[key] = value;
+  }
+  return null;
 }
 
 async function readStdin(): Promise<string> {
@@ -72,6 +115,8 @@ function parseInput(raw: string): PruningInput | string {
     if (typeof validated === "string") return validated;
     input.max_iterations = validated;
   }
+  const ctxError = applyEquivalenceContext(obj, input);
+  if (ctxError !== null) return ctxError;
   return input;
 }
 
@@ -134,6 +179,8 @@ function parseBatchLine(raw: string): PruningInput | { id: string | undefined; e
     if (typeof validated === "string") return { id, error: validated };
     input.max_iterations = validated;
   }
+  const ctxError = applyEquivalenceContext(obj, input);
+  if (ctxError !== null) return { id, error: ctxError };
   return input;
 }
 

@@ -1,5 +1,5 @@
 /**
- * 対象: src/pruning/engine.ts (Hydra 式 pruning 本体)
+ * 対象: src/pruning の公開 `prune` (= selakovic/pruner.ts → common/engine.ts、Hydra 式 pruning 本体 + 実 checkEquivalence)
  * 観点:
  *   - trivially-reducible: 全候補ワイルドカード化可なケースで iterations > 0
  *   - initial_mismatch: 初回検証で slow ≢ fast なら pruning を回さない
@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { prune } from "../../src/pruning/engine";
+import { prune } from "../../src/pruning";
 
 describe("prune — trivially-reducible", () => {
   it("全候補が削除可能なケースでは pruned が返り iterations > 0", async () => {

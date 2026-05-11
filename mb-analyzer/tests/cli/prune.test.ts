@@ -243,4 +243,71 @@ describe("runPrune", () => {
     expect(code).toBe(2);
     expect(stderrSpy.writes.join("")).toContain("'timeout_ms' field must be in [1, 60000]");
   });
+
+  it("等価検証コンテキスト (environment / module_base_dir / mount_html / aspect 等) を渡しても受理される", async () => {
+    restoreStdin = feedStdin(
+      JSON.stringify({
+        slow: "1 + 1",
+        fast: "2",
+        timeout_ms: 1000,
+        max_iterations: 10,
+        environment: "vm",
+        module_base_dir: "/abs/issue",
+        mount_html: "<div></div>",
+        aspect: "A",
+        candidate_kind: "single",
+        enclosure_type: "f1-body",
+      }),
+    );
+
+    const code = await runPrune();
+
+    expect(code).toBe(0);
+    expect(parseStdout(stdoutSpy.writes).verdict).toBe("pruned");
+    expect(stderrSpy.writes).toHaveLength(0);
+  });
+
+  it("environment が \"vm\" / \"jsdom\" 以外だと exit 2", async () => {
+    restoreStdin = feedStdin(JSON.stringify({ slow: "1", fast: "1", environment: "node" }));
+
+    const code = await runPrune();
+
+    expect(code).toBe(2);
+    expect(stderrSpy.writes.join("")).toContain("'environment' field must be one of vm | jsdom");
+  });
+
+  it("module_base_dir が present かつ非 string だと exit 2", async () => {
+    restoreStdin = feedStdin(JSON.stringify({ slow: "1", fast: "1", module_base_dir: 42 }));
+
+    const code = await runPrune();
+
+    expect(code).toBe(2);
+    expect(stderrSpy.writes.join("")).toContain("'module_base_dir' field must be a string when present");
+  });
+
+  it("等価検証コンテキストが null (= Python Gateway が exclude_none=False で送る未設定値) でも受理される", async () => {
+    // mb_scanner の NodeRunnerPrunerGateway は model_dump_json(exclude_none=False) で送るため、
+    // 未設定の optional フィールドが "mount_html": null のように届く。これを「present だが不正」と
+    // 誤判定して exit 2 にしてはいけない (回帰防止: prune-batch で server 系 7 件が全部 error になった事故)。
+    restoreStdin = feedStdin(
+      JSON.stringify({
+        slow: "1 + 1",
+        fast: "2",
+        timeout_ms: 1000,
+        max_iterations: 10,
+        environment: null,
+        module_base_dir: null,
+        mount_html: null,
+        aspect: null,
+        candidate_kind: null,
+        enclosure_type: null,
+      }),
+    );
+
+    const code = await runPrune();
+
+    expect(code).toBe(0);
+    expect(parseStdout(stdoutSpy.writes).verdict).toBe("pruned");
+    expect(stderrSpy.writes).toHaveLength(0);
+  });
 });

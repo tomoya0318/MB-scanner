@@ -1,17 +1,19 @@
 /**
- * 対象: src/shared/pruning-contracts.ts (Python ↔ TypeScript の JSON 契約)
+ * 対象: src/contracts/pruning-contracts.ts (Python ↔ TypeScript の JSON 契約)
  * 観点: Python 側 Pydantic enum / StrEnum と同じ文字列値・同じ union 幅で型が narrow されていること
  * 判定事項:
  *   - PRUNING_VERDICT / PLACEHOLDER_KIND: Python 側 StrEnum と同一の文字列値 (runtime)
  *   - PruningVerdict / PlaceholderKind: union 型が Python と同じ列挙幅 (型レベル)
  *   - Placeholder: JSON 往復でフィールド名 (id / kind / original_snippet) と値を保持
- *   - PruningInput: slow/fast 必須、id/setup/timeout_ms/max_iterations 任意
+ *   - PruningInput: slow/fast 必須、id/setup/timeout_ms/max_iterations + 等価検証コンテキスト (environment 等) 任意
+ *   - ExecutionEnvironmentHint: equivalence/preprocessing 契約と同じ "vm" | "jsdom"
  *   - PruningResult: pruned は pattern_code/placeholders/iterations で表現、initial_mismatch と error は pattern なしで成立
  */
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   PLACEHOLDER_KIND,
   PRUNING_VERDICT,
+  type ExecutionEnvironmentHint,
   type Placeholder,
   type PlaceholderKind,
   type PruningInput,
@@ -74,6 +76,32 @@ describe("PruningInput", () => {
     expect(minimal.setup).toBeUndefined();
     expect(full.setup).toBe("const arr = [1, 2, 3];");
     expect(full.max_iterations).toBe(100);
+  });
+
+  it("等価検証コンテキスト (environment / module_base_dir / mount_html / aspect / candidate_kind / enclosure_type) は任意で JSON 往復しても保持される", () => {
+    const input: PruningInput = {
+      slow: "x",
+      fast: "x",
+      timeout_ms: 5000,
+      environment: "jsdom",
+      module_base_dir: "/abs/data/selakovic-2016-issues/serverIssues/ChalkIssues/issues/issue_28",
+      mount_html: "<div id=\"demo\"></div>",
+      aspect: "A",
+      candidate_kind: "single",
+      enclosure_type: "server-test-case",
+    };
+    const parsed = JSON.parse(JSON.stringify(input)) as PruningInput;
+    expect(parsed).toStrictEqual(input);
+    // 省略時は undefined (= 等価検証側のデフォルトに委ねる)
+    const minimal: PruningInput = { slow: "x", fast: "x" };
+    expect(minimal.environment).toBeUndefined();
+    expect(minimal.module_base_dir).toBeUndefined();
+  });
+});
+
+describe("ExecutionEnvironmentHint", () => {
+  it("equivalence/preprocessing 契約と同じ \"vm\" | \"jsdom\" の union", () => {
+    expectTypeOf<ExecutionEnvironmentHint>().toEqualTypeOf<"vm" | "jsdom">();
   });
 });
 

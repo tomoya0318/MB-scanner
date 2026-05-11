@@ -13,6 +13,10 @@ import globals from "globals";
 //   import してはならない (ドメイン非依存層、@angular/common 流の命名)
 // - equivalence-checker/common も同様: dataset 非依存層なので equivalence-checker/selakovic を
 //   import してはならない (preprocessing/common ↔ selakovic と対称)
+// - pruning/common は dataset 非依存の pruning アルゴリズム本体。pruning/selakovic も
+//   equivalence-checker も import してはならない (等価検証は DI で受ける)。
+//   pruning/selakovic だけが equivalence-checker を import して checkEquivalence を bind する
+//   (equivalence-checker/common ↔ selakovic と対称)
 // - cli/ のみ composition root として全機能を import できる
 const DEPENDENCY_ZONES = [
   {
@@ -67,6 +71,16 @@ const DEPENDENCY_ZONES = [
   {
     target: "./src/equivalence-checker",
     from: ["./src/pruning", "./src/equivalence-class-test", "./src/eslint-rule-codegen", "./src/cli"],
+  },
+  {
+    target: "./src/pruning/common",
+    from: [
+      "./src/pruning/selakovic",
+      "./src/equivalence-checker",
+      "./src/equivalence-class-test",
+      "./src/eslint-rule-codegen",
+      "./src/cli",
+    ],
   },
   {
     target: "./src/pruning",

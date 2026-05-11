@@ -1,9 +1,9 @@
 """Pruning モデル (Hydra 式 AST 差分フィルタ) の Pydantic バリデーションテスト
 
 対象: mb_scanner.domain.entities.pruning
-観点: TypeScript 側 (shared/types.ts) と JSON 契約が揃っていること、
-      ``PruningInput`` の境界バリデーション、``PruningResult`` の verdict 別表現、
-      ``extra`` 設定 (input=forbid / result=ignore) が期待通り機能すること
+観点: TypeScript 側 (contracts/pruning-contracts.ts) と JSON 契約が揃っていること、
+      ``PruningInput`` の境界バリデーション + 等価検証コンテキスト (environment 等) の pass-through、
+      ``PruningResult`` の verdict 別表現、``extra`` 設定 (input=forbid / result=ignore) が期待通り機能すること
 """
 
 import json
@@ -93,6 +93,46 @@ class TestPruningInput:
         dumped = json.loads(inp.model_dump_json())
         assert "timeout_ms" in dumped
         assert dumped["timeout_ms"] == 5000
+
+
+class TestPruningInputEquivalenceContext:
+    """``PruningInput`` が等価検証コンテキストを pass-through で受け取れること。
+
+    対象フィールド: environment / module_base_dir / mount_html / aspect / candidate_kind /
+    enclosure_type。pruning 本体は解釈しないが、Node の prune-batch が wire format として
+    受け付ける必要がある。
+    """
+
+    def test_defaults_are_none(self) -> None:
+        inp = PruningInput(slow="x", fast="x")
+        assert inp.environment is None
+        assert inp.module_base_dir is None
+        assert inp.mount_html is None
+        assert inp.aspect is None
+        assert inp.candidate_kind is None
+        assert inp.enclosure_type is None
+
+    def test_accepts_and_round_trips(self) -> None:
+        payload = {
+            "slow": "x",
+            "fast": "x",
+            "timeout_ms": 5000,
+            "environment": "jsdom",
+            "module_base_dir": "/abs/data/selakovic-2016-issues/serverIssues/ChalkIssues/issues/issue_28",
+            "mount_html": '<div id="demo"></div>',
+            "aspect": "A",
+            "candidate_kind": "single",
+            "enclosure_type": "server-test-case",
+        }
+        inp = PruningInput.model_validate(payload)
+        assert inp.environment == "jsdom"
+        assert inp.module_base_dir == payload["module_base_dir"]
+        assert inp.mount_html == '<div id="demo"></div>'
+        assert inp.aspect == "A"
+        assert inp.candidate_kind == "single"
+        assert inp.enclosure_type == "server-test-case"
+        dumped = json.loads(inp.model_dump_json())
+        assert PruningInput.model_validate(dumped) == inp
 
 
 class TestPlaceholder:

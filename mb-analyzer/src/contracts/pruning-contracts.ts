@@ -25,6 +25,12 @@ export interface Placeholder {
   original_snippet: string;
 }
 
+/**
+ * pruning が内部で回す等価検証の実行環境。値は `equivalence-contracts.ts` の
+ * `EXECUTION_ENVIRONMENT` / `preprocessing-contracts.ts` の `ExecutionEnvironmentHint` と一致させる。
+ */
+export type ExecutionEnvironmentHint = "vm" | "jsdom";
+
 export interface PruningInput {
   id?: string;
   slow: string;
@@ -32,6 +38,20 @@ export interface PruningInput {
   setup?: string;
   timeout_ms?: number;
   max_iterations?: number;
+  /**
+   * 後段の等価検証 (`equivalence-checker`) にそのまま渡す実行コンテキスト。
+   * pruning アルゴリズム本体 (`pruning/common/`) はこれらを **解釈しない** — `pruning/selakovic/` が
+   * `checkEquivalence` 呼び出しの closure に閉じ込めるだけ。値の集合・意味論は `equivalence-contracts.ts`
+   * の `EquivalenceInput` と揃える (`environment` 省略時は等価検証側で `vm`、`module_base_dir` は jsdom で
+   * 相対 `require('./x')` の解決基準、`mount_html` は jsdom で mount する HTML、`aspect`/`candidate_kind`/
+   * `enclosure_type` は oracle 選択 / 記録 Proxy で包む対象を決める preprocess 由来 hint)。
+   */
+  environment?: ExecutionEnvironmentHint;
+  module_base_dir?: string;
+  mount_html?: string;
+  aspect?: string;
+  candidate_kind?: string;
+  enclosure_type?: string;
 }
 
 export interface PruningResult {

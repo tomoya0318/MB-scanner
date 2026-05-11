@@ -1,5 +1,5 @@
-/** Pruning モジュールの public API。 */
-export { prune } from "./engine";
+/** Pruning モジュールの public API (dataset エントリ = `selakovic/`)。 */
+export { prune } from "./selakovic";
 export type {
   Placeholder,
   PlaceholderKind,

@@ -11,7 +11,7 @@
 import * as fc from "fast-check";
 import { describe, it } from "vitest";
 import { SubtreeSet } from "../../../src/ast/subtree-hash";
-import { parse } from "../../../src/pruning/ast/parser";
+import { parse } from "../../../src/pruning/common/ast/parser";
 import { walkAllNodes } from "./walk";
 
 // 識別子・リテラル・演算子・構造を混ぜた短い JS 断片を生成する arbitrary。
