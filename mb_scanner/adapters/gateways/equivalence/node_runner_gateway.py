@@ -244,9 +244,13 @@ def _check_timeout_echo(requested_ms: int, effective_ms: int | None) -> str | No
 
 
 def _error(message: str, *, id_: str | None = None) -> EquivalenceCheckResult:
+    # subprocess spawn 失敗 / JSON 解釈失敗 / timeout 等の Gateway 側 error は
+    # 「使える verdict が出せなかった」= ADR-0018 の executor-error と同じ分類なので
+    # verdict_reason を付ける (Node 側 outer catch が "executor-error" を付けるのと揃える)。
     return EquivalenceCheckResult(
         id=id_,
         verdict=Verdict.ERROR,
         observations=[],
+        verdict_reason="executor-error",
         error_message=message,
     )

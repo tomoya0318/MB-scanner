@@ -150,9 +150,13 @@ function parseBatchLine(raw: string): EquivalenceInput | { id: string | undefine
 }
 
 function errorResult(id: string | undefined, message: string): EquivalenceCheckResult {
+  // batch 行のパース失敗 (slow/fast 欠落 / timeout_ms 不正 / 非 JSON 等) も
+  // 「使える verdict が出せなかった」= executor-error と同じ分類 (ADR-0018) なので
+  // verdict_reason を付ける (Gateway 側 _error と揃える)。
   const result: EquivalenceCheckResult = {
     verdict: "error",
     observations: [],
+    verdict_reason: "executor-error",
     error_message: message,
   };
   if (id !== undefined) result.id = id;
