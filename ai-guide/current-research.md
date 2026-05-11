@@ -348,6 +348,7 @@ C1〜C4 の各軸で入力空間を有限クラスに分割し，各クラスの
 | 等価性検証器をパイプラインと評価の両方で共用 | ネガティブセットアップの一部を手動確認 |
 | セットアップの設計偏り | OSS 適用で新たな失敗パターンを発見する可能性を議論 |
 | Selakovic データの経年 (2016 年) | OSS ケーススタディで 2026 年時点の有効性を確認 |
+| 検証器が一部の candidate を「中身まで実行できず判定不能 (`inconclusive`)」にする (dep 不在 / Ember の AMD loader / workload が薄い等) | `equal` = positive な等価エビデンスで確認・`not_equal` = 差を観測・`inconclusive` = 検証不能、と verdict を分け、「検証器が著者判断と一致した」の分母は `equal`+`not_equal` の確認済み分のみにし `inconclusive` は別途「検証カバレッジ」として報告する。`not_equal` のうち記録 Proxy 干渉等の checker artifact 由来のものは手動レビューで角に置く (= ADR-0018 / ADR-0013 §threats)。当面 ~67 件確認済 / ~6 件 not_equal (うち 4 件が genuine な検出、うち 1 件 = angular-10351 は著者判断との既知の不一致) / ~33 件 inconclusive |
 
 ---
 

@@ -141,25 +141,29 @@ if (slow.exception !== null || fast.exception !== null) {
 
 具体例:
 
-- 両側とも同じ値を返す純粋関数 → O1 `equal`、O2-O4 `not_applicable`、overall `equal`
-- 両側とも同じ例外を投げる関数 → O1 `not_applicable`、O3 `equal`、overall `equal`
+- 両側とも同じ値を返す純粋関数 → O1 `equal`、他 `not_applicable`、overall `equal`
+- 両側とも同じ例外を投げる関数 → O1 `not_applicable`、O3 `equal`、(positive-evidence oracle が全 N/A なので) overall **`inconclusive`** (= 「両方同じくクラッシュした」≠「等価」、ADR-0018)
 
 `not_applicable` は「検査しない」ではなく「**この軸ではこのトリプルを判定しない（他軸に任せる）**」という**責務移譲のシグナル**として機能している。
 
-#### ルール 3: overall verdict の合成優先順位
+#### ルール 3: overall verdict の合成 (ADR-0018 の新 5 規則)
 
-`deriveOverallVerdict`（`verdict.ts`）は以下の優先順位で合成する:
+`deriveOverallVerdict`（`verdict.ts`、Python ミラーは `equivalence_verification.py`）は以下の優先順位で合成する:
 
 1. いずれかの oracle が `not_equal` → **`not_equal`**
 2. いずれかの oracle が `error` → **`error`**
-3. 全 oracle が `not_applicable` → **`error`**（観測対象ゼロでは等価性を判定できない）
-4. 残りは少なくとも 1 つ `equal` を含む → **`equal`**
+3. 全 oracle が `not_applicable` → **`inconclusive`**（観測チャネルゼロ。`verdict_reason = "no-observable-channel"`）
+4. `not_equal`/`error` 無し かつ **positive-evidence oracle**（= `{return_value (C1), argument_mutation (C4-mutation), interaction_trace (C6)}`）がすべて `not_applicable` → **`inconclusive`**（差は観測されなかったが「同じ値を返した / 同じ引数変化をした / 同じ呼び出し列だった」という積極的等価エビデンスが無い = 中身を exercise できていない可能性が高い。`verdict_reason` = `exception` oracle が `equal` なら `"both-sides-threw"`、それ以外なら `"no-positive-evidence"`）
+5. それ以外 → **`equal`**（positive-evidence oracle に non-N/A が 1 つ以上）
+
+`EquivalenceCheckResult.verdict_reason?: string | null` は `inconclusive` のとき上記の理由、`error` の executor crash / setup throw のとき `"executor-error"`、`equal`/`not_equal` のとき `null`。詳細は [ADR-0018](adr/0018-equivalence-verdict-conservative.md)。
 
 設計上の含意:
 
 - **`not_equal` が最強**: 実際に差異が観測されたら、他軸で error や not_applicable が出ていても **not_equal を信じる**。「観測できた非等価」は「観測できなかった軸」より優先。
-- **`error` は not_equal に負ける**: シリアライズ不能 (循環参照) や timeout 等で観測不可でも、別の軸で差異が取れていれば non-equivalent 判定を優先する。
-- **全 not_applicable も error**: 「4 軸すべてで何も観測できなかった」は等価の証拠にはならず、**観測失敗**として扱う。例: 両側とも body が文のみ (return 無し、副作用なし、例外なし、引数変更なし)。
+- **`error` は executor crash 専用**: シリアライズ不能 (循環参照) / timeout / setup throw 等で観測パイプライン自体が壊れたとき。観測はできたが等価エビデンスが無い場合は `error` でなく `inconclusive`。
+- **`equal` は「中身を exercise した上で一致」だけ**: 「両方同じくクラッシュ」「DOM が初期から変化なし」「scaffolding global しか無い」は単独では `equal` にしない (→ `inconclusive`)。RQ では `equal`+`not_equal` の確認済み分を「検証器が著者判断と一致した」の分母にし、`inconclusive` は別途「検証カバレッジ」指標。
+- **pruning は `inconclusive` を等価扱い**: Hydra 式 pruning (`pruning/engine.ts`) の縮約可否判定は `equal ∪ inconclusive`。`inconclusive` の保守的区別は等価検証アーティファクトのためで、パターン縮約の健全性とは別軸 (ADR-0018)。
 
 ---
 
