@@ -29,6 +29,7 @@ import {
 import { routeOracles } from "./oracle-routing";
 import {
   DOM_NORMALIZE_PROFILE,
+  EXCEPTION_PROFILE,
   EXTERNAL_OBSERVATION_PROFILE,
   INTERACTION_TRACE_PROFILE,
   ITERATION_CAP,
@@ -106,7 +107,7 @@ function runOracle(
     case ORACLE.ARGUMENT_MUTATION:
       return checkArgumentMutation(slow, fast);
     case ORACLE.EXCEPTION:
-      return checkException(slow, fast);
+      return checkException(slow, fast, EXCEPTION_PROFILE);
     case ORACLE.EXTERNAL_OBSERVATION:
       return checkExternalObservation(slow, fast, isJsdom ? EXTERNAL_OBSERVATION_PROFILE : undefined);
     case ORACLE.DOM_MUTATION:

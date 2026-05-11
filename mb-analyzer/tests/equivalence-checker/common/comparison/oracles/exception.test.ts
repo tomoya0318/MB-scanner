@@ -6,6 +6,7 @@
  *   - 両側例外かつ ctor と message が一致 → equal
  *   - 両側例外だが ctor か message が異なる → not_equal
  *   - 片方だけ例外 → not_equal
+ *   - profile.normalizeMessagePatterns で正規化後に一致すれば equal (dataset の `<lib>_before/after` 配置 artifact 解消)
  */
 import { describe, expect, it } from "vitest";
 import { checkException } from "../../../../../src/equivalence-checker/common/comparison/oracles/exception";
@@ -39,5 +40,13 @@ describe("checkException", () => {
     const obs = checkException(capture({ exception: { ctor: "Error", message: "x" } }), capture());
     expect(obs.verdict).toBe("not_equal");
     expect(obs.detail).toContain("only slow");
+  });
+
+  it("normalizeMessagePatterns で `_before`/`_after` を消すと一致 → equal", () => {
+    const s = capture({ exception: { ctor: "Error", message: "Cannot find module './backbone_before/node_modules/x'" } });
+    const f = capture({ exception: { ctor: "Error", message: "Cannot find module './backbone_after/node_modules/x'" } });
+    const profile = { normalizeMessagePatterns: [[/([A-Za-z][\w.$-]*)_(?:before|after)(?=[/'")\s.\\:]|$)/g, "$1"]] as const };
+    expect(checkException(s, f).verdict).toBe("not_equal"); // 正規化なしでは differ
+    expect(checkException(s, f, profile).verdict).toBe("equal"); // 正規化すると一致
   });
 });

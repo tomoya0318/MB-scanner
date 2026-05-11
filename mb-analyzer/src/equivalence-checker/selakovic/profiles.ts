@@ -8,6 +8,7 @@
  */
 import type {
   DomNormalizeProfile,
+  ExceptionProfile,
   ExternalObservationProfile,
   InteractionTraceProfile,
 } from "../common/comparison/oracles";
@@ -39,31 +40,54 @@ export const DOM_NORMALIZE_PROFILE: DomNormalizeProfile = {
 };
 
 /**
- * O4 (external-observation): `new_globals` から除外する framework 内部 global のパターン。
- * `/^ng/` は AngularJS が立てる `ngContext` 等 (angular-7759_4 の偽 not_equal 解消)。
+ * O4 (external-observation): `new_globals` から除外するパターン。
+ * - `/^ng/` = AngularJS が立てる `ngContext` 等 (angular-7759_4 の偽 not_equal 解消)。
+ * - `/^__selakovic/` = runnable scaffolding 由来の漏れ。
+ * - 一文字 / よくある loop・temp 変数名 = `f1` body / preF1 が `<script>` として top-level 実行されるため
+ *   `var i` / `for(var keys ...)` 等が global に漏れる (= workload/lib の意図した state ではない script 実行 artifact)。
+ *   underscore-1224 の偽 not_equal (`new_globals` が片側だけ `keys` を含む) 解消。
  */
 export const EXTERNAL_OBSERVATION_PROFILE: ExternalObservationProfile = {
-  ignoreNewGlobalPatterns: [/^ng/],
+  ignoreNewGlobalPatterns: [
+    /^ng/,
+    /^__selakovic/,
+    /^[a-z]$/,
+    /^(arr|el|fn|idx|item|key|keys|len|n|node|obj|res|result|str|tmp|val|values)$/,
+  ],
+};
+
+/**
+ * O3 (exception): Selakovic dataset は slow/fast を `<lib>_before/`/`<lib>_after/` の別 dir に置くため、
+ * dep 解決失敗時の error message に `Cannot find module './backbone_before/...'` のように配置 artifact が混じる。
+ * 比較前に `_(before|after)` を除去して「両側同じく落ちた」と正しく判定する (backbone-1097/2858/707 / mocha-763)。
+ */
+export const EXCEPTION_PROFILE: ExceptionProfile = {
+  normalizeMessagePatterns: [[/([A-Za-z][\w.$-]*)_(?:before|after)(?=[/'")\s.\\:]|$)/g, "$1"]],
 };
 
 /**
  * C6 (interaction-trace): trace から除外する path prefix。framework の bootstrap-phase 自己呼び出し
  * (`angular.module(...)` / `angular.injector(...)` / `React.render(...)` 等) を比較対象に乗せない。
  * 記録 Proxy で包む対象を「workload が叩く境界」に限れば本来ノイズは乗らないが、保険として持つ。
+ * (内部レイアウトノイズ — `cid`・`_`-prefix フィールド — の除去は記録 Proxy 側の serializer / get-trap で
+ *  キー単位に行う。`ignoreGets` 全 get 除外は「workload が境界 object を read しただけ」を観測から落として
+ *  しまい偽 inconclusive を生むので使わない。)
  */
 export const INTERACTION_TRACE_PROFILE: InteractionTraceProfile = {
   ignorePathPrefixes: [],
 };
 
-/** serializer の `skipKeyPrefixes` — AngularJS の `$$hashKey` 等の内部プロパティを正規化で無視する。 */
-export const SERIALIZER_SKIP_KEY_PREFIXES: readonly string[] = ["$$"];
-
 /**
  * iteration-cap (ADR-0017): 計測ハーネスは preprocess が除去済 (`f1` は 1 回しか走らない) なので、
- * ここで縮めるのは `f1` body / lib 内部に残る大きいリテラル境界ループの保険。`threshold` 以上の
- * リテラル上限を `cap` に clamp する。`cap=null` で無効。— 2b.4 で実物を見て調整。
+ * ここで縮めるのは `f1` body / lib 内部に残る大きいリテラル境界ループ。`threshold` 以上のリテラル上限を
+ * `cap` に clamp する。`cap=null` で無効。
+ *
+ * threshold は当初 10000 だったが、(a) 反復回数は等価の構成要素ではない (ADR-0013) し spike で「縮小しても
+ * verdict は変わらない」を実証済、(b) ループが数百〜数千回回ると 1 反復あたりの C6 trace エントリ × 反復回数が
+ * 記録 Proxy の trace 上限 (2000) を超え、その「どこで打ち切られたか」が slow/fast の trace 量の僅差で
+ * ずれて偽 not_equal を生む (moment-1885 等)、ので 100 に下げて「数百回以上のループは 5 回に clamp」にする。
  */
-export const ITERATION_CAP: IterationCapOptions = { threshold: 10_000, cap: 5 };
+export const ITERATION_CAP: IterationCapOptions = { threshold: 100, cap: 5 };
 
 /**
  * jsdom 環境の重い候補 (AngularJS 665KB-2MB の load+bootstrap を含む) 用に推奨する timeout (ms)。

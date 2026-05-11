@@ -27,7 +27,39 @@ import type { TraceEntry } from "./types";
 export const RECORDER_GLOBAL = "__recorder";
 
 const MAX_DEPTH = 6;
-const SKIP_KEY_PREFIX = "$$";
+/**
+ * serialize / get-trace で無視するプロパティキーの prefix。`$$` は AngularJS の `$$hashKey` 等、
+ * `_` は多くの JS ライブラリ (Backbone / moment / underscore / request 等) が「private/内部」フィールドに
+ * 使う慣習。C6 は「workload↔SUT の観測可能な interaction」を見るのが目的なので、SUT 内部のレイアウト差
+ * (= patch のリファクタリングで変わるが振る舞いには影響しない) を比較対象から外す。
+ */
+const SKIP_KEY_PREFIXES: readonly string[] = ["$$", "_"];
+/**
+ * prefix 規則に当てはまらないが「逐次採番カウンタ / 内部 bookkeeping」として無視するキー (exact match)。
+ * `cid` = Backbone の Model/Collection の連番 ID (`"c1"`/`"c5001"` — 何個 Model を作ったかに依存して
+ * before/after で値がずれる)。prefix では拾えないのでここに足す (= C6 が観測すべき「振る舞い」ではない)。
+ */
+const SKIP_KEY_EXACT: ReadonlySet<string> = new Set(["cid"]);
+function isSkippedKey(k: string): boolean {
+  return SKIP_KEY_EXACT.has(k) || SKIP_KEY_PREFIXES.some((p) => k.startsWith(p));
+}
+/**
+ * 「SUT との interaction」ではなく値変換 / イテレーション / Promise プロトコルの機構であって、
+ * 呼び出しても trace に記録しないメソッド (= raw 関数を real target に bind して返す → 内部アクセスも漏れない)。
+ * 例: `"" + wrappedObj` が `valueOf`/`toString` を呼ぶ、`for..of` が `Symbol.iterator` を呼ぶ — これらを
+ * trace に乗せると「同じ振る舞いだが内部実装が違う patch」(moment の `isAfter` が `other._a` vs `other.valueOf()` 等) で
+ * 偽 not_equal が出る。
+ */
+const NON_INTERACTION_METHODS: ReadonlySet<string | symbol> = new Set<string | symbol>([
+  "valueOf",
+  "toString",
+  "toLocaleString",
+  "toJSON",
+  "then",
+  Symbol.toPrimitive,
+  Symbol.iterator,
+  Symbol.asyncIterator,
+]);
 /** 1 つの値の serialize で辿る配列要素 / オブジェクトキーの最大数 (それ以上は `…(+N more)` に畳む)。 */
 const MAX_BREADTH = 24;
 /** 1 つの値の serialize 結果の最大文字数 (これを超えたら `<truncated>`)。深さ×幅だけでは爆発しうるため総量でも縛る。 */
@@ -201,7 +233,7 @@ function serializeForTraceInner(value: unknown, stack: object[], depth: number, 
     } catch {
       keys = [];
     }
-    keys = keys.filter((k) => !k.startsWith(SKIP_KEY_PREFIX)).sort();
+    keys = keys.filter((k) => !isSkippedKey(k)).sort();
     const shown = Math.min(keys.length, MAX_BREADTH);
     const parts: string[] = [];
     for (let i = 0; i < shown; i++) {
@@ -318,6 +350,9 @@ export function makeRecorder(): Recorder {
         }
         if (typeof v === "function") {
           const fn = v as (...a: unknown[]) => unknown;
+          // 値変換 / イテレーション / Promise プロトコルの機構は trace に乗せず real target に bind して返す
+          // (= 呼んでも記録しないし内部アクセスも漏れない)。
+          if (NON_INTERACTION_METHODS.has(prop)) return fn.bind(tgt);
           const methodPath = `${path}.${String(prop)}`;
           return (...callArgs: unknown[]): unknown => recordCall(methodPath, fn, tgt, callArgs);
         }
@@ -327,7 +362,8 @@ export function makeRecorder(): Recorder {
           typeof prop === "string" &&
           prop !== "constructor" &&
           prop !== "prototype" &&
-          prop !== "then"
+          !NON_INTERACTION_METHODS.has(prop) &&
+          !isSkippedKey(prop)
         ) {
           pushTrace({ path: `${path}.${prop}`, op: "get", result: serializeForTrace(v) });
         }
@@ -454,13 +490,46 @@ if (import.meta.vitest) {
       expect(Object.getPrototypeOf(wrapped)).toBe(C.prototype);
     });
 
-    it("$$ prefix プロパティを serialize で無視し、循環は <circular>", () => {
+    it("$$ / _ prefix と cid プロパティを serialize で無視し、循環は <circular>", () => {
       const r = makeRecorder();
-      const cyc: Record<string, unknown> = { a: 1, $$hashKey: "x" };
+      const cyc: Record<string, unknown> = { a: 1, $$hashKey: "x", _internal: 7, _f: undefined, cid: "c1" };
       cyc.self = cyc;
       const obj = r.wrap({ id: (x: unknown) => x }, "obj");
       obj.id(cyc);
+      // $$hashKey ($$ prefix) / _internal / _f (_ prefix) / cid (exact) はいずれも serialize から除外される
       expect(r.trace[0]?.args?.[0]).toBe('{"a":1,"self":<circular>}');
+    });
+
+    it("_ prefix / cid のデータプロパティ get は trace に記録されない (bookkeeping)", () => {
+      const r = makeRecorder();
+      const obj = r.wrap({ _internal: 7, cid: "c1", value: 42 }, "obj");
+      expect(obj._internal).toBe(7);
+      expect(obj.cid).toBe("c1");
+      expect(obj.value).toBe(42); // 普通のプロパティは従来どおり get として乗る
+      expect(r.trace).toEqual([{ path: "obj.value", op: "get", result: "42" }]);
+    });
+
+    it("valueOf / toString は呼んでも trace に乗らず、内部アクセスも漏れない", () => {
+      const r = makeRecorder();
+      const obj = r.wrap(
+        {
+          _internal: 99,
+          valueOf(this: { _internal: number }): number {
+            return this._internal; // this を real target に bind するので proxy 経由でない
+          },
+          touch(): number {
+            return 1;
+          },
+        },
+        "obj",
+      );
+      expect(+obj).toBe(99); // valueOf 呼び出し
+      expect(obj.toString()).toBe("[object Object]"); // toString 呼び出し (Object.prototype.toString)
+      // valueOf / toString の呼び出しも内部の this._internal read も trace に乗らない
+      expect(r.trace).toEqual([]);
+      // 通常メソッドは従来どおり乗る
+      obj.touch();
+      expect(r.trace).toEqual([{ path: "obj.touch", op: "call", args: [], result: "1" }]);
     });
 
     it("同一 target の再 wrap は同じ proxy (WeakMap キャッシュ)", () => {

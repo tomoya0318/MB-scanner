@@ -32,12 +32,21 @@ export function wrapBoundaryVarsStatement(pairs: ReadonlyArray<readonly [varName
 /** client lib-file 系で workload が直接叩きうる window グローバル候補 (保守的)。lib 名が不明なので存在するものだけ wrap する。 */
 export const CLIENT_LIB_GLOBALS: readonly string[] = ["$", "jQuery", "_", "ejs", "Ember", "React", "angular", "Q"];
 
+/**
+ * `recurse: true` だと「メソッド戻り値 (= chain) を再帰 wrap → それが lib 内部に再投入されると version-sensitive な
+ * 内部コードが Proxy で壊れる」ことがある。jQuery (`$`/`jQuery`) は `$(...).children().domManip(...)` の連鎖を
+ * 内部で多用し、`recurse:true` の wrapped jQuery object を `domManip` が `.length`/`.name`/`getPrototypeOf` 経由で
+ * 触って壊れる (jquery-200) ので、top-level の `$`/`jQuery` だけ wrap し chain は wrap しない (`recurse: false`)。
+ * 他の lib は従来どおり `recurse: true`。
+ */
+const NON_RECURSIVE_LIB_GLOBALS: ReadonlySet<string> = new Set(["$", "jQuery"]);
+
 /** `libSource` 実行後に置く: 存在する lib グローバルだけを `__recorder.wrap(...)` で包む文を返す。 */
 export function wrapClientLibGlobalsStatement(): string {
-  const body = CLIENT_LIB_GLOBALS.map(
-    (g) =>
-      `if (typeof ${g} !== 'undefined') ${g} = globalThis.${RECORDER_GLOBAL}.wrap(${g}, ${JSON.stringify(g)}, { recurse: true });`,
-  ).join(" ");
+  const body = CLIENT_LIB_GLOBALS.map((g) => {
+    const recurse = NON_RECURSIVE_LIB_GLOBALS.has(g) ? "false" : "true";
+    return `if (typeof ${g} !== 'undefined') ${g} = globalThis.${RECORDER_GLOBAL}.wrap(${g}, ${JSON.stringify(g)}, { recurse: ${recurse} });`;
+  }).join(" ");
   return `if (${RECORDER_GUARD}) { ${body} }`;
 }
 
@@ -60,10 +69,14 @@ if (import.meta.vitest) {
       expect(wrapBoundaryVarsStatement([])).toBe("");
     });
 
-    it("wrapClientLibGlobalsStatement: 既知の lib グローバルを存在チェック付きで包む", () => {
+    it("wrapClientLibGlobalsStatement: 既知の lib グローバルを存在チェック付きで包む (jQuery は recurse: false)", () => {
       const s = wrapClientLibGlobalsStatement();
-      expect(s).toContain("if (typeof jQuery !== 'undefined') jQuery = globalThis.__recorder.wrap(jQuery, \"jQuery\", { recurse: true });");
+      // jQuery / $ は chain を wrap すると before 版が壊れるので recurse: false
+      expect(s).toContain("if (typeof jQuery !== 'undefined') jQuery = globalThis.__recorder.wrap(jQuery, \"jQuery\", { recurse: false });");
+      expect(s).toContain("if (typeof $ !== 'undefined') $ = globalThis.__recorder.wrap($, \"$\", { recurse: false });");
+      // 他の lib は recurse: true のまま
       expect(s).toContain("if (typeof _ !== 'undefined') _ = globalThis.__recorder.wrap(_, \"_\", { recurse: true });");
+      expect(s).toContain("if (typeof React !== 'undefined') React = globalThis.__recorder.wrap(React, \"React\", { recurse: true });");
       // 未注入時に runnable が壊れないよう、全体が 1 つの guard に包まれている
       expect(s.startsWith("if (typeof globalThis.__recorder === 'object'")).toBe(true);
     });
