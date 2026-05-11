@@ -91,3 +91,14 @@ Hydra 式 pruning (`pruning/engine.ts`) の縮約可否判定 (`isEquivalentEnou
 
 - 旧 4 規則 → 新 5 規則の差分: 旧 rule 2「全 N/A → `error`」が新 rule 3「全 N/A → `inconclusive`」に。旧 rule 3「`not_equal` なし & 残り全部 `equal` → `equal`」が新 rule 4 (positive evidence チェック) + 新 rule 5 に分裂。旧 rule 4「`not_equal` なしで `error` 混入 → `error`」は新 rule 2 に吸収。oracle 評価順序 (C5→C1→C6→C2→C4→C3) は変更なし (verdict 合成は順序非依存)。
 - 再走の生データ・突合は `tmp/0006_phase2b-equivalence-checker/verify-97-{results,crosscheck}.{md,tsv}` を上書き更新。新規分析 (`inconclusive` の理由分布等) は `tmp/0007_equivalence-verdict-conservative-reclassification/`。
+
+### 2026-05-11 更新 (Phase C-2 で `dom_changed` を実装)
+
+§決定 の「`dom_mutation` の positive 格上げは Phase C」と §トリガーの「dom_changed フラグを足す」を実装した:
+
+- `ExecutionCapture.dom_changed?: boolean` を追加。jsdom executor が body 実行前の初期 mount HTML を覚えておき実行後と文字列比較してセットする。
+- `dom_mutation` oracle は「両側とも `dom_changed === false`」のとき N/A を返す (= DOM 観測としては何も起きていない)。
+- `POSITIVE_EVIDENCE_ORACLES` に `DOM_MUTATION` を追加。
+- **保守化追加ルール**: 「`exception=equal` (両側同じく落ちた) かつ唯一の positive evidence が `dom_mutation` のみ」の場合は `inconclusive(both-sides-threw)` に倒す。これは Angular の bootstrap で DOM を触ってから両側同じく落ちたケース (workload を完走できていない = 弱い equal) を防ぐ。`return_value` (C1 = exception 時に N/A) / `argument_mutation` (C4) / `interaction_trace` (C6) のいずれかが non-N/A なら workload が部分的にでも exercise されたと見なせるので `equal` を保つ。
+
+効果 (97 件再走): `equal 67→71` (+4 = react-808#0/#1 / angular-4359#0/7759_3 の純粋 dom-only が `real-c2` に昇格) / `inconclusive 33→29` (-4) / `not_equal 6` 不変 / 検証カバレッジ 67.6%→71.3%。Phase B 時点で `inconclusive(no-positive-evidence)` 6 件のうち 2 件 (react-1885#0/3665#0) は `dom_changed=false` だったため `inconclusive` に正しく残った (= Phase B の dom-only 分類が一部不正確だった、を C-2 が修正した側面)。
