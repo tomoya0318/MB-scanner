@@ -21,12 +21,12 @@ import type { ConsoleCall, ExceptionCapture, ExecutionCapture } from "../capture
 import { freezeContextNonDeterminism } from "../transforms/non-determinism";
 
 /**
- * `jsdom` の window/document を持つ VM context で 1 スクリプトを実行し `ExecutionCapture` を返す
- * (ADR-0012 の「jsdom 環境」。Phase 2b で記録 Proxy / iteration-cap を順次足す)。
+ * `jsdom` の window/document を持つ VM context で 1 スクリプトを実行し `ExecutionCapture` を返す。
+ * 判断: ai-guide/adr/0012-equivalence-checker-execution-environment.md
  *
  * - `runScripts: "outside-only"` で素の jsdom + `getInternalVMContext()` を使う (= `<script>` は実行しないが
- *   外から `vm.runInContext` で同じ realm に注入できる)。AngularJS / jQuery 等の browser ライブラリが
- *   `window` / `document` を参照しても動く (Phase 1.0 スパイクで AngularJS 950KB の load+bootstrap を実証)。
+ *   外から `vm.runInContext` で同じ realm に注入できる)。browser ライブラリ (AngularJS / jQuery 等) が
+ *   `window` / `document` を参照しても動く。
  * - server `test_case_*.js` の `require('./<lib>_*.js')` 解決のため、グローバル `require` を注入する:
  *   相対パスは `module_base_dir` 起点で resolve して同 context で eval (`.js` / `.json` 対応)、bare npm dep は
  *   dataset fork の `node_modules` から host `createRequire` で解決を試みる (見つからなければ throw → `error`)。
@@ -218,10 +218,10 @@ function installRequire(context: vm.Context, moduleBaseDir: string | undefined, 
           return record.exports;
         } catch (e) {
           // フォールバック: 相対パスに `/node_modules/<x>` パターンがあれば、その最後のセグメントを
-          // bare module として shared lockfile (ADR-0016) から解決を試す。dataset の test_case が
-          // `require('./<lib>/node_modules/<dep>')` のように lib の transitive dep を hardcode パスで
-          // 参照する Selakovic 2016 の Backbone 系パターンを救う。pnpm の shared install (上位 dir の
-          // node_modules) は Node の relative 解決では辿れないため。bare 解決も失敗したら元の例外を投げる。
+          // bare module として shared lockfile から解決を試す (判断: ai-guide/adr/0016-equivalence-sandbox-sut-dependency-resolution.md)。
+          // dataset の test_case が `require('./<lib>/node_modules/<dep>')` のように lib の transitive dep を
+          // hardcode パスで参照するパターンを救う — pnpm の shared install (上位 dir の node_modules) は
+          // Node の relative 解決では辿れないため。bare 解決も失敗したら元の例外を投げる。
           const m = /\/node_modules\/([^/]+)\/?$/.exec(spec);
           const depName = m?.[1];
           if (depName !== undefined && baseRequire !== null) {
@@ -234,8 +234,8 @@ function installRequire(context: vm.Context, moduleBaseDir: string | undefined, 
           throw e;
         }
       }
-      // bare npm dep — Selakovic dataset fork は SUT lib の依存を lockfile 同梱で vendor 済 (ADR-0016)。
-      // host の dataset node_modules から解決を試み、無ければ throw (= Phase F の error 分類で可視化)。
+      // bare npm dep — Selakovic dataset fork は SUT lib の依存を lockfile 同梱で vendor 済。
+      // host の dataset node_modules から解決を試み、無ければ throw (= 呼び出し側の error verdict に乗る)。
       if (baseRequire !== null) {
         return baseRequire(spec) as unknown;
       }

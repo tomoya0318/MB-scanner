@@ -1,10 +1,9 @@
 /**
  * Selakovic dataset 固有の正規化「値」— `common/` の各 primitive に `opts`/config として渡す。
- * 値の根拠は計測ハーネス知識 / 使用 framework 知識 (`tmp/oracle-mapping.md` §5.4 / §8)。暫定値が多く、
- * 2b.4 の 97 件再走で詰める (詰めるたびにここを更新 → 再走 → crosscheck)。
+ * 値の根拠は計測ハーネス知識 / 使用 framework 知識。
  *
- * `common/` のソースには framework/dataset 固有の string literal を置かない (ESLint zone + grep)。
- * それらは全部このファイルと `wrap-targets.ts` にだけ現れる。
+ * `common/` のソースには framework/dataset 固有の string literal を置かない (ESLint zone + grep) —
+ * それらはこのファイルに集約する。
  */
 import type {
   DomNormalizeProfile,
@@ -15,9 +14,8 @@ import type {
 import type { IterationCapOptions } from "../common/sandbox";
 
 /**
- * C2 の DOM 正規化プロファイル。AngularJS 1.x / React 0.x が DOM に動的に付与するノイズを除去する。
- * root = `<body>` (デフォルト)。`tmp/oracle-mapping.md` §5.4 の DOM patch issue (Angular/9369, React/808, React/934, …)
- * を 2b.4 で見て詰める。
+ * C2 の DOM 正規化プロファイル。AngularJS 1.x / React 0.x が compile/link 時に DOM へ動的付与する
+ * 属性・class・コメントを除去する (root = `<body>` デフォルト)。
  */
 export const DOM_NORMALIZE_PROFILE: DomNormalizeProfile = {
   ignoreAttributes: [
@@ -78,19 +76,19 @@ export const INTERACTION_TRACE_PROFILE: InteractionTraceProfile = {
 };
 
 /**
- * iteration-cap (ADR-0017): 計測ハーネスは preprocess が除去済 (`f1` は 1 回しか走らない) なので、
- * ここで縮めるのは `f1` body / lib 内部に残る大きいリテラル境界ループ。`threshold` 以上のリテラル上限を
- * `cap` に clamp する。`cap=null` で無効。
+ * iteration-cap: 計測ハーネスは preprocess が除去済 (`f1` は 1 回しか走らない) なので、ここで縮めるのは
+ * `f1` body / lib 内部に残る大きいリテラル境界ループ。`threshold` 以上のリテラル上限を `cap` に clamp する
+ * (`cap=null` で無効)。
+ * 判断: ai-guide/adr/0017-equivalence-sandbox-pre-execution-transforms.md
  *
- * threshold は当初 10000 だったが、(a) 反復回数は等価の構成要素ではない (ADR-0013) し spike で「縮小しても
- * verdict は変わらない」を実証済、(b) ループが数百〜数千回回ると 1 反復あたりの C6 trace エントリ × 反復回数が
- * 記録 Proxy の trace 上限 (2000) を超え、その「どこで打ち切られたか」が slow/fast の trace 量の僅差で
- * ずれて偽 not_equal を生む (moment-1885 等)、ので 100 に下げて「数百回以上のループは 5 回に clamp」にする。
+ * threshold が低いのは: 反復回数は等価の構成要素ではない (ADR-0013) し、数百回以上回るループは 1 反復あたりの
+ * C6 trace エントリ × 反復回数が記録 Proxy の trace 上限を超え、その打ち切り位置が slow/fast の trace 量の僅差で
+ * ずれて偽 not_equal を生むため。
  */
 export const ITERATION_CAP: IterationCapOptions = { threshold: 100, cap: 5 };
 
 /**
- * jsdom 環境の重い候補 (AngularJS 665KB-2MB の load+bootstrap を含む) 用に推奨する timeout (ms)。
+ * jsdom 環境の重い候補 (大きい framework lib の load+bootstrap を含む) 用に推奨する timeout (ms)。
  * 呼び出し側が `timeout_ms` を明示していればそちらを尊重する (バッチ API は必須なので通常そちら)。
  */
 export const HEAVY_JSDOM_TIMEOUT_MS = 20_000;

@@ -8,12 +8,11 @@ import {
 } from "../../../contracts/equivalence-contracts";
 
 /**
- * positive な等価エビデンスを与える oracle 集合 (ADR-0018 + Phase C-2)。
- * これらのいずれかが non-`not_applicable` のときだけ全体を `equal` にできる。
+ * positive な等価エビデンスを与える oracle 集合。これらのいずれかが non-`not_applicable` のときだけ
+ * 全体を `equal` にできる。判断: ai-guide/adr/0018-equivalence-verdict-conservative.md
  *
- * `dom_mutation` は Phase C-2 で oracle 側に「両側とも DOM を変更しなかった → N/A」を入れた (capture.dom_changed
- * を見る) ので、non-N/A は「少なくとも片側が DOM を実際に変更した」を意味する = positive evidence。
- *
+ * `dom_mutation` の non-N/A は「少なくとも片側が DOM を実際に変更した」を意味する (oracle 側が
+ * `capture.dom_changed` を見て両側未変更なら N/A を返すため) = positive evidence。
  * 一方 `exception` (両側同じくクラッシュ) / `external_observation` (scaffolding global ノイズ) の `equal` は
  * 単独では positive evidence と見なさない (前者は patch を exercise していない、後者は ignore pattern 後も
  * 残るノイズの可能性)。
@@ -43,7 +42,7 @@ export const VERDICT_REASON = {
 export type VerdictReason = (typeof VERDICT_REASON)[keyof typeof VERDICT_REASON];
 
 /**
- * oracle observation 集合から全体 verdict を導出する純粋関数 (ADR-0018 + Phase C-2)。
+ * oracle observation 集合から全体 verdict を導出する純粋関数。
  *
  * 1. いずれかの oracle が not_equal → not_equal
  * 2. いずれかの oracle が error → error

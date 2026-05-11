@@ -41,12 +41,14 @@ const DEFAULT_TIMEOUT_MS = 5000;
  * Selakovic dataset 用の等価検証エントリ。`(setup, slow, fast)` を環境ごとに実行し、
  * `oracle-routing.ts` が選んだ oracle 群で観測して verdict に畳む。
  *
- * - `environment === "vm"` (デフォルト / pruning): 素 vm + 非決定性遮断。oracle は C1/C4/C5/C3 の 4 本 (Phase 2a と同一)。
+ * - `environment === "vm"` (デフォルト / pruning): 素 vm + 非決定性遮断。oracle は C1/C4/C5/C3 の 4 本。
  * - `environment === "jsdom"` (Selakovic の client/server candidate): jsdom window/document + require shim + server vm globals。
- *   body には iteration-cap (ADR-0017) をかける。記録 Proxy を `globalThis.__recorder` として注入する
+ *   body には iteration-cap をかける。記録 Proxy を `globalThis.__recorder` として注入する
  *   (runnable が `preprocessing/selakovic/assemble/*` 由来で `globalThis.__recorder` を見て workload が叩く境界オブジェクトを
  *   wrap してから SUT を呼ぶ → `capture.interaction_trace` が埋まる)。oracle は上記 4 本 + C2 (DOM) + C6 (interaction-trace)。
  *   C2/C6 のチャネルが空なら oracle 自身が `not_applicable` を返す。`mount_html` も plumb する。
+ *
+ * 判断: ai-guide/adr/0012-equivalence-checker-execution-environment.md / 0015-equivalence-checker-layering-and-dom-oracle.md
  */
 export async function checkEquivalence(input: EquivalenceInput): Promise<EquivalenceCheckResult> {
   const setup = input.setup ?? "";

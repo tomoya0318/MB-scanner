@@ -1,5 +1,6 @@
 /**
- * 計測ループの反復回数を縮める実行前 AST pass (ADR-0017)。
+ * 計測ループの反復回数を縮める実行前 AST pass。
+ * 判断: ai-guide/adr/0017-equivalence-sandbox-pre-execution-transforms.md
  *
  * Selakovic の計測ハーネスは「同じ関数を N 回 (N が大きい) 回して時間を測る」形なので、
  * SUT lib を before/after で丸ごと走らせる等価検証では N が timeout の主因になる。pass の役割:
