@@ -1,7 +1,7 @@
 import type { File, Node } from "@babel/types";
 
 import { checkEquivalence } from "../equivalence-checker";
-import { VERDICT } from "../contracts/equivalence-contracts";
+import { VERDICT, type Verdict } from "../contracts/equivalence-contracts";
 import {
   PRUNING_VERDICT,
   type Placeholder,
@@ -33,6 +33,16 @@ import { PLACEHOLDER_NAME_PATTERN, replacementFor } from "./rules/replacement";
  *
  * 単一 setup 設計の採用判断は ai-guide/adr/0004-pruning-setup-single.md 参照。
  */
+
+/**
+ * pruning にとって「これ以上の縮約をしても witness 上の挙動が変わっていない」と見なせる verdict。
+ * `equal` (positive evidence あり) に加えて `inconclusive` (差は観測されなかったが positive evidence 無し)
+ * も含める: `inconclusive` の保守的な区別は等価検証アーティファクト (Selakovic dataset の検証主張) のための
+ * もので、パターン縮約の健全性とは別軸 — pruning は「観測可能な差が無い」を縮約可否の基準にする (ADR-0018)。
+ */
+function isEquivalentEnoughForPruning(verdict: Verdict): boolean {
+  return verdict === VERDICT.EQUAL || verdict === VERDICT.INCONCLUSIVE;
+}
 
 /**
  * `prune` の本体。失敗時は verdict=error を返し例外は呼び出し側へ投げない。
@@ -84,7 +94,7 @@ export async function prune(input: PruningInput): Promise<PruningResult> {
       node_count_before: nodeCountBefore,
     };
   }
-  if (initialCheck.verdict !== VERDICT.EQUAL) {
+  if (!isEquivalentEnoughForPruning(initialCheck.verdict)) {
     return {
       ...baseResult,
       verdict: PRUNING_VERDICT.INITIAL_MISMATCH,
@@ -230,7 +240,7 @@ async function tryPruneCandidates(args: TryPruneInput): Promise<TryPruneResult> 
         timeout_ms: cfg.timeout_ms,
       });
 
-      if (result.verdict !== VERDICT.EQUAL) continue; // 不等価 / error → 次候補へ
+      if (!isEquivalentEnoughForPruning(result.verdict)) continue; // 不等価 / error → 次候補へ
 
       succeeded = true;
       placeholders.push({

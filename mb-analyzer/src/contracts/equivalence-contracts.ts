@@ -8,6 +8,13 @@
 export const VERDICT = {
   EQUAL: "equal",
   NOT_EQUAL: "not_equal",
+  /**
+   * 差は観測されなかったが「同じ値を返した / 同じ引数変化をした / 同じ呼び出し列だった」という
+   * positive な等価エビデンスが無い (= 中身を exercise できていない可能性が高い) ケース。
+   * 「両側が同じ例外で落ちた」「DOM が初期から変化していない」「scaffolding global しか観測できていない」等。
+   * ADR-0018 参照。
+   */
+  INCONCLUSIVE: "inconclusive",
   ERROR: "error",
 } as const;
 export type Verdict = (typeof VERDICT)[keyof typeof VERDICT];
@@ -88,6 +95,12 @@ export interface EquivalenceCheckResult {
   id?: string;
   verdict: Verdict;
   observations: OracleObservation[];
+  /**
+   * `verdict === "inconclusive"` のときの理由分類 (`"no-observable-channel"` / `"both-sides-threw"` /
+   * `"no-positive-evidence"`)、または executor crash / setup throw 由来の `"error"` 時の `"executor-error"`。
+   * `equal` / `not_equal` では `null`。ADR-0018 参照。
+   */
+  verdict_reason?: string | null;
   error_message?: string | null;
   effective_timeout_ms?: number;
 }

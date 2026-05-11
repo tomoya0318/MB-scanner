@@ -2,11 +2,11 @@
 
 - **Status**: accepted。前提の実証ステータスは `tmp/phase2b-adr-assumption-audit.md` §B 参照（C6 の取得方法 = 汎用記録 Proxy で実装可能であることを spike で実証 — `tmp/0005_phase2b-c6-proxy-spike/spike-results.md`。Proxy は `get`/`set`/`apply`/`construct` トラップ + 戻り値の再帰 wrap の形が要る、を ADR-0015 §interaction-trace に反映済）。
 - **Date**: 2026-05-10
-- **Related**: ADR-0011 (preprocess 段1 の SUT 特定が interaction trace の「包む対象」を決める入力), ADR-0012 (実行環境 — DOM/trace の生成経路は executor 側), ADR-0015 (oracle 層の構造 + DOM oracle + interaction-trace oracle + adapter config), ADR-0017 (実行前 transform — 反復回数を非観測と決めたのは本 ADR、その帰結の iteration-cap 機構が 0017), `mb-analyzer/src/equivalence-checker/`, `ai-guide/code-map.md` §等価性検証器, `tmp/oracle-mapping.md` §2/§4/§6/§7, `tmp/dataset-conventions.md` §1.3/§6, `tmp/phase2b-adr-assumption-audit.md` §B
+- **Related**: ADR-0011 (preprocess 段1 の SUT 特定が interaction trace の「包む対象」を決める入力), ADR-0012 (実行環境 — DOM/trace の生成経路は executor 側), ADR-0015 (oracle 層の構造 + DOM oracle + interaction-trace oracle + adapter config), ADR-0017 (実行前 transform — 反復回数を非観測と決めたのは本 ADR、その帰結の iteration-cap 機構が 0017), **ADR-0018 (verdict 合成の改修 — 旧 4 規則 → 新 5 規則 + `inconclusive` verdict + positive-evidence ルール。本 ADR の「verdict の合成規則」§ を上書き)**, `mb-analyzer/src/equivalence-checker/`, `ai-guide/code-map.md` §等価性検証器, `tmp/oracle-mapping.md` §2/§4/§6/§7, `tmp/dataset-conventions.md` §1.3/§6, `tmp/phase2b-adr-assumption-audit.md` §B
 
 ## このADRの守備範囲
 
-このADRが決めるのは **「2 つの body が "意味論的に等価" であるとは、どの観測量がすべて一致することか」と「複数 oracle の判定をどう 1 つの verdict に合成するか」だけ** — つまり*意味論*の話。具体的には: 等価の構成要素 (C1–C6) と各々が構成要素である理由 / 等価から除外する観測量 (timing・iteration 回数・memory・stack・同期後 async・非決定性 API 生値) と除外理由 / verdict 合成の 4 規則 / oracle 評価順序 / 既知の穴と threats への書き方。
+このADRが決めるのは **「2 つの body が "意味論的に等価" であるとは、どの観測量がすべて一致することか」だけ** — つまり*意味論*の話。具体的には: 等価の構成要素 (C1–C6) と各々が構成要素である理由 / 等価から除外する観測量 (timing・iteration 回数・memory・stack・同期後 async・非決定性 API 生値) と除外理由 / oracle 評価順序 / 既知の穴と threats への書き方。**複数 oracle の判定を 1 つの verdict に合成する規則は ADR-0018 (新 5 規則 + `inconclusive` verdict + positive-evidence ルール) が決める** — 本 ADR §「verdict の合成規則」は ADR-0018 で上書きされた旧 4 規則を履歴として残す。
 
 **扱わないこと** (他 ADR の管轄。本 ADR は該当箇所を 1 行参照するだけ):
 - jsdom か Playwright か / `capture.dom_html`・`capture.interaction_trace` の生成経路 → **ADR-0012 (実行環境)**
@@ -81,14 +81,16 @@ Selakovic & Pradel (ICSE 2016) は性能修正パッチが "semantic-preserving"
 - **body 同期終了後の非同期タスクの副作用**: sandbox は body の同期完了で観測を打ち切る。`setTimeout` / `queueMicrotask` / 未解決 Promise の後続副作用は見ない。本 dataset は同期コード主体 + 計測ハーネス除去後は `$.ajax` の async も消えるので実害は低い (`ai-guide/code-map.md` §等価性検証器の穴 3)。
 - **非決定性 API の生値**: `Date.now()` / `Math.random()` / `process.hrtime()` 等は sandbox の実行前 transform で固定または遮断する (ADR-0017)。固定後の値は両側同一なので等価判定に影響しない = 実質非観測。
 
-### verdict の合成規則
+### verdict の合成規則 (旧 4 規則 — **ADR-0018 で新 5 規則に上書きされた**。以下は履歴)
+
+> **現行の合成規則は ADR-0018 を参照** (全 N/A → `inconclusive` / positive-evidence oracle がすべて N/A → `inconclusive` / それ以外 → `equal`、+ `verdict_reason`)。下記は ADR-0018 以前の挙動。
 
 各 oracle は `equal` / `not_equal` / `not_applicable` / `error` のいずれかを返す。全体 verdict は:
 
 1. **`not_equal` が 1 つでもあれば → `not_equal`**。実際に観測できた非等価は、他軸で `error` / `not_applicable` が出ていても優先する (「観測できた非等価」> 「観測できなかった軸」 — `ai-guide/code-map.md` §verdict)。
-2. **全 oracle が `not_applicable` → `error`**。観測対象がゼロ (戻り値なし・副作用なし・例外なし・DOM 変化なし) では等価を主張できない = 観測失敗扱い。
-3. **`not_equal` がなく、`not_applicable` 以外がすべて `equal` → `equal`**。
-4. **上記以外 (`not_equal` はないが `error` が混じる) → `error`** (または report 上は `inconclusive` として扱い手動レビューに回す)。
+2. **全 oracle が `not_applicable` → `error`** (※ ADR-0018 で `inconclusive` に変更)。観測対象がゼロ (戻り値なし・副作用なし・例外なし・DOM 変化なし) では等価を主張できない = 観測失敗扱い。
+3. **`not_equal` がなく、`not_applicable` 以外がすべて `equal` → `equal`** (※ ADR-0018 で「positive-evidence oracle = `{C1,C4,C6}` のいずれかが non-N/A」を追加要件にし、満たさなければ `inconclusive`)。
+4. **上記以外 (`not_equal` はないが `error` が混じる) → `error`** (または report 上は `inconclusive` として扱い手動レビューに回す ← ADR-0018 でこの「report 上 inconclusive」を first-class な `inconclusive` verdict に昇格)。
 
 ### oracle 評価の順序 (report の読みやすさ / short-circuit 用)
 

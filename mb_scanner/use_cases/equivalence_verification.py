@@ -11,22 +11,42 @@ from collections.abc import Sequence
 from mb_scanner.domain.entities.equivalence import (
     EquivalenceCheckResult,
     EquivalenceInput,
+    Oracle,
     OracleObservation,
     OracleVerdict,
     Verdict,
 )
 from mb_scanner.domain.ports.equivalence_checker import EquivalenceCheckerPort
 
+# positive な等価エビデンスを与える oracle 集合 (ADR-0018)。
+# これらのいずれかが non-not_applicable のときだけ全体を equal にできる。
+# exception (両側同じくクラッシュ) / dom_mutation / external_observation の equal は単独では positive と見なさない。
+_POSITIVE_EVIDENCE_ORACLES = frozenset(
+    {Oracle.RETURN_VALUE, Oracle.ARGUMENT_MUTATION, Oracle.INTERACTION_TRACE},
+)
+
+# inconclusive verdict の理由文字列 (ADR-0018)。equal / not_equal では None。
+# - no-observable-channel: 全 oracle が not_applicable
+# - both-sides-threw     : exception oracle が equal (= 両側が同じ例外で落ちた) で positive evidence 無し
+# - no-positive-evidence : 例外も無く positive evidence 無し (dom_mutation / external_observation だけが equal 等)
+# executor-error は executor crash / setup throw 由来の error verdict 用で、Node 側 checker が直接セットする。
+VERDICT_REASON_NO_OBSERVABLE_CHANNEL = "no-observable-channel"
+VERDICT_REASON_BOTH_SIDES_THREW = "both-sides-threw"
+VERDICT_REASON_NO_POSITIVE_EVIDENCE = "no-positive-evidence"
+VERDICT_REASON_EXECUTOR_ERROR = "executor-error"
+
 
 def derive_overall_verdict(observations: list[OracleObservation]) -> Verdict:
-    """Oracle observation から全体 verdict を導く純粋関数
+    """Oracle observation から全体 verdict を導く純粋関数 (ADR-0018, 5 規則)
 
     優先順位:
         1. not_equal が 1 つでもある → not_equal
         2. error が 1 つでもある → error
-        3. 全 oracle が not_applicable → error（観測対象ゼロ）
-        4. equal が 1 つでもある → equal
-        5. フォールバック → error
+        3. 全 oracle が not_applicable → inconclusive（観測チャネルゼロ）
+        4. not_equal/error 無し かつ positive-evidence oracle
+           ({return_value, argument_mutation, interaction_trace}) がすべて not_applicable
+           → inconclusive（差は観測されなかったが積極的等価エビデンスが無い）
+        5. それ以外 → equal
     """
     verdicts = [o.verdict for o in observations]
     if OracleVerdict.NOT_EQUAL in verdicts:
@@ -34,10 +54,31 @@ def derive_overall_verdict(observations: list[OracleObservation]) -> Verdict:
     if OracleVerdict.ERROR in verdicts:
         return Verdict.ERROR
     if all(v == OracleVerdict.NOT_APPLICABLE for v in verdicts):
-        return Verdict.ERROR
-    if OracleVerdict.EQUAL in verdicts:
-        return Verdict.EQUAL
-    return Verdict.ERROR
+        return Verdict.INCONCLUSIVE
+    has_positive_evidence = any(
+        o.oracle in _POSITIVE_EVIDENCE_ORACLES and o.verdict != OracleVerdict.NOT_APPLICABLE
+        for o in observations
+    )
+    if not has_positive_evidence:
+        return Verdict.INCONCLUSIVE
+    return Verdict.EQUAL
+
+
+def derive_verdict_reason(observations: list[OracleObservation], verdict: Verdict) -> str | None:
+    """``derive_overall_verdict`` が inconclusive を返した理由を分類する (ADR-0018)
+
+    inconclusive 以外の verdict では None を返す。
+    """
+    if verdict is not Verdict.INCONCLUSIVE:
+        return None
+    if all(o.verdict == OracleVerdict.NOT_APPLICABLE for o in observations):
+        return VERDICT_REASON_NO_OBSERVABLE_CHANNEL
+    # inconclusive かつ非 N/A の oracle がある時点で not_equal/error は無いので exception は N/A か equal。
+    # equal なら「両側が同じ例外で落ちた」(jsdom では dom_mutation=equal も常に付くがノイズなので無視)。
+    exception = next((o for o in observations if o.oracle is Oracle.EXCEPTION), None)
+    if exception is not None and exception.verdict == OracleVerdict.EQUAL:
+        return VERDICT_REASON_BOTH_SIDES_THREW
+    return VERDICT_REASON_NO_POSITIVE_EVIDENCE
 
 
 class EquivalenceVerificationUseCase:
@@ -80,6 +121,7 @@ def _finalize(result: EquivalenceCheckResult) -> EquivalenceCheckResult:
         id=result.id,
         verdict=recalculated,
         observations=result.observations,
+        verdict_reason=derive_verdict_reason(result.observations, recalculated),
         error_message=result.error_message,
         effective_timeout_ms=result.effective_timeout_ms,
     )

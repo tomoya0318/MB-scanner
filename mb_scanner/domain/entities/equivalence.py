@@ -19,10 +19,17 @@ DEFAULT_TIMEOUT_MS = 5_000
 
 
 class Verdict(StrEnum):
-    """全体等価性判定"""
+    """全体等価性判定
+
+    ``INCONCLUSIVE`` = 差は観測されなかったが positive な等価エビデンス
+    (``return_value`` / ``argument_mutation`` / ``interaction_trace`` のいずれかが non-N/A) が
+    無いケース (= 中身を exercise できていない可能性が高い)。``error`` (executor crash 等) とは区別する。
+    ADR-0018 参照。
+    """
 
     EQUAL = "equal"
     NOT_EQUAL = "not_equal"
+    INCONCLUSIVE = "inconclusive"
     ERROR = "error"
 
 
@@ -112,5 +119,9 @@ class EquivalenceCheckResult(BaseModel):
     id: str | None = None
     verdict: Verdict
     observations: list[OracleObservation] = Field(default_factory=list[OracleObservation])
+    # verdict == INCONCLUSIVE のときの理由分類 ("no-observable-channel" / "both-sides-threw" /
+    # "no-positive-evidence")、または executor crash / setup throw 由来の ERROR 時の "executor-error"。
+    # equal / not_equal では None。ADR-0018 参照。
+    verdict_reason: str | None = None
     error_message: str | None = None
     effective_timeout_ms: int | None = None

@@ -4,7 +4,7 @@
  * 判定事項:
  *   - 等価な式 (`1+1` vs `2`) → equal、return_value oracle も equal
  *   - Selakovic 反例 (`x % 2` vs `x & 1`, x=-3) → not_equal
- *   - 両側 throw で ctor+msg 一致 → equal、片方だけ throw → not_equal
+ *   - 両側 throw で ctor+msg 一致 → inconclusive (両側同じくクラッシュ = positive evidence 無し)、片方だけ throw → not_equal
  *   - setup で配列を共有し両側が同じ変異 → equal、異なる変異 → not_equal
  *   - 副作用分離: slow の破壊的変更が fast に伝播しない
  *   - console 出力差分 → not_equal
@@ -33,12 +33,13 @@ describe("checkEquivalence", () => {
     expect(ret?.verdict).toBe("not_equal");
   });
 
-  it("両側 throw (ctor + msg 一致) は equal", async () => {
+  it("両側 throw (ctor + msg 一致) は inconclusive (positive evidence 無し)", async () => {
     const result = await checkEquivalence({
       slow: `throw new TypeError("boom")`,
       fast: `throw new TypeError("boom")`,
     });
-    expect(result.verdict).toBe("equal");
+    expect(result.verdict).toBe("inconclusive");
+    expect(result.verdict_reason).toBe("both-sides-threw");
     const exc = result.observations.find((o) => o.oracle === "exception");
     expect(exc?.verdict).toBe("equal");
   });

@@ -1,6 +1,6 @@
 """等価性検証 CLI コマンド
 
-- ``mbs check-equivalence``: 1 トリプル検証。終了コード equal=0 / not_equal=1 / error=2。
+- ``mbs check-equivalence``: 1 トリプル検証。終了コード equal=0 / not_equal=1 / inconclusive=2 / error=3。
 - ``mbs check-equivalence-batch``: JSONL 入力による複数トリプルの一括検証。Python 側 ThreadPoolExecutor で並列化する。
 
 Node ランナー (``mb-analyzer/dist/cli.js``) を subprocess 経由で呼び出す
@@ -39,7 +39,9 @@ equivalence_app = typer.Typer(help="Equivalence verification commands")
 
 EXIT_EQUAL = 0
 EXIT_NOT_EQUAL = 1
-EXIT_ERROR = 2
+EXIT_INCONCLUSIVE = 2
+# `error` verdict と入力パース失敗 (どちらも「使える verdict が出せなかった」) を 3 に統一。
+EXIT_ERROR = 3
 
 EXIT_BATCH_OK = 0
 EXIT_BATCH_ERROR = 2
@@ -55,6 +57,8 @@ def _verdict_to_exit_code(verdict: Verdict) -> int:
         return EXIT_EQUAL
     if verdict is Verdict.NOT_EQUAL:
         return EXIT_NOT_EQUAL
+    if verdict is Verdict.INCONCLUSIVE:
+        return EXIT_INCONCLUSIVE
     return EXIT_ERROR
 
 
@@ -158,6 +162,7 @@ def _summarize(results: Sequence[EquivalenceCheckResult]) -> str:
         f"[summary] total={len(results)} "
         f"equal={counts.get(Verdict.EQUAL, 0)} "
         f"not_equal={counts.get(Verdict.NOT_EQUAL, 0)} "
+        f"inconclusive={counts.get(Verdict.INCONCLUSIVE, 0)} "
         f"error={counts.get(Verdict.ERROR, 0)}"
     )
 
@@ -225,7 +230,7 @@ def check_equivalence(
 ) -> None:
     """1 トリプル (setup, slow, fast) を Node ランナーで検証し、結果を JSON で出力する。
 
-    終了コード: equal=0 / not_equal=1 / error=2
+    終了コード: equal=0 / not_equal=1 / inconclusive=2 / error=3 (入力パース失敗も 3)
     """
     try:
         input_model = _build_input(

@@ -34,7 +34,9 @@ function assignOptionalStringFields(
 
 const EXIT_EQUAL = 0;
 const EXIT_NOT_EQUAL = 1;
-const EXIT_ERROR = 2;
+const EXIT_INCONCLUSIVE = 2;
+// `error` verdict と入力パース失敗 (どちらも「使える verdict が出せなかった」) を 3 に統一。
+const EXIT_ERROR = 3;
 const EXIT_BATCH_OK = 0;
 const EXIT_BATCH_IO_FAILURE = 2;
 
@@ -94,6 +96,7 @@ export async function runCheckEquivalence(): Promise<number> {
 
   if (result.verdict === "equal") return EXIT_EQUAL;
   if (result.verdict === "not_equal") return EXIT_NOT_EQUAL;
+  if (result.verdict === "inconclusive") return EXIT_INCONCLUSIVE;
   return EXIT_ERROR;
 }
 

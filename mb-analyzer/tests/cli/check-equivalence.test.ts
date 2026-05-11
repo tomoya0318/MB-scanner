@@ -4,10 +4,11 @@
  * 判定事項:
  *   - equal → stdout に result JSON、exit 0
  *   - not_equal → exit 1
- *   - checker 内部で verdict=error → exit 2
+ *   - inconclusive → exit 2
+ *   - checker 内部で verdict=error → exit 3
  *   - setup / timeout_ms が checker まで届く (effective_timeout_ms でエコーバック検証)
- *   - JSON parse 失敗 / 非 object / null → exit 2 + stderr、stdout は空
- *   - slow/fast が非 string、setup / timeout_ms が present かつ型不一致 / 非 finite → exit 2
+ *   - JSON parse 失敗 / 非 object / null → exit 3 + stderr、stdout は空
+ *   - slow/fast が非 string、setup / timeout_ms が present かつ型不一致 / 非 finite → exit 3
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runCheckEquivalence } from "../../src/cli/check-equivalence";
@@ -16,6 +17,7 @@ import { feedStdin, installSpy, restoreSpy, type WritableSpy } from "../fixtures
 interface SingleResult {
   verdict: string;
   observations: unknown[];
+  verdict_reason?: string | null;
   error_message?: string | null;
   effective_timeout_ms?: number;
 }
@@ -63,7 +65,7 @@ describe("runCheckEquivalence", () => {
     expect(parseStdout(stdoutSpy.writes).verdict).toBe("not_equal");
   });
 
-  it("checker が error を返すと exit 2", async () => {
+  it("checker が error を返すと exit 3", async () => {
     // setup 自体が throw → checker トップ catch で verdict=error
     restoreStdin = feedStdin(
       JSON.stringify({ setup: `throw new Error("setup boom")`, slow: "1", fast: "1" }),
@@ -71,8 +73,23 @@ describe("runCheckEquivalence", () => {
 
     const code = await runCheckEquivalence();
 
+    expect(code).toBe(3);
+    const result = parseStdout(stdoutSpy.writes);
+    expect(result.verdict).toBe("error");
+    expect(result.verdict_reason).toBe("executor-error");
+  });
+
+  it("両側が同じ例外で落ちるだけ (positive evidence 無し) は inconclusive / exit 2", async () => {
+    restoreStdin = feedStdin(
+      JSON.stringify({ slow: `throw new Error("boom")`, fast: `throw new Error("boom")` }),
+    );
+
+    const code = await runCheckEquivalence();
+
     expect(code).toBe(2);
-    expect(parseStdout(stdoutSpy.writes).verdict).toBe("error");
+    const result = parseStdout(stdoutSpy.writes);
+    expect(result.verdict).toBe("inconclusive");
+    expect(result.verdict_reason).toBe("both-sides-threw");
   });
 
   it("setup + timeout_ms が checker に届く (effective_timeout_ms 反映)", async () => {
@@ -93,7 +110,7 @@ describe("runCheckEquivalence", () => {
 
     const code = await runCheckEquivalence();
 
-    expect(code).toBe(2);
+    expect(code).toBe(3);
     expect(stdoutSpy.writes).toHaveLength(0);
     expect(stderrSpy.writes.join("")).toContain("Failed to parse stdin as JSON");
   });
@@ -103,7 +120,7 @@ describe("runCheckEquivalence", () => {
 
     const code = await runCheckEquivalence();
 
-    expect(code).toBe(2);
+    expect(code).toBe(3);
     expect(stderrSpy.writes.join("")).toContain("Expected a JSON object on stdin");
   });
 
@@ -112,7 +129,7 @@ describe("runCheckEquivalence", () => {
 
     const code = await runCheckEquivalence();
 
-    expect(code).toBe(2);
+    expect(code).toBe(3);
     expect(stderrSpy.writes.join("")).toContain("Expected a JSON object on stdin");
   });
 
@@ -121,7 +138,7 @@ describe("runCheckEquivalence", () => {
 
     const code = await runCheckEquivalence();
 
-    expect(code).toBe(2);
+    expect(code).toBe(3);
     expect(stderrSpy.writes.join("")).toContain("'slow' field must be a string");
   });
 
@@ -130,7 +147,7 @@ describe("runCheckEquivalence", () => {
 
     const code = await runCheckEquivalence();
 
-    expect(code).toBe(2);
+    expect(code).toBe(3);
     expect(stderrSpy.writes.join("")).toContain("'fast' field must be a string");
   });
 
@@ -139,7 +156,7 @@ describe("runCheckEquivalence", () => {
 
     const code = await runCheckEquivalence();
 
-    expect(code).toBe(2);
+    expect(code).toBe(3);
     expect(stderrSpy.writes.join("")).toContain("'setup' field must be a string when present");
   });
 
@@ -148,7 +165,7 @@ describe("runCheckEquivalence", () => {
 
     const code = await runCheckEquivalence();
 
-    expect(code).toBe(2);
+    expect(code).toBe(3);
     expect(stderrSpy.writes.join("")).toContain(
       "'timeout_ms' field must be a finite number when present",
     );
@@ -161,7 +178,7 @@ describe("runCheckEquivalence", () => {
 
     const code = await runCheckEquivalence();
 
-    expect(code).toBe(2);
+    expect(code).toBe(3);
     expect(stderrSpy.writes.join("")).toContain(
       "'timeout_ms' field must be a finite number when present",
     );

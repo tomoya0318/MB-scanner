@@ -1,5 +1,5 @@
 export { checkEquivalence } from "./selakovic";
-export { deriveOverallVerdict } from "./common/comparison/verdict";
+export { deriveOverallVerdict, deriveVerdictReason, VERDICT_REASON, type VerdictReason } from "./common/comparison/verdict";
 export type {
   EquivalenceCheckResult,
   EquivalenceInput,

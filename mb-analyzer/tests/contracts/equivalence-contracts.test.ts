@@ -28,12 +28,13 @@ describe("VERDICT", () => {
     expect(VERDICT).toStrictEqual({
       EQUAL: "equal",
       NOT_EQUAL: "not_equal",
+      INCONCLUSIVE: "inconclusive",
       ERROR: "error",
     });
   });
 
-  it("Verdict 型が 3 値の union として narrow される", () => {
-    expectTypeOf<Verdict>().toEqualTypeOf<"equal" | "not_equal" | "error">();
+  it("Verdict 型が 4 値の union として narrow される", () => {
+    expectTypeOf<Verdict>().toEqualTypeOf<"equal" | "not_equal" | "inconclusive" | "error">();
   });
 });
 
@@ -136,6 +137,17 @@ describe("EquivalenceCheckResult", () => {
       error_message: "timeout",
     };
     expect(result.error_message).toBe("timeout");
+  });
+
+  it("inconclusive verdict は verdict_reason を伴える", () => {
+    const result: EquivalenceCheckResult = {
+      verdict: VERDICT.INCONCLUSIVE,
+      observations: [{ oracle: ORACLE.EXCEPTION, verdict: ORACLE_VERDICT.EQUAL }],
+      verdict_reason: "both-sides-threw",
+    };
+    const parsed = JSON.parse(JSON.stringify(result)) as EquivalenceCheckResult;
+    expect(parsed.verdict).toBe("inconclusive");
+    expect(parsed.verdict_reason).toBe("both-sides-threw");
   });
 
   it("Oracle 型は readonly union として narrow される", () => {

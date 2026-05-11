@@ -23,7 +23,9 @@ class TestEnums:
     def test_verdict_values(self) -> None:
         assert Verdict.EQUAL.value == "equal"
         assert Verdict.NOT_EQUAL.value == "not_equal"
+        assert Verdict.INCONCLUSIVE.value == "inconclusive"
         assert Verdict.ERROR.value == "error"
+        assert {v.value for v in Verdict} == {"equal", "not_equal", "inconclusive", "error"}
 
     def test_oracle_verdict_values(self) -> None:
         assert OracleVerdict.NOT_APPLICABLE.value == "not_applicable"
@@ -202,3 +204,19 @@ class TestEquivalenceCheckResult:
         result = EquivalenceCheckResult.model_validate(payload)
         assert result.id == "case-001"
         assert result.effective_timeout_ms == 3000
+
+    def test_verdict_reason_default_none(self) -> None:
+        result = EquivalenceCheckResult(verdict=Verdict.EQUAL, observations=[])
+        assert result.verdict_reason is None
+
+    def test_inconclusive_with_verdict_reason_from_ts(self) -> None:
+        payload = {
+            "verdict": "inconclusive",
+            "observations": [{"oracle": "exception", "verdict": "equal"}],
+            "verdict_reason": "both-sides-threw",
+        }
+        result = EquivalenceCheckResult.model_validate(payload)
+        assert result.verdict is Verdict.INCONCLUSIVE
+        assert result.verdict_reason == "both-sides-threw"
+        dumped = json.loads(result.model_dump_json())
+        assert dumped["verdict_reason"] == "both-sides-threw"

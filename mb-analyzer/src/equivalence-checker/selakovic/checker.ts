@@ -16,6 +16,8 @@ import {
   checkInteractionTrace,
   checkReturnValue,
   deriveOverallVerdict,
+  deriveVerdictReason,
+  VERDICT_REASON,
 } from "../common/comparison";
 import {
   applyIterationCap,
@@ -69,9 +71,11 @@ export async function checkEquivalence(input: EquivalenceInput): Promise<Equival
     const observations: OracleObservation[] = routeOracles(isJsdom ? "jsdom" : "vm").map((o) =>
       runOracle(o, slow, fast, isJsdom),
     );
+    const verdict = deriveOverallVerdict(observations);
     return {
-      verdict: deriveOverallVerdict(observations),
+      verdict,
       observations,
+      verdict_reason: deriveVerdictReason(observations, verdict),
       effective_timeout_ms: timeout_ms,
     };
   } catch (e) {
@@ -83,6 +87,7 @@ export async function checkEquivalence(input: EquivalenceInput): Promise<Equival
     return {
       verdict: VERDICT.ERROR,
       observations: [],
+      verdict_reason: VERDICT_REASON.EXECUTOR_ERROR,
       error_message: extractErrorMessage(e),
       effective_timeout_ms: timeout_ms,
     };

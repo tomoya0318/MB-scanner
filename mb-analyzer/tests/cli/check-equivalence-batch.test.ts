@@ -88,7 +88,7 @@ describe("runCheckEquivalenceBatch", () => {
     const result = getResult(parseOutput(spy.writes), 0);
     expect(result.id).toBe("loop");
     expect(result.effective_timeout_ms).toBe(1);
-    // 両側 timeout → exception oracle で ctor 一致 → equal もあり得るが、
+    // 両側 timeout → exception oracle で ctor 一致 → inconclusive (positive evidence 無し) になるが、
     // どちらにせよ timeout_ms=1 が checker まで届いていることがエコーバックで確認できれば十分
   });
 
