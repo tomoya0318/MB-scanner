@@ -43,6 +43,9 @@ export interface TraceEntry {
  * - `exception` は正常終了なら null、throw された場合は ctor + message
  * - `timed_out` は vm.runInContext の timeout による打ち切り
  * - `dom_html` は jsdom 環境で `dom.serialize()` した正規化前 HTML (vm 環境では undefined)
+ * - `dom_changed` は jsdom 環境で「body 実行後の DOM が初期 mount HTML と違うか」(vm 環境では undefined)。
+ *   両側 false (= 両側とも DOM を変更しなかった) なら dom_mutation oracle は N/A を返す
+ *   (ADR-0018: dom_mutation=equal を positive evidence に格上げするための前提)。
  * - `interaction_trace` は記録 Proxy を注入した場合の操作列 (注入しない場合は undefined)
  */
 export interface ExecutionCapture {
@@ -54,5 +57,6 @@ export interface ExecutionCapture {
   new_globals: string[];
   timed_out: boolean;
   dom_html?: string | null;
+  dom_changed?: boolean;
   interaction_trace?: TraceEntry[];
 }

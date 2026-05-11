@@ -49,8 +49,14 @@ class TestDeriveOverallVerdict:
             ([obs(_EQ, Oracle.ARGUMENT_MUTATION), obs(_EQ, Oracle.EXCEPTION)], Verdict.EQUAL),
             # exception=equal だけ (両側同じくクラッシュ) → inconclusive
             ([obs(_NA), obs(_NA, Oracle.ARGUMENT_MUTATION), obs(_EQ, Oracle.EXCEPTION), obs(_NA, Oracle.EXTERNAL_OBSERVATION)], Verdict.INCONCLUSIVE),
-            # dom_mutation=equal だけ (positive evidence 無し) → inconclusive
-            ([obs(_NA), obs(_NA, Oracle.INTERACTION_TRACE), obs(_EQ, Oracle.DOM_MUTATION)], Verdict.INCONCLUSIVE),
+            # dom_mutation=equal は positive evidence (C-2 で dom_changed を見て N/A 判定する前提) → equal
+            ([obs(_NA), obs(_NA, Oracle.INTERACTION_TRACE), obs(_EQ, Oracle.DOM_MUTATION)], Verdict.EQUAL),
+            # external_observation=equal だけ (positive evidence 無し) → inconclusive
+            ([obs(_NA), obs(_NA, Oracle.INTERACTION_TRACE), obs(_EQ, Oracle.EXTERNAL_OBSERVATION)], Verdict.INCONCLUSIVE),
+            # exception=equal + dom_mutation=equal だけ → inconclusive (bootstrap で DOM 触ってから両側同じく落ちた = 弱い equal、ADR-0018 + C-2 保守化)
+            ([obs(_NA), obs(_NA, Oracle.ARGUMENT_MUTATION), obs(_EQ, Oracle.EXCEPTION), obs(_NA, Oracle.INTERACTION_TRACE), obs(_EQ, Oracle.DOM_MUTATION)], Verdict.INCONCLUSIVE),
+            # exception=equal + dom_mutation=equal + interaction_trace=equal → equal (workload が trace を残しているので exercise されている)
+            ([obs(_NA), obs(_NA, Oracle.ARGUMENT_MUTATION), obs(_EQ, Oracle.EXCEPTION), obs(_EQ, Oracle.INTERACTION_TRACE), obs(_EQ, Oracle.DOM_MUTATION)], Verdict.EQUAL),
         ],
     )
     def test_precedence(self, observations: list[OracleObservation], expected: Verdict) -> None:

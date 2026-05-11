@@ -8,15 +8,21 @@ import {
 } from "../../../contracts/equivalence-contracts";
 
 /**
- * positive な等価エビデンスを与える oracle 集合 (ADR-0018)。
+ * positive な等価エビデンスを与える oracle 集合 (ADR-0018 + Phase C-2)。
  * これらのいずれかが non-`not_applicable` のときだけ全体を `equal` にできる。
- * `exception` (両側同じくクラッシュ) / `dom_mutation` (初期から変化していない可能性) /
- * `external_observation` (scaffolding global ノイズ) の `equal` は単独では positive evidence と見なさない。
+ *
+ * `dom_mutation` は Phase C-2 で oracle 側に「両側とも DOM を変更しなかった → N/A」を入れた (capture.dom_changed
+ * を見る) ので、non-N/A は「少なくとも片側が DOM を実際に変更した」を意味する = positive evidence。
+ *
+ * 一方 `exception` (両側同じくクラッシュ) / `external_observation` (scaffolding global ノイズ) の `equal` は
+ * 単独では positive evidence と見なさない (前者は patch を exercise していない、後者は ignore pattern 後も
+ * 残るノイズの可能性)。
  */
 const POSITIVE_EVIDENCE_ORACLES: readonly Oracle[] = [
   ORACLE.RETURN_VALUE,
   ORACLE.ARGUMENT_MUTATION,
   ORACLE.INTERACTION_TRACE,
+  ORACLE.DOM_MUTATION,
 ];
 
 /**
@@ -56,12 +62,20 @@ export function deriveOverallVerdict(observations: OracleObservation[]): Verdict
   const hasApplicable = verdicts.some((v) => v !== ORACLE_VERDICT.NOT_APPLICABLE);
   if (!hasApplicable) return VERDICT.INCONCLUSIVE;
 
-  const hasPositiveEvidence = observations.some(
+  const positiveEvidence = observations.filter(
     (o) => POSITIVE_EVIDENCE_ORACLES.includes(o.oracle) && o.verdict !== ORACLE_VERDICT.NOT_APPLICABLE,
   );
-  if (!hasPositiveEvidence) return VERDICT.INCONCLUSIVE;
+  if (positiveEvidence.length === 0) return VERDICT.INCONCLUSIVE;
 
-  // ここまでで NOT_EQUAL / ERROR は除外され、positive-evidence oracle に non-N/A が 1 つ以上ある。
+  // 保守化: 両側が同じ例外で落ちた (exception=equal) かつ唯一の positive evidence が dom_mutation の場合、
+  // その DOM 変化は workload 実行ではなく runnable の bootstrap (Angular の compile step 等) で生じた可能性が高く、
+  // 「patch を exercise していない」= 弱い equal に該当する → inconclusive(both-sides-threw) に倒す。
+  // C1 (return_value) は exception 時に必ず N/A、C4 (argument_mutation) / C6 (interaction_trace) が non-N/A なら
+  // workload が部分的にでも exercise されたと見なせるので equal を保つ。
+  const exception = observations.find((o) => o.oracle === ORACLE.EXCEPTION);
+  const onlyDomEvidence = positiveEvidence.length === 1 && positiveEvidence[0]?.oracle === ORACLE.DOM_MUTATION;
+  if (exception?.verdict === ORACLE_VERDICT.EQUAL && onlyDomEvidence) return VERDICT.INCONCLUSIVE;
+
   return VERDICT.EQUAL;
 }
 

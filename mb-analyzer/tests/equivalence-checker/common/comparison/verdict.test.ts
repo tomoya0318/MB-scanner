@@ -63,7 +63,9 @@ describe("deriveOverallVerdict", () => {
     ).toBe("inconclusive");
   });
 
-  it("dom_mutation=equal だけ (positive evidence 無し) は inconclusive", () => {
+  it("dom_mutation=equal は positive evidence (C-2 で dom_changed を見て N/A 判定する前提) → equal", () => {
+    // ADR-0018 + Phase C-2: dom_mutation oracle が「両側とも DOM 未変更」を N/A にするので、
+    // ここに non-N/A の equal が来ているなら「少なくとも片側が DOM を実際に変更した」を意味する = positive。
     expect(
       deriveOverallVerdict([
         obs(ORACLE.RETURN_VALUE, NA),
@@ -71,6 +73,45 @@ describe("deriveOverallVerdict", () => {
         obs(ORACLE.EXCEPTION, NA),
         obs(ORACLE.EXTERNAL_OBSERVATION, NA),
         obs(ORACLE.DOM_MUTATION, EQ),
+        obs(ORACLE.INTERACTION_TRACE, NA),
+      ]),
+    ).toBe("equal");
+  });
+
+  it("exception=equal + dom_mutation=equal だけ → inconclusive (bootstrap で DOM 触ってから両側同じく落ちた = 弱い equal)", () => {
+    expect(
+      deriveOverallVerdict([
+        obs(ORACLE.RETURN_VALUE, NA),
+        obs(ORACLE.ARGUMENT_MUTATION, NA),
+        obs(ORACLE.EXCEPTION, EQ),
+        obs(ORACLE.EXTERNAL_OBSERVATION, NA),
+        obs(ORACLE.DOM_MUTATION, EQ),
+        obs(ORACLE.INTERACTION_TRACE, NA),
+      ]),
+    ).toBe("inconclusive");
+  });
+
+  it("exception=equal + dom_mutation=equal + interaction_trace=equal → equal (workload が trace を残しているので exercise されている)", () => {
+    expect(
+      deriveOverallVerdict([
+        obs(ORACLE.RETURN_VALUE, NA),
+        obs(ORACLE.ARGUMENT_MUTATION, NA),
+        obs(ORACLE.EXCEPTION, EQ),
+        obs(ORACLE.DOM_MUTATION, EQ),
+        obs(ORACLE.INTERACTION_TRACE, EQ),
+      ]),
+    ).toBe("equal");
+  });
+
+  it("external_observation=equal だけ (positive evidence 無し) は inconclusive", () => {
+    // 残った非 positive な oracle (external_observation = scaffolding global ノイズの可能性) 単独では equal 不可。
+    expect(
+      deriveOverallVerdict([
+        obs(ORACLE.RETURN_VALUE, NA),
+        obs(ORACLE.ARGUMENT_MUTATION, NA),
+        obs(ORACLE.EXCEPTION, NA),
+        obs(ORACLE.EXTERNAL_OBSERVATION, EQ),
+        obs(ORACLE.DOM_MUTATION, NA),
         obs(ORACLE.INTERACTION_TRACE, NA),
       ]),
     ).toBe("inconclusive");

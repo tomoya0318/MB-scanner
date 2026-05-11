@@ -85,6 +85,16 @@ export async function executeInJsdom(options: JsdomExecuteOptions): Promise<Exec
   }
   const baselineKeys = new Set(Object.keys(ctxRecord));
 
+  // body 実行前の DOM を覚えておく (= 初期 mount HTML の正規化前)。
+  // body 実行後にこれと比較して `dom_changed` を立てる。両側 false なら dom_mutation oracle は
+  // N/A を返す (= 「両側とも DOM を変更しなかった」を positive evidence に誤認しないため、ADR-0018)。
+  let initialDomHtml: string | null = null;
+  try {
+    initialDomHtml = dom.serialize();
+  } catch {
+    initialDomHtml = null;
+  }
+
   if (options.setup.length > 0) {
     vm.runInContext(normalizeSetup(options.setup), context, { timeout: options.timeout_ms, displayErrors: false });
   }
@@ -111,6 +121,14 @@ export async function executeInJsdom(options: JsdomExecuteOptions): Promise<Exec
   } catch {
     domHtml = null;
   }
+  // 初期 mount HTML との文字列比較で「body 実行で DOM が変わったか」を判定する。
+  // 厳密な正規化 (属性順 / 空白 collapse / framework ノイズ) は dom_mutation oracle が profile で行うが、
+  // ここの目的は「何か触ったか」の 0/1 判定なので素の文字列比較で十分 (両側に同じ初期 HTML を流すので
+  // 比較は対称)。`domHtml` か `initialDomHtml` が serialize 失敗で null なら undefined のまま (= 不明)。
+  let domChanged: boolean | undefined;
+  if (domHtml !== null && initialDomHtml !== null) {
+    domChanged = domHtml !== initialDomHtml;
+  }
 
   const capture: ExecutionCapture = {
     return_value: returnValue,
@@ -122,6 +140,7 @@ export async function executeInJsdom(options: JsdomExecuteOptions): Promise<Exec
     timed_out: timedOut,
     dom_html: domHtml,
   };
+  if (domChanged !== undefined) capture.dom_changed = domChanged;
   if (recorder !== null) capture.interaction_trace = recorder.trace;
   return capture;
 }

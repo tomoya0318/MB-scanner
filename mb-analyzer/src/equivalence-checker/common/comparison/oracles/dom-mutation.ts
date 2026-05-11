@@ -55,6 +55,13 @@ export function checkDomMutation(
       detail: "DOM was captured on one side only",
     };
   }
+  // 両側とも DOM を変更しなかった (= 初期 mount HTML のまま) → 「DOM 観測としては何も起きていない」
+  // ので N/A を返す (両側に同じ初期 HTML を流しているので比較は常に equal になるが、それは
+  // positive な等価エビデンスにならない。ADR-0018 + verdict.ts の positive-evidence ルールが
+  // dom_mutation を信頼するためには「何か触ったかを判定済」が前提)。
+  if (slow.dom_changed === false && fast.dom_changed === false) {
+    return { oracle, verdict: ORACLE_VERDICT.NOT_APPLICABLE };
+  }
 
   let slowNorm: string;
   let fastNorm: string;

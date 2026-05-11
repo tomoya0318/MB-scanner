@@ -18,11 +18,13 @@ from mb_scanner.domain.entities.equivalence import (
 )
 from mb_scanner.domain.ports.equivalence_checker import EquivalenceCheckerPort
 
-# positive な等価エビデンスを与える oracle 集合 (ADR-0018)。
+# positive な等価エビデンスを与える oracle 集合 (ADR-0018 + Phase C-2)。
 # これらのいずれかが non-not_applicable のときだけ全体を equal にできる。
-# exception (両側同じくクラッシュ) / dom_mutation / external_observation の equal は単独では positive と見なさない。
+# dom_mutation は Phase C-2 で oracle 側に「両側とも DOM を変更しなかった → N/A」(capture.dom_changed を見る)
+# を入れたので、non-N/A は「少なくとも片側が DOM を実際に変更した」= positive evidence。
+# exception (両側同じくクラッシュ) / external_observation (scaffolding global ノイズ) は単独では positive と見なさない。
 _POSITIVE_EVIDENCE_ORACLES = frozenset(
-    {Oracle.RETURN_VALUE, Oracle.ARGUMENT_MUTATION, Oracle.INTERACTION_TRACE},
+    {Oracle.RETURN_VALUE, Oracle.ARGUMENT_MUTATION, Oracle.INTERACTION_TRACE, Oracle.DOM_MUTATION},
 )
 
 # inconclusive verdict の理由文字列 (ADR-0018)。equal / not_equal では None。
@@ -55,11 +57,19 @@ def derive_overall_verdict(observations: list[OracleObservation]) -> Verdict:
         return Verdict.ERROR
     if all(v == OracleVerdict.NOT_APPLICABLE for v in verdicts):
         return Verdict.INCONCLUSIVE
-    has_positive_evidence = any(
-        o.oracle in _POSITIVE_EVIDENCE_ORACLES and o.verdict != OracleVerdict.NOT_APPLICABLE
-        for o in observations
-    )
-    if not has_positive_evidence:
+    positive_evidence = [
+        o for o in observations
+        if o.oracle in _POSITIVE_EVIDENCE_ORACLES and o.verdict != OracleVerdict.NOT_APPLICABLE
+    ]
+    if not positive_evidence:
+        return Verdict.INCONCLUSIVE
+    # 保守化: 両側同じく落ちた (exception=equal) かつ唯一の positive evidence が dom_mutation のみ →
+    # その DOM 変化は workload 実行でなく bootstrap (Angular compile step 等) の可能性が高い = 弱い equal
+    # → inconclusive(both-sides-threw) に倒す。C1 は exception 時に必ず N/A、C4/C6 が non-N/A なら workload が
+    # 部分的にでも exercise されたと見なせるので equal を保つ。
+    exception = next((o for o in observations if o.oracle is Oracle.EXCEPTION), None)
+    only_dom_evidence = len(positive_evidence) == 1 and positive_evidence[0].oracle is Oracle.DOM_MUTATION
+    if exception is not None and exception.verdict == OracleVerdict.EQUAL and only_dom_evidence:
         return Verdict.INCONCLUSIVE
     return Verdict.EQUAL
 
