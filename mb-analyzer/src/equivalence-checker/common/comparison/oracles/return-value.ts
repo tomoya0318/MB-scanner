@@ -55,3 +55,59 @@ export function checkReturnValue(
     fast_value: fast.return_value,
   };
 }
+
+// 判断: ai-guide/adr/0007-in-source-testing-internal-helpers.md
+if (import.meta.vitest) {
+  const { describe, it, expect } = import.meta.vitest;
+  // 観点: 両側の戻り値を serialize 後の文字列で完全一致比較する。片側でも例外 → N/A (O3 に委譲)、
+  // 両側 return_is_undefined → N/A、UNSERIALIZABLE_MARKER → error、片側だけ undefined / 値差 → not_equal。
+  const cap = (o: Partial<ExecutionCapture> = {}): ExecutionCapture => ({
+    return_value: "undefined",
+    return_is_undefined: true,
+    arg_snapshots: [],
+    exception: null,
+    console_log: [],
+    new_globals: [],
+    timed_out: false,
+    ...o,
+  });
+
+  describe("checkReturnValue (in-source)", () => {
+    it("両側同値 → equal", () => {
+      const v = cap({ return_value: "42", return_is_undefined: false });
+      expect(checkReturnValue(v, cap({ return_value: "42", return_is_undefined: false })).verdict).toBe("equal");
+    });
+
+    it("値が異なる → not_equal (slow_value/fast_value を載せる)", () => {
+      const obs = checkReturnValue(
+        cap({ return_value: "-1", return_is_undefined: false }),
+        cap({ return_value: "1", return_is_undefined: false }),
+      );
+      expect(obs.verdict).toBe("not_equal");
+      expect(obs.slow_value).toBe("-1");
+      expect(obs.fast_value).toBe("1");
+    });
+
+    it("両側 undefined → not_applicable", () => {
+      expect(checkReturnValue(cap(), cap()).verdict).toBe("not_applicable");
+    });
+
+    it("片方だけ undefined → not_equal", () => {
+      expect(checkReturnValue(cap(), cap({ return_value: "1", return_is_undefined: false })).verdict).toBe(
+        "not_equal",
+      );
+    });
+
+    it("片方でも exception → not_applicable (O3 に委譲)", () => {
+      const slow = cap({ exception: { ctor: "Error", message: "e" } });
+      expect(checkReturnValue(slow, cap({ return_value: "1", return_is_undefined: false })).verdict).toBe(
+        "not_applicable",
+      );
+    });
+
+    it("シリアライズ不能 (UNSERIALIZABLE_MARKER) → error", () => {
+      const slow = cap({ return_value: UNSERIALIZABLE_MARKER, return_is_undefined: false });
+      expect(checkReturnValue(slow, cap({ return_value: "1", return_is_undefined: false })).verdict).toBe("error");
+    });
+  });
+}

@@ -5,7 +5,7 @@
  * client: 注入 service / workload が直接叩く framework global) を Proxy で包み、呼び出し列を
  * `TraceEntry[]` に記録する。slow/fast の trace を比較するのが C6。
  *
- * 設計 (spike §3 / ADR-0013 / ADR-0015):
+ * 判断: ai-guide/adr/0015-equivalence-checker-layering-and-dom-oracle.md
  * - `get` / `set` / `apply` / `construct` トラップのみ定義。他 (`has`/`ownKeys`/`getPrototypeOf`/...) は
  *   未定義 = Reflect 素通し → `instanceof` / `hasOwnProperty` / `Object.getPrototypeOf` / `Object.keys` を壊さない。
  * - メソッド呼び出し / `apply` / `construct` の転送は **real target を `this` (or 素の `Reflect.construct`)** にして実行 →
@@ -545,6 +545,27 @@ if (import.meta.vitest) {
       expect(r.trace).toHaveLength(1);
       r.reset();
       expect(r.trace).toHaveLength(0);
+    });
+
+    it("MAX_TRACE_ENTRIES を超えると末尾に 1 件だけ <trace-truncated> 番兵を残し以降は捨てる", () => {
+      const r = makeRecorder();
+      const obj = r.wrap({ f: (x: number) => x }, "obj");
+      for (let i = 0; i < MAX_TRACE_ENTRIES + 100; i++) obj.f(i);
+      expect(r.trace).toHaveLength(MAX_TRACE_ENTRIES + 1);
+      expect(r.trace.at(-1)).toEqual({
+        path: "<trace-truncated>",
+        op: "call",
+        result: `<exceeded ${MAX_TRACE_ENTRIES} entries>`,
+      });
+    });
+
+    it("配列・オブジェクトの要素数が MAX_BREADTH を超えると …(+N more) に畳む", () => {
+      const r = makeRecorder();
+      const obj = r.wrap({ id: (x: unknown) => x }, "obj");
+      obj.id(Array.from({ length: MAX_BREADTH + 5 }, (_, i) => i));
+      obj.id(Object.fromEntries(Array.from({ length: MAX_BREADTH + 3 }, (_, i) => [`k${i}`, i])));
+      expect(r.trace[0]?.args?.[0]).toContain("…(+5 more)");
+      expect(r.trace[1]?.args?.[0]).toContain("…(+3 more)");
     });
   });
 }

@@ -128,3 +128,78 @@ function normalizeElement(el: Element, profile: DomNormalizeProfile): void {
     }
   }
 }
+
+// 判断: ai-guide/adr/0007-in-source-testing-internal-helpers.md
+if (import.meta.vitest) {
+  const { describe, it, expect } = import.meta.vitest;
+  // 観点: jsdom 実行後の dom_html を `profile` で正規化 (ng-* 属性 / ng-scope class / コメント / 空白 / 属性順) してから
+  // slow/fast を文字列比較。両側 dom_html 無し → N/A、片側だけ取得 → not_equal、正規化中に parse 例外 → error。
+  // 統合観点: 両側とも DOM を変更しなかった (= 初期 mount HTML のまま) なら N/A — そうしないと「両側に同じ初期 HTML を
+  // 流したから equal」を positive evidence に誤認する (react-808#1 / react-1885#0 / react-3665#0、ADR-0018)。
+  const cap = (o: Partial<ExecutionCapture> = {}): ExecutionCapture => ({
+    return_value: "undefined",
+    return_is_undefined: true,
+    arg_snapshots: [],
+    exception: null,
+    console_log: [],
+    new_globals: [],
+    timed_out: false,
+    ...o,
+  });
+
+  describe("checkDomMutation (in-source)", () => {
+    it("両側 dom_html 無し → not_applicable", () => {
+      expect(checkDomMutation(cap(), cap()).verdict).toBe("not_applicable");
+    });
+
+    it("両側とも dom_changed=false (初期 mount HTML のまま) → not_applicable", () => {
+      const html = "<!doctype html><html><head></head><body><div id=\"demo1\"></div></body></html>";
+      const slow = cap({ dom_html: html, dom_changed: false });
+      const fast = cap({ dom_html: html, dom_changed: false });
+      expect(checkDomMutation(slow, fast).verdict).toBe("not_applicable");
+    });
+
+    it("framework ノイズ (ng-* 属性 / ng-scope class / ngRepeat コメント / 空白 / 属性順) だけの差は equal", () => {
+      const profile = {
+        ignoreAttributes: ["ng-version"],
+        ignoreClassTokens: ["ng-scope"],
+        ignoreCommentNodes: true,
+        collapseWhitespace: true,
+        sortAttributes: true,
+      };
+      const slow = cap({
+        dom_html: `<!doctype html><html><head></head><body><div class="x ng-scope" ng-version="1.5"><!-- ngRepeat: a in b -->  Hi  </div></body></html>`,
+      });
+      const fast = cap({
+        dom_html: `<!doctype html><html><head></head><body><div ng-version="1.6" class="x"> Hi </div></body></html>`,
+      });
+      expect(checkDomMutation(slow, fast, profile).verdict).toBe("equal");
+    });
+
+    it("真の DOM 差は not_equal (detail に char offset)", () => {
+      const obs = checkDomMutation(
+        cap({ dom_html: `<!doctype html><html><head></head><body><p>A</p></body></html>` }),
+        cap({ dom_html: `<!doctype html><html><head></head><body><p>B</p></body></html>` }),
+      );
+      expect(obs.verdict).toBe("not_equal");
+      expect(obs.detail).toContain("char offset");
+    });
+
+    it("片方だけ DOM 取得 → not_equal", () => {
+      expect(
+        checkDomMutation(cap({ dom_html: "<html><head></head><body></body></html>" }), cap()).verdict,
+      ).toBe("not_equal");
+    });
+
+    it("rootSelector で比較対象 subtree を絞れる", () => {
+      const slow = cap({
+        dom_html: `<html><head></head><body><div id="demo">X</div><div>noise-A</div></body></html>`,
+      });
+      const fast = cap({
+        dom_html: `<html><head></head><body><div id="demo">X</div><div>noise-B</div></body></html>`,
+      });
+      expect(checkDomMutation(slow, fast, { rootSelector: "#demo" }).verdict).toBe("equal");
+      expect(checkDomMutation(slow, fast).verdict).toBe("not_equal");
+    });
+  });
+}

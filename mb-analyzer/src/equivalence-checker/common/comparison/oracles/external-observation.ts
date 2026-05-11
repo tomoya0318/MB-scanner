@@ -95,3 +95,76 @@ function serializeConsoleCalls(calls: ConsoleCall[]): string {
   }));
   return JSON.stringify(serialized);
 }
+
+// 判断: ai-guide/adr/0007-in-source-testing-internal-helpers.md
+if (import.meta.vitest) {
+  const { describe, it, expect } = import.meta.vitest;
+  // 観点: 外部観測可能な副作用 (console 呼び出し列 + 新規 global key 集合) の差分を両側で比較。
+  // 両側とも空 → N/A、console args の serialize 中に循環参照 → error、console 列 (順序込み) + globals 集合一致 → equal。
+  // 統合観点: `f1` body / preF1 が `<script>` で top-level 実行されると `var i` / `var keys` 等の scaffolding 変数が
+  // 片側だけ global に漏れて偽 not_equal を生む (underscore-1224)。AngularJS の `ng-<timestamp>` cache key global も同様
+  // (angular-7759_4)。`ignoreNewGlobalPatterns` で `/^ng/` や 1 文字 / よくある loop/temp 変数名を除外すると一致する。
+  const cap = (o: Partial<ExecutionCapture> = {}): ExecutionCapture => ({
+    return_value: "undefined",
+    return_is_undefined: true,
+    arg_snapshots: [],
+    exception: null,
+    console_log: [],
+    new_globals: [],
+    timed_out: false,
+    ...o,
+  });
+  const logA: ConsoleCall = { method: "log", args: ["a", 1] };
+  const logB: ConsoleCall = { method: "log", args: ["b"] };
+
+  describe("checkExternalObservation (in-source)", () => {
+    it("console 空 & new_globals 空 → not_applicable", () => {
+      expect(checkExternalObservation(cap(), cap()).verdict).toBe("not_applicable");
+    });
+
+    it("console 列が完全一致 & globals 一致 → equal", () => {
+      const s = cap({ console_log: [logA], new_globals: ["g"] });
+      const f = cap({ console_log: [logA], new_globals: ["g"] });
+      expect(checkExternalObservation(s, f).verdict).toBe("equal");
+    });
+
+    it("console 列が異なる → not_equal (detail に console)", () => {
+      const obs = checkExternalObservation(cap({ console_log: [logA] }), cap({ console_log: [logB] }));
+      expect(obs.verdict).toBe("not_equal");
+      expect(obs.detail).toContain("console");
+    });
+
+    it("new_globals 集合が違う → not_equal (detail に new_globals)", () => {
+      const obs = checkExternalObservation(cap({ new_globals: ["a"] }), cap({ new_globals: ["b"] }));
+      expect(obs.verdict).toBe("not_equal");
+      expect(obs.detail).toContain("new_globals");
+    });
+
+    it("console の順序が違うと not_equal", () => {
+      const s = cap({ console_log: [logA, logB] });
+      const f = cap({ console_log: [logB, logA] });
+      expect(checkExternalObservation(s, f).verdict).toBe("not_equal");
+    });
+
+    it("循環参照を含む console args → error", () => {
+      const cyc: Record<string, unknown> = {};
+      cyc.self = cyc;
+      const s = cap({ console_log: [{ method: "log", args: [cyc] }] });
+      const f = cap({ console_log: [{ method: "log", args: ["x"] }] });
+      expect(checkExternalObservation(s, f).verdict).toBe("error");
+    });
+
+    it("ignoreNewGlobalPatterns で framework 内部 global (ng*) を除外 → equal (angular-7759_4 の偽 not_equal 解消)", () => {
+      const s = cap({ new_globals: ["ngContext", "ngScope", "result"] });
+      const f = cap({ new_globals: ["result"] });
+      expect(checkExternalObservation(s, f).verdict).toBe("not_equal"); // 素だと ng* の差で not_equal
+      expect(checkExternalObservation(s, f, { ignoreNewGlobalPatterns: [/^ng/] }).verdict).toBe("equal");
+    });
+
+    it("ignoreNewGlobalPatterns で全部消えて両側 console/global 空 → not_applicable", () => {
+      const s = cap({ new_globals: ["ngFoo"] });
+      const f = cap({ new_globals: ["ngBar"] });
+      expect(checkExternalObservation(s, f, { ignoreNewGlobalPatterns: [/^ng/] }).verdict).toBe("not_applicable");
+    });
+  });
+}

@@ -90,7 +90,8 @@ mb-analyzer/                  # === TypeScript CLI (現行実装) ===
 │       └── preprocess-selakovic.ts
 ├── tests/                    # vitest (`tests/{cli,equivalence-checker,pruning,contracts,preprocessing}/**` + property + integration)
 │   ├── cli/
-│   ├── equivalence-checker/  # common/{comparison/oracles,comparison/verdict,sandbox/...,serializer} + selakovic/{checker,oracle-routing}
+│   ├── equivalence-checker/  # common/comparison/verdict + common/sandbox/executors/{vm,jsdom} + selakovic/checker のみ
+│   │                         #   (oracle 6 本 / routeOracles / serializer / recording-proxy / transforms は各 src の in-source — ADR-0007)
 │   ├── preprocessing/        # selakovic.test.ts (公開 API preprocess() のみ; モジュール内ヘルパは各 src ファイルの in-source — ADR-0007)
 │   ├── pruning/              # engine.test.ts (モジュール内ヘルパ candidates / rules / ast/parser は各 src ファイルの in-source)
 │   ├── property/
@@ -147,7 +148,7 @@ mb-analyzer-legacy/           # [DEPRECATED] 旧 pnpm workspace monorepo
 2. `mb_scanner/domain/entities/equivalence.py` の `Oracle` 列挙値に対応する文字列を追加 (Python ↔ TS で完全一致; TS 側は `contracts/equivalence-contracts.ts` の `ORACLE`)
 3. `selakovic/oracle-routing.ts` の環境別 oracle 集合 + `selakovic/checker.ts` の `runOracle` switch に追加。dataset 固有の正規化値は `selakovic/profiles.ts` に置いて `common/` に直書きしない
 4. positive evidence にするか / verdict 合成への影響を `common/comparison/verdict.ts` と `use_cases/equivalence_verification.py` (`derive_overall_verdict` / `derive_verdict_reason`、両者ミラー) で見直し
-5. テスト追加 (`mb-analyzer/tests/equivalence-checker/common/comparison/oracles/*.test.ts` + verdict.test.ts と Python 側 use case テスト)
+5. テスト追加: oracle 関数の単発判定は新 oracle ファイル末尾の `if (import.meta.vitest)` ブロックに (ADR-0007)、合成への影響は `tests/equivalence-checker/common/comparison/verdict.test.ts` と Python 側 use case テストに
 
 ### 2. サンドボックス環境のカスタマイズ
 
@@ -214,6 +215,7 @@ mb-analyzer-legacy/           # [DEPRECATED] 旧 pnpm workspace monorepo
 
 - `mb-analyzer/tests/` 配下を vitest の `tests/**/*.test.ts` で自動検出する
 - テストディレクトリ構造は `src/` とミラー: `src/cli/check-equivalence.ts` → `tests/cli/check-equivalence-batch.test.ts` のように対応させる
+- in-source / `tests/` の振り分けは ADR-0007 のルール (モジュールの `index.ts` に乗るか) — oracle / `routeOracles` / serializer / 各 transform 等の内部ヘルパは各 src ファイル末尾の `if (import.meta.vitest)` に置く。詳細は [`quality-check/mb-analyzer.md`](../quality-check/mb-analyzer.md)
 - サンドボックス実行の E2E (stdin/stdout 含む) は `tests/cli/` に置く
-- oracle / verdict 等の純粋ロジックは `tests/equivalence-checker/` に置く
+- `tests/equivalence-checker/` に置くのは公開 API (`checkEquivalence`)、verdict 合成 (`deriveOverallVerdict` / `deriveVerdictReason` — 論文 audit trail として外仕様化)、および real vm/jsdom/FS を叩く executor (`vm` / `jsdom`) — 後者は in-source に置くと実装本体が肥大するため `tests/` 側に残す
 - Python 側 integration test (`tests/adapters/gateways/equivalence/test_selakovic_fixtures.py`) と役割分担: TS 側テストは型レベル・単体の責務、言語をまたぐ subprocess 契約は Python 側で実機確認
