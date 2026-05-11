@@ -43,9 +43,12 @@ services:
         UID: ${HOST_UID:-1000}
         GID: ${HOST_GID:-1000}
     container_name: ${COMPOSE_PROJECT_NAME:-mb_scanner}-archive
+    # 旧 docker compose (< v2.24) でもパースできるよう legacy 文字列形式にする。
+    # ロング形式 (`{path, required}`) は v2.24+ 限定で、サーバの compose が古いと
+    # ファイル全体のバリデーションが失敗し dev サービスも起動できなくなる。
+    # archive プロファイル実行時に .env が無いとエラーになるが、再現実験では .env を置く前提。
     env_file:
-      - path: .env
-        required: false
+      - .env
     volumes:
       - type: bind
         source: ./data
