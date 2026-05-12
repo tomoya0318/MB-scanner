@@ -14,4 +14,6 @@ export { detectLayout } from "./io/layout";
 export type { DetectedLayout } from "./io/layout";
 export { loadLibPair } from "./io/lib-pair";
 export type { LibPair } from "./io/lib-pair";
+export { resolveScriptDepSources } from "./io/script-deps";
+export type { ResolvedScriptDeps } from "./io/script-deps";
 export { extractInlineScripts } from "./decompose/inline-script";
