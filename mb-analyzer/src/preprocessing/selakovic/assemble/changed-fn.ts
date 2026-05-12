@@ -24,11 +24,11 @@ const ENV_JSDOM: ExecutionEnvironmentHint = "jsdom";
 /**
  * `aspect: lib` の changed-fn candidate を組む (plan §D1 / spike v2)。`unit` は workload が (推移的に) exercise
  * すると判定済の fn unit (= `pipeline.ts` が `isReachedByAnyWorkload` で KEEP したもの)。`libAfterSrc` は
- * `findChangeUnits` に渡したのと同じ after lib ソース (`unit.afterFn` の span がここを指す)。`depLibSources` は
- * `<script src>` で読まれる依存 lib のソース列 (Phase 3 の dep-vendoring で埋まる。それまでは `[]`)。
+ * `findChangeUnits` に渡したのと同じ after lib ソース (`unit.afterFn` の span がここを指す)。
  *
  * 構造:
- *  - `setup` = (依存 lib ソース…) + lib (after、変更関数の body だけ穴あき + ガード + after 本体インライン fallback) + preF1
+ *  - `setup` = lib (after、変更関数の body だけ穴あき + ガード + after 本体インライン fallback) + preF1
+ *    （`<script src>` の CDN 依存 lib は `pipeline.ts` が全候補の `setup` 先頭に一括連結する — plan §C1）
  *  - `slow` = `globalThis.__HOLE__ = function(<liftDeps>, <fnParams>){…変更前の本体…+ 戻り値を __OBS に記録}` ＋ 観測する形の workload
  *  - `fast` = 同じく `__HOLE__` に変更後の本体 ＋ 観測する形の workload
  *  - pruning が削る対象は `slow` (= 変更関数本体 + workload) の AST、`setup` (= lib 全文 + dep) は不変
@@ -43,7 +43,6 @@ export function buildChangedFnCandidate(
   unit: FnChangeUnit,
   libAfterSrc: string,
   f1Decomposition: F1Decomposition,
-  depLibSources: readonly string[],
 ): PreprocessingResult | null {
   if (f1Decomposition.wrapperKind !== "top-level") return null;
   const afterFn = unit.afterFn;
@@ -63,7 +62,7 @@ export function buildChangedFnCandidate(
 
   return {
     layout: LAYOUT_KIND.CLIENT,
-    setup: [...depLibSources, holedLib, preF1].filter((s) => s.length > 0).join("\n;\n"),
+    setup: [holedLib, preF1].filter((s) => s.length > 0).join("\n;\n"),
     slow: `globalThis.__HOLE__ = ${buildHoleFunction(holeParams, statementsToCode(beforeBody.body as readonly Statement[]))};\n;\n${workload}`,
     fast: `globalThis.__HOLE__ = ${buildHoleFunction(holeParams, statementsToCode(afterBody.body as readonly Statement[]))};\n;\n${workload}`,
     enclosure_type: afterFn.type,
@@ -101,7 +100,7 @@ if (import.meta.vitest) {
     it("workload が呼ぶ変更関数 → setup に穴あき lib / slow・fast に __HOLE__ + 観測 + workload、内部依存は lift", () => {
       const f1d = extractF1(inline)!;
       const unit = fnUnitFor(libBefore, libAfter);
-      const c = buildChangedFnCandidate(unit, libAfter, f1d, []);
+      const c = buildChangedFnCandidate(unit, libAfter, f1d);
       expect(c).not.toBeNull();
       const r = c!;
       expect(r.candidate_kind).toBe(CANDIDATE_KIND.CHANGED_FN);
@@ -134,7 +133,7 @@ if (import.meta.vitest) {
       const before = `var lib = {};\nlib.norm = function (x) { return x % 2 === 0; };`;
       const after = `var lib = {};\nlib.norm = function (y) { return y & 1 === 0; };`;
       const unit = fnUnitFor(before, after);
-      expect(buildChangedFnCandidate(unit, after, f1d, [])).toBeNull();
+      expect(buildChangedFnCandidate(unit, after, f1d)).toBeNull();
     });
 
     it("angular controller wrapper の f1 → null (v1 では embedded のみ)", () => {
@@ -146,7 +145,7 @@ if (import.meta.vitest) {
       // angular wrapper が抽出できないケースもあるが、できた場合 wrapperKind !== "top-level" なら null
       if (f1d && f1d.wrapperKind !== "top-level") {
         const unit = fnUnitFor(libBefore, libAfter);
-        expect(buildChangedFnCandidate(unit, libAfter, f1d, [])).toBeNull();
+        expect(buildChangedFnCandidate(unit, libAfter, f1d)).toBeNull();
       }
     });
   });

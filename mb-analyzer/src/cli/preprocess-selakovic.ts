@@ -12,6 +12,7 @@ import {
   extractInlineScripts,
   loadLibPair,
   preprocess,
+  resolveScriptDepSources,
   type DetectedLayout,
   type SelakovicPreprocessInput,
 } from "../preprocessing/selakovic";
@@ -130,6 +131,13 @@ function buildPreprocessInput(issueDir: string, layout: DetectedLayout): Selakov
     }
     const beforeHtml = readFileSync(layout.clientFiles.beforeHtml, "utf-8");
     const afterHtml = readFileSync(layout.clientFiles.afterHtml, "utf-8");
+    // `<script src>` の CDN 依存 lib (jquery/handlebars/underscore) を dataset fork の node_modules/ から解決。
+    // 解決できなかったものは stderr に出す (= install-vendor-deps.sh 未実行 or 宣言漏れ — 集計の手がかり)。
+    const patchedLibFilenames = [...Object.keys(libBeforeFiles), ...Object.keys(libAfterFiles)];
+    const deps = resolveScriptDepSources(issueDir, beforeHtml, patchedLibFilenames);
+    if (deps.missing.length > 0) {
+      process.stderr.write(`[preprocess-selakovic] ${issueDir}: unresolved <script src> deps: ${deps.missing.join(", ")}\n`);
+    }
     return {
       kind: "client",
       before_inline: extractInlineScripts(beforeHtml),
@@ -138,6 +146,7 @@ function buildPreprocessInput(issueDir: string, layout: DetectedLayout): Selakov
       lib_after_files: libAfterFiles,
       lib_kind: libKind,
       lib_referenced_by_workload: htmlReferencesLib(beforeHtml),
+      dep_lib_sources: deps.sources,
     };
   }
 

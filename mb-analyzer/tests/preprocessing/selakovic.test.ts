@@ -133,6 +133,38 @@ describe("preprocess — client / top-level f1", () => {
     expect(cf.before_node_count).toBeLessThan(embedded.before_node_count!);
   });
 
+  it("作用点 lib: dep_lib_sources は全候補の setup 先頭に連結される (`<script src>` CDN dep)", () => {
+    const libBefore = "var lib = {};\nlib.norm = function (x) { return x % 2 === 0; };";
+    const libAfter = "var lib = {};\nlib.norm = function (x) { return x & 1 === 0; };";
+    const inlineCallsLib = `
+      var f1 = function () { lib.norm(1); };
+      var a = execute(f1, 10);
+    `;
+    const results = preprocess({
+      kind: "client",
+      before_inline: inlineCallsLib,
+      after_inline: inlineCallsLib,
+      lib_before_files: { "lib.js": libBefore },
+      lib_after_files: { "lib.js": libAfter },
+      lib_kind: "file",
+      lib_referenced_by_workload: true,
+      dep_lib_sources: ["/* jquery 2.1.3 stub */\nvar jQuery = {};", "/* handlebars 1.1.0 stub */\nvar Handlebars = {};"],
+    });
+    expect(results.length).toBeGreaterThanOrEqual(2); // embedded #0 + changed-fn #1
+    for (const r of results) {
+      // 全候補の setup 先頭に dep が <script> 順で入る
+      expect(r.setup).toContain("/* jquery 2.1.3 stub */");
+      expect(r.setup).toContain("/* handlebars 1.1.0 stub */");
+      expect(r.setup!.indexOf("jquery 2.1.3 stub")).toBeLessThan(r.setup!.indexOf("handlebars 1.1.0 stub"));
+    }
+    // embedded の setup は dep だけ (lib は slow/fast 側) / changed-fn の setup は dep + 穴あき lib + preF1
+    const embedded = results.find((r) => r.candidate_kind === CANDIDATE_KIND.SINGLE)!;
+    expect(embedded.setup).toMatch(/^\/\* jquery 2\.1\.3 stub \*\//);
+    const cf = results.find((r) => r.candidate_kind === CANDIDATE_KIND.CHANGED_FN)!;
+    expect(cf.setup).toMatch(/^\/\* jquery 2\.1\.3 stub \*\//);
+    expect(cf.setup).toContain("globalThis.__HOLE__.call"); // dep の後に穴あき lib も来る
+  });
+
   it("作用点 lib: 変更が複数 top-level 関数にまたがっても embedded (#0) が出る", () => {
     const results = preprocess({
       kind: "client",

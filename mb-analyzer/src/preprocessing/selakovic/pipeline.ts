@@ -42,6 +42,12 @@ export type SelakovicPreprocessInput =
       lib_kind: "dir" | "file" | null;
       /** v_before.html が `<script src="<lib>_before.js">` でこの lib を参照しているか (= workload が runtime に lib を叩く)。 */
       lib_referenced_by_workload: boolean;
+      /**
+       * `v_*.html` の `<script src>` が CDN から読む依存 lib (jquery/handlebars/underscore) のソース列を `<script>` 順に。
+       * CLI が `node_modules/` から解決して詰める (`io/script-deps.ts`)。jsdom は `<script src>` を auto-load しないので
+       * 各候補の `setup` の先頭に連結する (plan §C1)。未指定なら deps なし扱い (テストや lib 非依存 issue 用)。
+       */
+      dep_lib_sources?: readonly string[];
     }
   | {
       kind: "server";
@@ -107,12 +113,19 @@ function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "clie
     }
   }
 
+  // `<script src>` CDN 依存 lib (jquery/handlebars/underscore) を各候補の setup 先頭に連結する (plan §C1)。
+  // jsdom は <script src> を auto-load しないので、解決済みソースをここで足す。changed-fn / embedded / fallback 共通。
+  const depPrefix = (input.dep_lib_sources ?? []).join("\n;\n");
   // changed-fn は builder が入れた node count (= 変更関数本体のサイズ) を尊重し、inline 全文サイズで上書きしない。
-  return candidates.map((c) =>
-    c.candidate_kind === CANDIDATE_KIND.CHANGED_FN
-      ? { ...c, aspect }
-      : { ...c, aspect, before_node_count: beforeNodeCount, after_node_count: afterNodeCount },
-  );
+  return candidates.map((c) => {
+    const base =
+      depPrefix.length > 0 && typeof c.setup === "string"
+        ? { ...c, setup: c.setup.length > 0 ? `${depPrefix}\n;\n${c.setup}` : depPrefix }
+        : c;
+    return base.candidate_kind === CANDIDATE_KIND.CHANGED_FN
+      ? { ...base, aspect }
+      : { ...base, aspect, before_node_count: beforeNodeCount, after_node_count: afterNodeCount };
+  });
 }
 
 /**
@@ -144,7 +157,7 @@ function appendChangedFnCandidates(
   const graph = buildCallGraph(cu.beforeAst, [{ name: "f1", body: [...f1Before.preF1Statements, ...f1Before.f1Body.body] }]);
   for (const u of fnUnits) {
     if (!isReachedByAnyWorkload(graph, u.name)) continue; // 変更関数 u を呼ぶ workload が無い → DROP (change-not-exercised)
-    const candidate = buildChangedFnCandidate(u, libSourceAfter, f1Before, []);
+    const candidate = buildChangedFnCandidate(u, libSourceAfter, f1Before);
     if (candidate !== null) candidates.push(candidate);
   }
 }
