@@ -120,7 +120,7 @@ class TestPruningInputEquivalenceContext:
             "environment": "jsdom",
             "module_base_dir": "/abs/data/selakovic-2016-issues/serverIssues/ChalkIssues/issues/issue_28",
             "mount_html": '<div id="demo"></div>',
-            "aspect": "A",
+            "aspect": "lib",
             "candidate_kind": "single",
             "enclosure_type": "server-test-case",
         }
@@ -128,7 +128,7 @@ class TestPruningInputEquivalenceContext:
         assert inp.environment == "jsdom"
         assert inp.module_base_dir == payload["module_base_dir"]
         assert inp.mount_html == '<div id="demo"></div>'
-        assert inp.aspect == "A"
+        assert inp.aspect == "lib"
         assert inp.candidate_kind == "single"
         assert inp.enclosure_type == "server-test-case"
         dumped = json.loads(inp.model_dump_json())

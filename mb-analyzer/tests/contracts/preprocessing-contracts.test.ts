@@ -9,8 +9,12 @@
  */
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
+  ASPECT,
+  CANDIDATE_KIND,
   EXCLUSION_REASON,
   LAYOUT_KIND,
+  type Aspect,
+  type CandidateKind,
   type ExclusionReason,
   type LayoutKind,
   type PreprocessingInput,
@@ -41,10 +45,11 @@ describe("EXCLUSION_REASON", () => {
       NO_ENCLOSURE_CANDIDATE: "no-enclosure-candidate",
       LAYOUT_UNKNOWN: "layout-unknown",
       MISSING_FILES: "missing-files",
+      CHANGE_NOT_EXERCISED: "change-not-exercised",
     });
   });
 
-  it("ExclusionReason 型が 7 値の union", () => {
+  it("ExclusionReason 型が 8 値の union", () => {
     expectTypeOf<ExclusionReason>().toEqualTypeOf<
       | "parse-error"
       | "no-changed-nodes"
@@ -53,7 +58,38 @@ describe("EXCLUSION_REASON", () => {
       | "no-enclosure-candidate"
       | "layout-unknown"
       | "missing-files"
+      | "change-not-exercised"
     >();
+  });
+});
+
+describe("ASPECT", () => {
+  it("Python 側 Aspect StrEnum と同じ文字列値を持つ", () => {
+    expect(ASPECT).toStrictEqual({
+      LIB: "lib",
+      WORKLOAD: "workload",
+      BOTH: "lib+workload",
+      FALLBACK: "fallback",
+    });
+  });
+
+  it("Aspect 型が 4 値の union", () => {
+    expectTypeOf<Aspect>().toEqualTypeOf<"lib" | "workload" | "lib+workload" | "fallback">();
+  });
+});
+
+describe("CANDIDATE_KIND", () => {
+  it("Python 側 CandidateKind StrEnum と同じ文字列値を持つ", () => {
+    expect(CANDIDATE_KIND).toStrictEqual({
+      SINGLE: "single",
+      LIB: "lib",
+      BODY: "body",
+      CHANGED_FN: "changed-fn",
+    });
+  });
+
+  it("CandidateKind 型が 4 値の union", () => {
+    expectTypeOf<CandidateKind>().toEqualTypeOf<"single" | "lib" | "body" | "changed-fn">();
   });
 });
 

@@ -25,15 +25,16 @@ class TestEnums:
     def test_exclusion_reason_values(self) -> None:
         assert "parse-error" in {r.value for r in ExclusionReason}
         assert "layout-unknown" in {r.value for r in ExclusionReason}
+        assert "change-not-exercised" in {r.value for r in ExclusionReason}
 
     def test_aspect_values(self) -> None:
-        assert Aspect.LIB.value == "A"
-        assert Aspect.BODY.value == "B"
-        assert Aspect.BOTH.value == "A+B"
+        assert Aspect.LIB.value == "lib"
+        assert Aspect.WORKLOAD.value == "workload"
+        assert Aspect.BOTH.value == "lib+workload"
         assert Aspect.FALLBACK.value == "fallback"
 
     def test_candidate_kind_values(self) -> None:
-        assert {k.value for k in CandidateKind} == {"lib", "body", "single"}
+        assert {k.value for k in CandidateKind} == {"single", "lib", "body", "changed-fn"}
 
     def test_execution_environment_hint_values(self) -> None:
         assert {e.value for e in ExecutionEnvironmentHint} == {"vm", "jsdom"}
@@ -59,7 +60,7 @@ class TestPreprocessingResult:
                 "slow": "x",
                 "fast": "x",
                 "enclosure_type": "f1-body",
-                "aspect": "A+B",
+                "aspect": "lib+workload",
                 "candidate_kind": "body",
                 "environment": "jsdom",
             }

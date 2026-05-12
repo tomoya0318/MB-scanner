@@ -84,14 +84,14 @@ describe("EquivalenceInput", () => {
       environment: "jsdom",
       module_base_dir: "/abs/issue",
       mount_html: "<div id='demo'></div>",
-      aspect: "A",
+      aspect: "lib",
       candidate_kind: "lib",
       enclosure_type: "server-test-case",
     };
     expect(minimal.slow).toBe("1");
     expect(full.timeout_ms).toBe(5000);
     expect(full.mount_html).toContain("demo");
-    expect(full.aspect).toBe("A");
+    expect(full.aspect).toBe("lib");
   });
 });
 

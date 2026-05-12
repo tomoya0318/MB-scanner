@@ -7,6 +7,9 @@ import {
   type ExecutionEnvironmentHint,
   type PreprocessingResult,
 } from "../../contracts/preprocessing-contracts";
+import { findChangeUnits, type FnChangeUnit } from "../common/change-units";
+import { buildCallGraph, isReachedByAnyWorkload } from "../common/reachability";
+import { buildChangedFnCandidate } from "./assemble/changed-fn";
 import {
   buildClientBodyCandidate,
   buildClientCombinedCandidate,
@@ -14,7 +17,7 @@ import {
 } from "./assemble/client";
 import { extractFromScripts, extractFromServerFiles } from "./assemble/fallback";
 import { buildServerRunnable } from "./assemble/server";
-import { extractF1 } from "./decompose/f1";
+import { extractF1, type F1Decomposition } from "./decompose/f1";
 import { extractTest } from "./decompose/test-case";
 import { routeAspect, statementsChanged } from "./route/aspect";
 import { isIndependent } from "./route/case-split";
@@ -85,23 +88,65 @@ function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "clie
 
   let candidates: PreprocessingResult[];
   if (aspect === ASPECT.LIB) {
+    // embedded (#0) + workload が (推移的に) exercise する変更関数ごとに changed-fn 候補 (#1+)。
     candidates = [buildClientLibCandidate(f1Before, libSourceBefore, libSourceAfter, CANDIDATE_KIND.SINGLE)];
-  } else if (aspect === ASPECT.BODY) {
+    appendChangedFnCandidates(candidates, libSourceBefore, libSourceAfter, f1Before);
+  } else if (aspect === ASPECT.WORKLOAD) {
     candidates = [buildClientBodyCandidate(f1Before, f1After, libSourceBefore, libNeededInSetup, CANDIDATE_KIND.SINGLE)];
   } else {
-    // A+B: body の参照 identifier と lib の変化関数名 (diffLibPair の近似) が交差しなければ
+    // lib+workload: body の参照 identifier と lib の変化関数名 (diffLibPair の近似) が交差しなければ
     // independent → lib candidate / body candidate に分割、交差すれば co-evolution の疑いで 1 candidate (ADR-0014)。
     if (isIndependent(f1Before.f1Body.body, libChange.changedFunctionNames)) {
       candidates = [
         buildClientLibCandidate(f1Before, libSourceBefore, libSourceAfter, CANDIDATE_KIND.LIB),
         buildClientBodyCandidate(f1Before, f1After, libSourceBefore, libNeededInSetup, CANDIDATE_KIND.BODY),
       ];
+      appendChangedFnCandidates(candidates, libSourceBefore, libSourceAfter, f1Before);
     } else {
       candidates = [buildClientCombinedCandidate(f1Before, f1After, libSourceBefore, libSourceAfter)];
     }
   }
 
-  return candidates.map((c) => ({ ...c, aspect, before_node_count: beforeNodeCount, after_node_count: afterNodeCount }));
+  // changed-fn は builder が入れた node count (= 変更関数本体のサイズ) を尊重し、inline 全文サイズで上書きしない。
+  return candidates.map((c) =>
+    c.candidate_kind === CANDIDATE_KIND.CHANGED_FN
+      ? { ...c, aspect }
+      : { ...c, aspect, before_node_count: beforeNodeCount, after_node_count: afterNodeCount },
+  );
+}
+
+/**
+ * `aspect: lib` (および `aspect: lib+workload` 独立判定の lib 側) について、`<lib>_*.js` の変更を unit に切り分け
+ * (`findChangeUnits`)、workload (`f1`) が (推移的に) exercise する fn unit ごとに changed-fn candidate を `candidates`
+ * の末尾に push する。workload が exercise しない変更 (version-bump ノイズ等) は DROP — embedded `#0` がカバーする。
+ * angular controller wrapper の f1 は v1 では skip (embedded のみ。`buildAngularRunnable` の hole 対応は v2)。
+ */
+function appendChangedFnCandidates(
+  candidates: PreprocessingResult[],
+  libSourceBefore: string,
+  libSourceAfter: string,
+  f1Before: F1Decomposition,
+): void {
+  if (libSourceBefore.length === 0 || libSourceAfter.length === 0) return;
+  if (f1Before.wrapperKind !== "top-level") return;
+
+  let cu;
+  try {
+    cu = findChangeUnits(libSourceBefore, libSourceAfter);
+  } catch {
+    return; // lib が parse できない → embedded のみ (embedded 側も実行時に落ちるが、それは equiv gate が判定する)
+  }
+  if (cu.empty) return;
+  const fnUnits = cu.units.filter((u): u is FnChangeUnit => u.kind === "fn" && u.afterFn !== null);
+  if (fnUnits.length === 0) return; // fn unit なし (stmt unit / version-bump だけ) → embedded のみ
+
+  // workload root = f1 の preF1 + body (aspect: lib なので f1 は before で固定)。
+  const graph = buildCallGraph(cu.beforeAst, [{ name: "f1", body: [...f1Before.preF1Statements, ...f1Before.f1Body.body] }]);
+  for (const u of fnUnits) {
+    if (!isReachedByAnyWorkload(graph, u.name)) continue; // 変更関数 u を呼ぶ workload が無い → DROP (change-not-exercised)
+    const candidate = buildChangedFnCandidate(u, libSourceAfter, f1Before, []);
+    if (candidate !== null) candidates.push(candidate);
+  }
 }
 
 function preprocessServer(input: Extract<SelakovicPreprocessInput, { kind: "server" }>): PreprocessingResult[] {

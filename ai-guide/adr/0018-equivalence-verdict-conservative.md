@@ -102,3 +102,11 @@ Hydra 式 pruning (`pruning/engine.ts`) の縮約可否判定 (`isEquivalentEnou
 - **保守化追加ルール**: 「`exception=equal` (両側同じく落ちた) かつ唯一の positive evidence が `dom_mutation` のみ」の場合は `inconclusive(both-sides-threw)` に倒す。これは Angular の bootstrap で DOM を触ってから両側同じく落ちたケース (workload を完走できていない = 弱い equal) を防ぐ。`return_value` (C1 = exception 時に N/A) / `argument_mutation` (C4) / `interaction_trace` (C6) のいずれかが non-N/A なら workload が部分的にでも exercise されたと見なせるので `equal` を保つ。
 
 効果 (97 件再走): `equal 67→71` (+4 = react-808#0/#1 / angular-4359#0/7759_3 の純粋 dom-only が `real-c2` に昇格) / `inconclusive 33→29` (-4) / `not_equal 6` 不変 / 検証カバレッジ 67.6%→71.3%。Phase B 時点で `inconclusive(no-positive-evidence)` 6 件のうち 2 件 (react-1885#0/3665#0) は `dom_changed=false` だったため `inconclusive` に正しく残った (= Phase B の dom-only 分類が一部不正確だった、を C-2 が修正した側面)。
+
+### 2026-05-12 更新 (`argument_mutation` の unserializable snapshot を `error` でなく key 除外に)
+
+§トリガー「`inconclusive` が Ember 等を超えて減らないとき → executor 側を優先タスク化」に該当する小修正。`argument_mutation` oracle (`oracles/argument-mutation.ts`) は従来「snapshot に `UNSERIALIZABLE_MARKER` を 1 つでも含む → `verdict=error`」だったが、これだと verdict 合成 rule 2 (`error` 混入 → 全体 `error`) で **候補が捨てられる**。`UNSERIALIZABLE_MARKER` の発生源は `serializer.ts` の循環参照検出のみで、Ember では `globalThis.Ember` が循環したオブジェクトグラフ (computed property ↔ meta ↔ owner …) なので、Ember を読み込んだ candidate は `argument_mutation` が常に `error` → 0022 (workload-reachability で lib を絞る) で Ember candidate が bootstrap・実行できるようになっても等価判定が `error` で潰れる。
+
+修正: **`UNSERIALIZABLE_MARKER` を含む key を比較対象から除外し、残った key だけで判定。残り 0 件なら `not_applicable`** (= 「観測できる setup object が無い」と同じ扱い)。「観測できない」と「壊れている」は別 — 後者だけ `error` に値する。除外後に `not_applicable` になると positive-evidence ルール (本 ADR rule 4/5) が後段で効くので、他に positive evidence (`return_value` 等) が無ければ全体は `inconclusive` に倒れる = 健全性は保たれる。Ember 3174/4329_1/4158 (`tmp/0022_.../spike-e2e-v2.log` で `argument_mutation=error` で潰れてた) はこれで `return_value`/`external_observation` 基準の判定に委ねられる。
+
+§決定 の「Ember 1.x の AMD loader は ~9 件 `inconclusive` の既知 limitation」は緩和方向 (0022 の lib-narrowing + 本修正で Ember candidate も実 exercise・等価判定に乗る)。将来 serializer.ts 側で循環を `<circular>` sentinel に丸めれば (TODO コメントあり)、この key 除外も不要になり「巨大だが有限の文字列」として比較できる (要 maxDepth デフォルト)。

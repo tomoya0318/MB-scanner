@@ -13,15 +13,18 @@ export const LAYOUT_KIND = {
 export type LayoutKind = (typeof LAYOUT_KIND)[keyof typeof LAYOUT_KIND];
 
 /**
- * 抽出が成立しなかった場合の理由コード。Phase 4.2 の集計で内訳を取るのに使う。
+ * 抽出が成立しなかった場合の理由コード。集計で内訳を取るのに使う。
  *
  * - `parse-error`: before / after の AST parse に失敗
  * - `no-changed-nodes`: AST diff が空 (整形差分のみで意味論変更なし)
- * - `module-wide-change`: minimal enclosure が Program / File に到達 (複数関数最適化)
+ * - `module-wide-change`: minimal enclosure が Program / File に到達 (複数関数最適化、fallback 経路)
  * - `multi-file-change`: server 系で変更が複数ファイルにまたがる
- * - `no-enclosure-candidate`: 候補型 (Function/Method/Block) が見つからない
+ * - `no-enclosure-candidate`: 候補型 (Function/Method/Block) が見つからない (fallback 経路)
  * - `layout-unknown`: client / server のどちらでもないディレクトリ構造
  * - `missing-files`: 期待するファイル (v_*.html / <lib>_* など) が欠落
+ * - `change-not-exercised`: lib の変更を (推移的にも) exercise する workload (`f1` / `test()`) が無い
+ *   = ベンチが lib 変更を測っていない (例: 最適化を inline `<script>` に micro-reconstruct)。実行ベース
+ *   等価検証では検証不能 → 除外 (recall の限界)。
  */
 export const EXCLUSION_REASON = {
   PARSE_ERROR: "parse-error",
@@ -31,34 +34,42 @@ export const EXCLUSION_REASON = {
   NO_ENCLOSURE_CANDIDATE: "no-enclosure-candidate",
   LAYOUT_UNKNOWN: "layout-unknown",
   MISSING_FILES: "missing-files",
+  CHANGE_NOT_EXERCISED: "change-not-exercised",
 } as const;
 export type ExclusionReason = (typeof EXCLUSION_REASON)[keyof typeof EXCLUSION_REASON];
 
 /**
- * 作用点ルーティングの結果 (ADR-0011 §段2)。
- * - `A`: lib (`<lib>_*.js`) のみに実コード変化 — 真 patch は lib の中
- * - `B`: ベンチマーク関数 body (`f1.body` / `test()` body) のみに変化 — 真 patch は body の中
- * - `A+B`: 両方変化 — ADR-0014 の identifier 交差判定で 1 or 2 candidate に分割
+ * 作用点ルーティングの結果 (ADR-0011 §段2)。「実コード変化が *どこ* にあるか」。
+ * - `lib`: ライブラリ (`<lib>_*.js`) のみに実コード変化 — 真 patch は lib の中 (実 PR では production コード変更に相当、常態)
+ * - `workload`: ベンチマーク関数 body (`f1.body` / `test()` body) のみに変化 — 真 patch は workload コードの中
+ * - `lib+workload`: 両方変化 — ADR-0014 の identifier 交差判定で 1 or 2 candidate に分割
  * - `fallback`: どちらにも実コード変化なし / 規約外フォーマット → Tier 1 の素の top-level diff
  */
 export const ASPECT = {
-  LIB: "A",
-  BODY: "B",
-  BOTH: "A+B",
+  LIB: "lib",
+  WORKLOAD: "workload",
+  BOTH: "lib+workload",
   FALLBACK: "fallback",
 } as const;
 export type Aspect = (typeof ASPECT)[keyof typeof ASPECT];
 
 /**
- * A+B split (ADR-0014) における candidate の役割。
- * - `lib`: lib varies / body fixed@before
- * - `body`: body varies / lib fixed@before
- * - `single`: split しない (A / B / A+B co-evolution / fallback)
+ * candidate の役割 / 形。
+ * - `single`: split しない既定形 (`aspect: lib` の embedded / `aspect: workload` / `aspect: lib+workload` の
+ *   co-evolution / `fallback`)。`(setup, slow, fast)` がそのまま 1 セット
+ * - `lib`: `aspect: lib+workload` の独立判定で 2 分割したときの lib 側 — lib varies / workload body fixed@before
+ * - `body`: 同 workload body 側 — workload body varies / lib fixed@before
+ * - `changed-fn`: `aspect: lib` (lib 内 patch) について、workload が (推移的に) exercise する変更関数を 1 つ
+ *   `<lib>_*.js` から切り出した pruning 向け candidate。slow/fast = `__HOLE__` に変更前/後の関数本体
+ *   (lambda-lift = lib 内部の補助関数・変数を引数化) + 観測する形 (戻り値を記録して返す) + workload、
+ *   setup = lib 全文 (変更関数だけ穴空き、ガード + after 本体インライン fallback) + 依存 lib + preF1。
+ *   1 issue で 0〜数個出る — 同 issue の embedded (`single`) と併存し、等価検証/pruning はこの小さい版を使う。
  */
 export const CANDIDATE_KIND = {
+  SINGLE: "single",
   LIB: "lib",
   BODY: "body",
-  SINGLE: "single",
+  CHANGED_FN: "changed-fn",
 } as const;
 export type CandidateKind = (typeof CANDIDATE_KIND)[keyof typeof CANDIDATE_KIND];
 

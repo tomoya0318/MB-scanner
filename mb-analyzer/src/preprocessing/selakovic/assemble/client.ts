@@ -11,14 +11,17 @@ import { buildAngularRunnable } from "./angular";
 import { wrapClientLibGlobalsStatement } from "./recorder-hooks";
 
 /**
- * clientIssues の `(setup, slow, fast)` candidate を作用点 (A / B / A+B) × wrapper kind
+ * clientIssues の `(setup, slow, fast)` candidate を作用点 (lib / workload / lib+workload) × wrapper kind
  * (top-level f1 / Angular controller-wrapper) で組み立てる (ADR-0011 §段2 / ADR-0014)。
  * `f1` body 内のループ反復回数は書き換えない (ADR-0017)。
+ *
+ * `aspect: lib` (lib 内 patch) の pruning 向け小 candidate (`changed-fn`) は `buildChangedFnCandidate`
+ * (Phase 2b-ii で追加予定) が担当する — ここの `buildClientLibCandidate` は embedded 版のみ。
  */
 
 const ENV_JSDOM: ExecutionEnvironmentHint = "jsdom";
 
-/** 作用点 A の lib candidate: lib varies / body fixed@before。 */
+/** 作用点 lib の embedded lib candidate: lib varies / workload body fixed@before (lib 全文を slow/fast に丸ごと埋める)。 */
 export function buildClientLibCandidate(
   f1Before: F1Decomposition,
   libSourceBefore: string,
@@ -49,7 +52,7 @@ export function buildClientLibCandidate(
   };
 }
 
-/** 作用点 B の body candidate: body varies / lib fixed@before。 */
+/** 作用点 workload の body candidate: workload body varies / lib fixed@before。 */
 export function buildClientBodyCandidate(
   f1Before: F1Decomposition,
   f1After: F1Decomposition,
@@ -86,7 +89,7 @@ export function buildClientBodyCandidate(
   };
 }
 
-/** A+B co-evolution の疑い: lib も body も同時に変える 1 candidate。 */
+/** lib+workload co-evolution の疑い: lib も workload body も同時に変える 1 candidate。 */
 export function buildClientCombinedCandidate(
   f1Before: F1Decomposition,
   f1After: F1Decomposition,

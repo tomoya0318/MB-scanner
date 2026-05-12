@@ -86,7 +86,7 @@ describe("PruningInput", () => {
       environment: "jsdom",
       module_base_dir: "/abs/data/selakovic-2016-issues/serverIssues/ChalkIssues/issues/issue_28",
       mount_html: "<div id=\"demo\"></div>",
-      aspect: "A",
+      aspect: "lib",
       candidate_kind: "single",
       enclosure_type: "server-test-case",
     };

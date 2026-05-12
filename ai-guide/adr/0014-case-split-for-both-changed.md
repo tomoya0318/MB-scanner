@@ -95,3 +95,9 @@ preprocess の **Tier 2 の段 2 (作用点ルーティング — ADR-0011)**。
 - **「lib 変化が workload で exercise されるか」も実質的な判定軸になる** (Phase 1.0 の観察): co-evolution 判定 (identifier 交差) で「分割可」と出ても、lib 側の変更関数が `f1`/`test()` から*そもそも呼ばれない*ことがある (react-808 の react 内部変更は `f1` の直接 DOM 呼び出しを通らない / mocha-701 は `init()` が mocha を require しない)。この場合 lib candidate は trivially equal になる (= 害はないが、candidate を作る価値も薄い)。Phase 2a で「lib の changed_function ∩ workload が到達する API」が空なら lib candidate を出さない (= 1 candidate に縮約) という最適化を検討する余地あり。本 ADR の分割規則はそのままで、出力 candidate 数の効率化の話。
 - **両側に実 diff があると判定された issue は等価検証で C6 (interaction trace) も効く** (ADR-0013): lib candidate の評価は「workload (fixed@before) が lib_before vs lib_after に投げた呼び出しの戻り値が同じか」= まさに C6。`clientIssues/Angular/issue_10351` (作用点 A、本 ADR の分割対象ではないが) で C6 が workload-observable な非等価を検出した例があるので、A+B の lib candidate でも同様の検出が起きうる。
 - 「無名関数の合成名 `<anon-fn-expr>#N`」の付け方は Tier 1 の AST 走査順に依存するヒューリスティック。before/after で同じ走査順なら名前は安定するが、関数の追加・削除があると番号がずれうる。交差判定では「名前が完全一致した場合のみ交差扱い」とし、ずれによる偽陰性 (= 本当は連動だが独立と判定) は上記トリガーで監視する。
+
+### 2026-05-12 更新 (作用点ラベルのリネーム + 0022 の lib narrowing 再設計)
+
+ADR-0011 §段2 の作用点ラベルを `A` / `B` / `A+B` → **`lib` / `workload` / `lib+workload`** にリネームした (ADR-0011 の「2026-05-12 更新」参照。本 ADR 本文の `A+B`・`作用点 A` 等は読み替え)。本 ADR の分割規則 (independent なら lib / body の 2 candidate) は不変。
+
+§補足 末尾の「lib changed_function ∩ workload 到達 API が空なら lib candidate を出さない最適化を Phase 2a で検討」は、`tmp/0022_preprocess-workload-reachability-redesign/` でより一般的に実装した — `aspect: lib` (および `aspect: lib+workload` 独立判定の lib 側) について、workload (`f1`/`test()`) が (推移的に) exercise する変更関数だけを `<lib>_*.js` から 1 つずつ切り出して lambda-lift + 観測する形にした `candidate_kind: "changed-fn"` 候補を出し、exercise されない変更は `change-not-exercised` で除外する。embedded (`single`) candidate は併存 (equiv 安定性 fallback)。`candidate_kind` から 0021 の `lib-enclosure` は削除。

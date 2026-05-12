@@ -5,17 +5,17 @@ import { findChangedNodes } from "../../common/ast-diff";
 
 /**
  * ADR-0011 §段2: ① `<lib>_*.js` に実コード変化があるか × ② ベンチマーク関数 body に
- * 実コード変化があるか で作用点を A / B / A+B / fallback に振り分ける。
+ * 実コード変化があるか で作用点を lib / workload / lib+workload / fallback に振り分ける。
  *
- * - **A** (lib のみ変化): `harness_only` / `no-html` 系 — 真 patch は lib の中。
- * - **B** (body のみ変化): `f1_body_only` 系 — 真 patch は `f1`/`test()` body の中。
- * - **A+B** (両方変化): `both_changed` / ケース IV-B — ADR-0014 の identifier 交差判定で分割。
+ * - **lib** (lib のみ変化): `harness_only` / `no-html` 系 — 真 patch は lib の中。
+ * - **workload** (body のみ変化): `f1_body_only` 系 — 真 patch は `f1`/`test()` body の中。
+ * - **lib+workload** (両方変化): `both_changed` / ケース IV-B — ADR-0014 の identifier 交差判定で分割。
  * - **fallback** (どちらも変化なし): artefact 除去後に何も残らない安全弁。実物では起きない見込み。
  */
 export function routeAspect(libHasRealChange: boolean, bodyHasRealChange: boolean): Aspect {
   if (libHasRealChange && bodyHasRealChange) return ASPECT.BOTH;
   if (libHasRealChange) return ASPECT.LIB;
-  if (bodyHasRealChange) return ASPECT.BODY;
+  if (bodyHasRealChange) return ASPECT.WORKLOAD;
   return ASPECT.FALLBACK;
 }
 
@@ -48,9 +48,9 @@ if (import.meta.vitest) {
   const { parse } = await import("../../../ast/parser");
 
   describe("routeAspect / statementsChanged (in-source)", () => {
-    it("routeAspect: A / B / A+B / fallback", () => {
+    it("routeAspect: lib / workload / lib+workload / fallback", () => {
       expect(routeAspect(true, false)).toBe(ASPECT.LIB);
-      expect(routeAspect(false, true)).toBe(ASPECT.BODY);
+      expect(routeAspect(false, true)).toBe(ASPECT.WORKLOAD);
       expect(routeAspect(true, true)).toBe(ASPECT.BOTH);
       expect(routeAspect(false, false)).toBe(ASPECT.FALLBACK);
     });

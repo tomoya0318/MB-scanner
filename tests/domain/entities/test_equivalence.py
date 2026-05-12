@@ -103,13 +103,13 @@ class TestEquivalenceInput:
                 "slow": "1",
                 "fast": "1",
                 "mount_html": "<div id='demo'></div>",
-                "aspect": "A",
+                "aspect": "lib",
                 "candidate_kind": "lib",
                 "enclosure_type": "server-test-case",
             }
         )
         assert inp.mount_html == "<div id='demo'></div>"
-        assert inp.aspect == "A"
+        assert inp.aspect == "lib"
         assert inp.candidate_kind == "lib"
         assert inp.enclosure_type == "server-test-case"
 

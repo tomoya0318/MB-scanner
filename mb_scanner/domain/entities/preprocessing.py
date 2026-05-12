@@ -27,7 +27,7 @@ class LayoutKind(StrEnum):
 class ExclusionReason(StrEnum):
     """抽出が成立しなかった理由コード
 
-    Phase 4.2 の集計で内訳を取るのに使う。詳細な説明は
+    集計で内訳を取るのに使う。詳細な説明は
     ``mb-analyzer/src/contracts/preprocessing-contracts.ts`` 参照。
     """
 
@@ -38,34 +38,41 @@ class ExclusionReason(StrEnum):
     NO_ENCLOSURE_CANDIDATE = "no-enclosure-candidate"
     LAYOUT_UNKNOWN = "layout-unknown"
     MISSING_FILES = "missing-files"
+    CHANGE_NOT_EXERCISED = "change-not-exercised"
 
 
 class Aspect(StrEnum):
-    """作用点ルーティングの結果 (ADR-0011 §段2)
+    """作用点ルーティングの結果 (ADR-0011 §段2) — 実コード変化が *どこ* にあるか
 
-    - ``LIB`` (``A``): lib (``<lib>_*.js``) のみに実コード変化 — 真 patch は lib の中
-    - ``BODY`` (``B``): ベンチマーク関数 body (``f1.body`` / ``test()`` body) のみに変化
-    - ``BOTH`` (``A+B``): 両方変化 — ADR-0014 の identifier 交差判定で 1 or 2 candidate に分割
+    - ``LIB`` (``"lib"``): ライブラリ (``<lib>_*.js``) のみに実コード変化 — 真 patch は lib の中
+    - ``WORKLOAD`` (``"workload"``): ベンチマーク関数 body (``f1.body`` / ``test()`` body) のみに変化
+    - ``BOTH`` (``"lib+workload"``): 両方変化 — ADR-0014 の identifier 交差判定で 1 or 2 candidate に分割
     - ``FALLBACK``: どちらにも実コード変化なし / 規約外フォーマット → Tier 1 の素の top-level diff
     """
 
-    LIB = "A"
-    BODY = "B"
-    BOTH = "A+B"
+    LIB = "lib"
+    WORKLOAD = "workload"
+    BOTH = "lib+workload"
     FALLBACK = "fallback"
 
 
 class CandidateKind(StrEnum):
-    """A+B split (ADR-0014) における candidate の役割
+    """candidate の役割 / 形
 
-    - ``LIB``: lib varies / body fixed@before
-    - ``BODY``: body varies / lib fixed@before
-    - ``SINGLE``: split しない (A / B / A+B co-evolution / fallback)
+    - ``SINGLE``: split しない既定形 (``aspect: lib`` の embedded / ``aspect: workload`` /
+      ``aspect: lib+workload`` の co-evolution / ``fallback``)。``(setup, slow, fast)`` がそのまま 1 セット
+    - ``LIB``: ``aspect: lib+workload`` の独立判定で 2 分割したときの lib 側 — lib varies / workload body fixed@before
+    - ``BODY``: 同 workload body 側 — workload body varies / lib fixed@before
+    - ``CHANGED_FN``: ``aspect: lib`` (lib 内 patch) について、workload が (推移的に) exercise する変更関数を
+      1 つ ``<lib>_*.js`` から切り出した pruning 向け candidate (slow/fast = ``__HOLE__`` に変更前/後の
+      関数本体 (lambda-lift + 観測する形) + workload、setup = lib 全文 (変更関数だけ穴空き) + 依存 lib + preF1)。
+      1 issue で 0〜数個出る — 同 issue の embedded (``SINGLE``) と併存。
     """
 
+    SINGLE = "single"
     LIB = "lib"
     BODY = "body"
-    SINGLE = "single"
+    CHANGED_FN = "changed-fn"
 
 
 class ExecutionEnvironmentHint(StrEnum):

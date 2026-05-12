@@ -254,7 +254,7 @@ describe("runPrune", () => {
         environment: "vm",
         module_base_dir: "/abs/issue",
         mount_html: "<div></div>",
-        aspect: "A",
+        aspect: "lib",
         candidate_kind: "single",
         enclosure_type: "f1-body",
       }),

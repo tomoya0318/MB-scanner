@@ -7,7 +7,13 @@ import type { ExecutionCapture } from "../../sandbox/capture/types";
  * pre/post は body 実行前後の時間軸 (slow/fast のサイド軸とは別概念)。
  *
  * - 両側とも setup で object/array を 1 つも定義していない → not_applicable
- * - snapshot にシリアライズ不能マーカを含む → error
+ * - snapshot にシリアライズ不能マーカ (循環参照等) を含む key は **比較対象から除外**。残り 0 件 → not_applicable
+ *   (= 「観測できる setup object が無かった」と同じ扱い)。理由: serialize 失敗 (= 観測できない) を `error`
+ *   に丸めると Ember 級 lib で `globalThis.Ember` が循環していて常に `error` → 候補全体が捨てられる。
+ *   観測できないことと壊れていることは別。observe できる key だけで判定し、ゼロなら N/A にして他 oracle に委ねる。
+ *   ADR-0018 の保守化 (positive evidence が無ければ全体 `inconclusive`) はこの後段で効くので健全性は保たれる。
+ *   TODO(v2): serializer.ts 側で循環参照を throw でなく `<circular>` sentinel に丸めれば、循環オブジェクトも
+ *   「巨大だが有限の文字列」として比較できる (要 maxDepth デフォルト設定で文字列サイズを抑える)。そうすればここの除外も不要に。
  * - key 集合と各 post が一致 → equal
  * - いずれか差分 → not_equal
  */
@@ -21,19 +27,13 @@ export function checkArgumentMutation(
     return { oracle, verdict: ORACLE_VERDICT.NOT_APPLICABLE };
   }
 
-  const hasUnserializable = [...slow.arg_snapshots, ...fast.arg_snapshots].some(
-    (s) => s.pre === UNSERIALIZABLE_MARKER || s.post === UNSERIALIZABLE_MARKER,
-  );
-  if (hasUnserializable) {
-    return {
-      oracle,
-      verdict: ORACLE_VERDICT.ERROR,
-      detail: "one or more argument snapshots could not be serialized",
-    };
+  const serializable = (s: { pre: string; post: string }): boolean =>
+    s.pre !== UNSERIALIZABLE_MARKER && s.post !== UNSERIALIZABLE_MARKER;
+  const slowPost = new Map(slow.arg_snapshots.filter(serializable).map((s) => [s.key, s.post]));
+  const fastPost = new Map(fast.arg_snapshots.filter(serializable).map((s) => [s.key, s.post]));
+  if (slowPost.size === 0 && fastPost.size === 0) {
+    return { oracle, verdict: ORACLE_VERDICT.NOT_APPLICABLE };
   }
-
-  const slowPost = new Map(slow.arg_snapshots.map((s) => [s.key, s.post]));
-  const fastPost = new Map(fast.arg_snapshots.map((s) => [s.key, s.post]));
   const keys = new Set<string>([...slowPost.keys(), ...fastPost.keys()]);
 
   const differingKeys: string[] = [];
@@ -65,7 +65,8 @@ export function checkArgumentMutation(
 if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
   // 観点: setup 由来 object/array の pre/post snapshot を両側で比較。両側とも snapshot 無し → N/A、
-  // UNSERIALIZABLE_MARKER → error、key 集合 + 各 post 一致 → equal、差分 → not_equal (detail に差分 key)。
+  // UNSERIALIZABLE_MARKER を含む key は除外 (残り 0 件 → N/A、残った key だけで判定)、
+  // key 集合 + 各 post 一致 → equal、差分 → not_equal (detail に差分 key)。
   const cap = (o: Partial<ExecutionCapture> = {}): ExecutionCapture => ({
     return_value: "undefined",
     return_is_undefined: true,
@@ -102,10 +103,24 @@ if (import.meta.vitest) {
       expect(checkArgumentMutation(s, f).verdict).toBe("not_equal");
     });
 
-    it("UNSERIALIZABLE_MARKER を含む → error", () => {
-      const s = cap({ arg_snapshots: [{ key: "c", pre: UNSERIALIZABLE_MARKER, post: "[]" }] });
-      const f = cap({ arg_snapshots: [{ key: "c", pre: "[]", post: "[]" }] });
-      expect(checkArgumentMutation(s, f).verdict).toBe("error");
+    it("snapshot が全て UNSERIALIZABLE_MARKER (循環 Ember グローバル等) → not_applicable (error にしない)", () => {
+      const s = cap({ arg_snapshots: [{ key: "Ember", pre: UNSERIALIZABLE_MARKER, post: UNSERIALIZABLE_MARKER }] });
+      const f = cap({ arg_snapshots: [{ key: "Ember", pre: UNSERIALIZABLE_MARKER, post: UNSERIALIZABLE_MARKER }] });
+      expect(checkArgumentMutation(s, f).verdict).toBe("not_applicable");
+    });
+
+    it("一部の key だけ UNSERIALIZABLE → その key は無視し、残りで判定 (一致 → equal)", () => {
+      const s = cap({ arg_snapshots: [{ key: "Ember", pre: UNSERIALIZABLE_MARKER, post: UNSERIALIZABLE_MARKER }, { key: "arr", pre: "[1]", post: "[1,2]" }] });
+      const f = cap({ arg_snapshots: [{ key: "Ember", pre: UNSERIALIZABLE_MARKER, post: UNSERIALIZABLE_MARKER }, { key: "arr", pre: "[1]", post: "[1,2]" }] });
+      expect(checkArgumentMutation(s, f).verdict).toBe("equal");
+    });
+
+    it("一部の key だけ UNSERIALIZABLE で、観測できる残りに差分 → not_equal", () => {
+      const s = cap({ arg_snapshots: [{ key: "Ember", pre: UNSERIALIZABLE_MARKER, post: "[]" }, { key: "arr", pre: "[1]", post: "[1,2]" }] });
+      const f = cap({ arg_snapshots: [{ key: "Ember", pre: "[]", post: "[]" }, { key: "arr", pre: "[1]", post: "[1]" }] });
+      const obs = checkArgumentMutation(s, f);
+      expect(obs.verdict).toBe("not_equal");
+      expect(obs.detail).toContain("arr");
     });
   });
 }

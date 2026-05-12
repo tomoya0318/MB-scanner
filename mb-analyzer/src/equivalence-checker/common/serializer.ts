@@ -83,6 +83,10 @@ function serialize(value: unknown, stack: object[], options: SerializeOptions, d
 
   const obj = value as object;
   if (stack.includes(obj)) {
+    // TODO(v2): throw でなく `"<circular>"` sentinel を返すことを検討 (maxDepth 超過を `"<deep>"` に
+    // するのと同じ方針)。そうすれば循環を含むオブジェクト (Ember の computed property / meta グラフ等) も
+    // 「巨大だが有限の文字列」として等価比較できる → argument_mutation oracle が unserializable key を
+    // 除外する必要が無くなる。難点: Ember グラフは巨大なので maxDepth デフォルトを設定して文字列サイズを抑える必要がある。
     throw new SerializationError("Circular reference detected while serializing value");
   }
   const dom = domNodeRepr(obj);
