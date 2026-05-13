@@ -12,6 +12,7 @@ from pydantic import ValidationError
 import pytest
 
 from mb_scanner.domain.entities.pruning import (
+    MAX_CODE_LENGTH,
     Placeholder,
     PlaceholderKind,
     PruningInput,
@@ -71,9 +72,15 @@ class TestPruningInput:
             PruningInput(slow="x", fast="x", max_iterations=100_001)
 
     def test_code_length_bound(self) -> None:
-        long = "x" * 1_000_001
+        # MAX_CODE_LENGTH (= 20MB、EquivalenceInput と同じ) を 1 文字でも超えたら ValidationError。
+        # setup にも同じ上限がかかる (0022 の changed-fn candidate は lib 全文を setup に残す)。
+        too_long = "x" * (MAX_CODE_LENGTH + 1)
         with pytest.raises(ValidationError):
-            PruningInput(slow=long, fast="x")
+            PruningInput(slow=too_long, fast="x")
+        with pytest.raises(ValidationError):
+            PruningInput(slow="x", fast="x", setup=too_long)
+        # ちょうど上限なら OK
+        PruningInput(slow="x" * MAX_CODE_LENGTH, fast="x")
 
     def test_extra_fields_rejected(self) -> None:
         with pytest.raises(ValidationError):
