@@ -77,9 +77,14 @@ export function classifyScriptSrcs(html: string, patchedLibFilenames: readonly s
   return entries;
 }
 
-/** パッケージ名 → `node_modules/<pkg>/` 内で `.js` 本体がありうる相対パス候補 (上から優先)。 */
+/**
+ * パッケージ名 → `node_modules/<pkg>/` 内で *ブラウザ用* `.js` 本体がありうる相対パス候補 (上から優先)。
+ * 注: jquery@1.7.x は npm 上では `coolaj86/node-jquery` で、`main` = `lib/node-jquery.js` は jsdom 上で
+ * 動かす CommonJS シム (= `<script>` 連結には使えない)。同 tarball が同梱する `tmp/jquery.js` が素の
+ * ブラウザ jQuery なのでそれを拾う (jquery@2.1.3/1.11.3 は jQuery 公式 npm パッケージで `dist/jquery.min.js` がある)。
+ */
 const PKG_FILE_CANDIDATES: Record<DepPkg, readonly string[]> = {
-  jquery: ["dist/jquery.min.js", "dist/jquery.js", "jquery.js", "jquery-min.js"],
+  jquery: ["dist/jquery.min.js", "dist/jquery.js", "tmp/jquery.js", "jquery.js", "jquery-min.js"],
   handlebars: ["dist/handlebars.min.js", "dist/handlebars.js", "lib/handlebars.js", "handlebars.js"],
   underscore: ["underscore-min.js", "underscore.js"],
 };
