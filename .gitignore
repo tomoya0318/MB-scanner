@@ -16,6 +16,8 @@ outputs/
 data/*
 !data/mb_scanner.db
 !data/selakovic-2016-issues
+# research/ の notes/ にある spike ログは研究記録として保存対象
+!research/**/notes/*.log
 
 # AI tmp files
 .ai/
@@ -40,3 +42,4 @@ mb-analyzer/coverage/
 .vscode/
 .mise/
 .cmux-surface
+research/src/research/*/inputs/

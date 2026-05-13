@@ -118,8 +118,8 @@ pnpm --prefix mb-analyzer run test:cov
 # =============================================================================
 
 [tasks.check-arch]
-description = "import-linter でレイヤー契約を検証する"
-run = "uv run lint-imports"
+description = "import-linter でレイヤー契約を検証する (config は mb_scanner/pyproject.toml の [tool.importlinter])"
+run = "cd mb_scanner && uv run --project .. lint-imports"
 
 [tasks.check]
 description = "Lint + 型チェック + テスト + アーキテクチャ検証を一括実行する"

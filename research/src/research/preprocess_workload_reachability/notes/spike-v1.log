@@ -1,0 +1,129 @@
+# spike-e2e.test.ts 実走ログ (brain-2 の docker コンテナ内, 2026-05-12)
+# tee は /mnt/data1/... がコンテナにマウントされてないため失敗 → ターミナル出力をそのまま貼り付け
+# vitest v3.2.4 / 12 tests / 101.53s / "Timeout calling onTaskUpdate" は console.log 過多による RPC timeout（結果には無害）
+
+ RUN  v3.2.4 /home/tomoya-n/workspace/mb-analyzer
+
+############### Underscore.string 347_1 (startsWith) ###############
+  path="_s.startsWith"  params=[str,starts,position]  liftDeps=[makeString,slice]  deps=[jquery.min.js]
+  setup 104262 chars / slow 695 chars / fast 692 chars
+  --- checkEquivalence: verdict=equal  (中身あり ✓) ---
+    slow_value=undefined
+    eq={"verdict":"equal","observations":[{"oracle":"exception","verdict":"not_applicable"},{"oracle":"return_value","verdict":"equal","slow_value":"\"[\\\"true\\\",×8]\"","fast_value":"\"[\\\"true\\\",×8]\""},{"oracle":"interaction_trace","verdict":"not_applicable"},{"oracle":"dom_mutation","verdict":"not_applicable"},{"oracle":"argument_mutation","verdict":"equal",...}]}
+  --- prune: verdict=pruned  iterations=200/200  nodes 152->144 ---
+    pattern_code:
+      globalThis.__HOLE__ = function (makeString, slice, str, starts, position) {
+        "$P0";
+        var __r = function () {
+          starts = String(starts);
+          position = position == "$P2" ? 0 : Math.min(position < 0 ? 0 : +position || 0, str.length);
+          return makeString(str).slice(position, starts.length + position) == starts;
+        }.call("$P3");
+        globalThis.__OBS.push(function () { try { return JSON.stringify(__r); } catch (e) { $P1; } }());
+        return __r;
+      };
+      ;
+      (function () { globalThis.__OBS = []; for (var i = 0; i <= 3; i++) { _.str.startsWith('image.gif', 'image'); _.str.startsWith('.vimrc', 'vim', 1); } return JSON.stringify(globalThis.__OBS); })();
+
+############### jQuery 367 (index) ###############
+  path="jQuery.fn.index"  params=[elem]  liftDeps=[jQuery]  deps=[なし]
+  setup 235732 chars / slow 868 chars / fast 867 chars
+  --- checkEquivalence: verdict=equal  (中身あり ✓) ---
+    eq={"verdict":"equal","observations":[...,{"oracle":"return_value","verdict":"equal","slow_value":"\"[\\\"-1\\\",\\\"0\\\",\\\"1\\\",×3]\"","fast_value":"同左"},...,{"oracle":"external_observation","verdict":"equal",...}]}
+  --- prune: verdict=pruned  iterations=171/200  nodes 149->123 ---
+    pattern_code:
+      globalThis.__HOLE__ = function (jQuery, elem) {
+        "$P1";
+        var __r = function () {
+          if ("$P5" || "$P3") {
+            return jQuery.inArray(this[0], elem ? "$P4" : this.parent().children());
+          }
+          $P0;
+        }.call(this);
+        globalThis.__OBS.push(function () { try { return JSON.stringify(__r); } catch (e) { $P2; } }());
+        return __r;
+      };
+      ;
+      (function () { globalThis.__OBS = []; for (var i = 0; i < 3; i++) { jQuery("<div/>").index(); jQuery("#foo").index(); jQuery('#bar').index(); } return JSON.stringify(globalThis.__OBS); })();
+
+############### jQuery 248 ###############
+  変更関数特定失敗: cannot determine path (parent=CallExpression)
+
+############### Underscore 1222 ###############
+  path="_.values"  params=[obj]  liftDeps=[]  deps=[jquery.min.js]
+  setup 126780 chars / slow 497 chars / fast 533 chars
+  --- checkEquivalence: verdict=equal  (中身あり ✓) ---
+    eq={"verdict":"equal","observations":[...,{"oracle":"return_value","verdict":"equal","slow_value":"\"[\\\"[0..99]\\\",...]\"",...}]}
+  --- prune: verdict=pruned  iterations=100/200  nodes 116->108 ---
+    pattern_code:
+      globalThis.__HOLE__ = function (obj) {
+        "$P0";
+        var __r = function () {
+          var values = [];
+          for (var key in obj) if (_.has(obj, key)) values.push(obj[key]);
+          return values;
+        }.call("$P2");
+        globalThis.__OBS.push(function () { try { return JSON.stringify(__r); } catch (e) { $P1; } }());
+        return __r;
+      };
+      ;
+      (function () { globalThis.__OBS = []; for (var i = 0; i < 3; i++) { _.values(map); } return JSON.stringify(globalThis.__OBS); })();
+
+############### Ember 3174 (assert) ###############
+  path="Ember.assert"  params=[desc,test]  liftDeps=[]  deps=[jquery.min.js,handlebars.js]
+  setup 1098156 chars / slow 609 chars / fast 626 chars
+  --- checkEquivalence: verdict=error ---
+    eq={"verdict":"error","observations":[],"verdict_reason":"executor-error","error_message":"TypeError: Cannot read properties of undefined (reading 'call')","effective_timeout_ms":15000}
+    → error。次の手が要る
+    （原因: Ember.assert は lib bootstrap 中に大量に呼ばれる → setup 実行時に globalThis.__HOLE__ が未定義 → .call で死ぬ）
+
+############### Ember 4329_1 (cacheFor) ###############
+  変更関数特定失敗: cannot determine path (parent=CallExpression)
+
+############### Ember 5547 (set) ###############
+  path="ComputedPropertyPrototype.set"  params=[obj,keyName,value]  liftDeps=[]  deps=[jquery.min.js,handlebars.js]
+  setup 2252293 chars / slow 2253 chars / fast 592 chars
+  --- checkEquivalence: verdict=not_equal ---
+    eq={"verdict":"not_equal","observations":[{"oracle":"exception","verdict":"not_equal","slow_value":"ReferenceError: metaFor is not defined","fast_value":"TypeError: this._set is not a function","detail":"different exception type: ReferenceError vs TypeError"},{"oracle":"return_value","verdict":"not_applicable"},...,{"oracle":"argument_mutation","verdict":"error","detail":"one or more argument snapshots could not be serialized"},...]}
+  --- prune: verdict=initial_mismatch  iterations=undefined/30  nodes 329->undefined ---
+    （原因: metaFor / this._set が Ember の AMD define(...) コールバック内ローカル → moduleScopeNames が拾えず lambda-lift から漏れる）
+
+############### Ember 4158 (jQuery 非互換 dataset バグ) ###############
+  変更関数特定失敗: cannot determine path (parent=CallExpression)
+
+############### Ember 4263 (handlebars <script src> 欠落) ###############
+  変更関数特定失敗: cannot determine path (parent=CallExpression)
+
+############### Ember 9991 (micro-reconstruct: lib に通してない) ###############
+  変更関数特定失敗: cannot determine path (parent=CallExpression)
+
+############### Underscore.string 347_2 (easy sanity) ###############
+  path="_s.startsWith"  params=[str,starts,position]  liftDeps=[makeString,slice]  deps=[jquery.min.js]
+  setup 104259 chars / slow 692 chars / fast 683 chars
+  --- checkEquivalence: verdict=equal  (中身あり ✓) ---
+    eq={"verdict":"equal","observations":[...,{"oracle":"return_value","verdict":"equal","slow_value":"\"[\\\"true\\\",×8]\"","fast_value":"同左"},...]}
+  --- prune: verdict=pruned  iterations=200/200  nodes 152->140 ---
+    pattern_code:
+      globalThis.__HOLE__ = function (makeString, slice, str, starts, position) {
+        "$P0";
+        var __r = function () {
+          "$P2";
+          position = position == "$P3" ? 0 : Math.min(position < 0 ? 0 : +position || 0, str.length);
+          return makeString(str).slice(position, starts.length + position) == starts;
+        }.call("$P4");
+        globalThis.__OBS.push(function () { try { return JSON.stringify(__r); } catch (e) { $P1; } }());
+        return __r;
+      };
+      ;
+      (function () { globalThis.__OBS = []; for (var i = 0; i <= 3; i++) { _.str.startsWith('image.gif', 'image'); _.str.startsWith('.vimrc', 'vim', 1); } return JSON.stringify(globalThis.__OBS); })();
+
+############### Underscore 1223 (easy sanity) ###############
+  path="_.forEach"  params=[obj,iterator,context]  liftDeps=[]  deps=[jquery.min.js]
+  setup 127014 chars / slow 851 chars / fast 884 chars
+  --- checkEquivalence: verdict=error ---
+    eq={"verdict":"error","observations":[],"verdict_reason":"executor-error","error_message":"TypeError: Cannot read properties of undefined (reading 'call')","effective_timeout_ms":15000}
+    → error。次の手が要る
+    （原因: underscore 自身の bootstrap が _.each/_.forEach を使う → setup 実行時に globalThis.__HOLE__ 未定義 → .call で死ぬ。Ember.assert と同じパターン。"core 関数なので稀ではない"）
+
+ ✓ tests/preprocessing/spike-e2e.test.ts (12 tests) 99203ms
+ Test Files  1 passed (1)  /  Tests  12 passed (12)  /  Errors  1 error (vitest worker RPC timeout, 無害)
