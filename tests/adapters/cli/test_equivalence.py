@@ -18,22 +18,29 @@ from mb_scanner.domain.entities.equivalence import (
 )
 
 
+def _observations_for(verdict: Verdict) -> list[OracleObservation]:
+    """Use case が observation から verdict を再計算するため、整合する observation を組む。
+
+    INCONCLUSIVE は「全 oracle が not_applicable」(= 観測チャネルゼロ) で表現する。
+    """
+    if verdict is Verdict.INCONCLUSIVE:
+        return_value = OracleVerdict.NOT_APPLICABLE
+    else:
+        return_value = {
+            Verdict.EQUAL: OracleVerdict.EQUAL,
+            Verdict.NOT_EQUAL: OracleVerdict.NOT_EQUAL,
+            Verdict.ERROR: OracleVerdict.ERROR,
+        }[verdict]
+    return [
+        OracleObservation(oracle=Oracle.RETURN_VALUE, verdict=return_value),
+        OracleObservation(oracle=Oracle.ARGUMENT_MUTATION, verdict=OracleVerdict.NOT_APPLICABLE),
+        OracleObservation(oracle=Oracle.EXCEPTION, verdict=OracleVerdict.NOT_APPLICABLE),
+        OracleObservation(oracle=Oracle.EXTERNAL_OBSERVATION, verdict=OracleVerdict.NOT_APPLICABLE),
+    ]
+
+
 def _stub_result(verdict: Verdict = Verdict.EQUAL) -> EquivalenceCheckResult:
-    """Use case が observation から verdict を再計算するため、整合する observation を持たせる。"""
-    main_verdict = {
-        Verdict.EQUAL: OracleVerdict.EQUAL,
-        Verdict.NOT_EQUAL: OracleVerdict.NOT_EQUAL,
-        Verdict.ERROR: OracleVerdict.ERROR,
-    }[verdict]
-    return EquivalenceCheckResult(
-        verdict=verdict,
-        observations=[
-            OracleObservation(oracle=Oracle.RETURN_VALUE, verdict=main_verdict),
-            OracleObservation(oracle=Oracle.ARGUMENT_MUTATION, verdict=OracleVerdict.NOT_APPLICABLE),
-            OracleObservation(oracle=Oracle.EXCEPTION, verdict=OracleVerdict.NOT_APPLICABLE),
-            OracleObservation(oracle=Oracle.EXTERNAL_OBSERVATION, verdict=OracleVerdict.NOT_APPLICABLE),
-        ],
-    )
+    return EquivalenceCheckResult(verdict=verdict, observations=_observations_for(verdict))
 
 
 GATEWAY_CLS = "mb_scanner.adapters.cli.equivalence.NodeRunnerEquivalenceGateway"
@@ -57,11 +64,20 @@ class TestCheckEquivalenceCLI:
             res = self.runner.invoke(app, ["check-equivalence", "--slow", "1", "--fast", "2"])
         assert res.exit_code == 1
 
-    def test_error_exit_code_2(self) -> None:
+    def test_inconclusive_exit_code_2(self) -> None:
+        with patch(GATEWAY_CLS) as gw_cls:
+            gw_cls.return_value.check.return_value = _stub_result(Verdict.INCONCLUSIVE)
+            res = self.runner.invoke(app, ["check-equivalence", "--slow", "1", "--fast", "1"])
+        assert res.exit_code == 2
+        payload = json.loads(res.stdout)
+        assert payload["verdict"] == "inconclusive"
+        assert payload["verdict_reason"] == "no-observable-channel"
+
+    def test_error_exit_code_3(self) -> None:
         with patch(GATEWAY_CLS) as gw_cls:
             gw_cls.return_value.check.return_value = _stub_result(Verdict.ERROR)
             res = self.runner.invoke(app, ["check-equivalence", "--slow", "1", "--fast", "1"])
-        assert res.exit_code == 2
+        assert res.exit_code == 3
 
     def test_missing_slow_fast_without_input_is_error(self) -> None:
         res = self.runner.invoke(app, ["check-equivalence"])
@@ -118,26 +134,12 @@ class TestCheckEquivalenceCLI:
         bad = tmp_path / "bad.json"
         bad.write_text("not json")
         res = self.runner.invoke(app, ["check-equivalence", "--input", str(bad)])
-        assert res.exit_code == 2
+        assert res.exit_code == 3
 
 
 def _stub_batch_result(input_id: str, verdict: Verdict = Verdict.EQUAL) -> EquivalenceCheckResult:
     """Batch API 向けの stub 結果 (id と observation を整合させる)"""
-    main_verdict = {
-        Verdict.EQUAL: OracleVerdict.EQUAL,
-        Verdict.NOT_EQUAL: OracleVerdict.NOT_EQUAL,
-        Verdict.ERROR: OracleVerdict.ERROR,
-    }[verdict]
-    return EquivalenceCheckResult(
-        id=input_id,
-        verdict=verdict,
-        observations=[
-            OracleObservation(oracle=Oracle.RETURN_VALUE, verdict=main_verdict),
-            OracleObservation(oracle=Oracle.ARGUMENT_MUTATION, verdict=OracleVerdict.NOT_APPLICABLE),
-            OracleObservation(oracle=Oracle.EXCEPTION, verdict=OracleVerdict.NOT_APPLICABLE),
-            OracleObservation(oracle=Oracle.EXTERNAL_OBSERVATION, verdict=OracleVerdict.NOT_APPLICABLE),
-        ],
-    )
+    return EquivalenceCheckResult(id=input_id, verdict=verdict, observations=_observations_for(verdict))
 
 
 class TestCheckEquivalenceBatchCLI:

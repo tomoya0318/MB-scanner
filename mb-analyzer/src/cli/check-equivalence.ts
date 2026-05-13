@@ -1,9 +1,42 @@
 import { checkEquivalence } from "../equivalence-checker";
-import type { EquivalenceCheckResult, EquivalenceInput } from "../shared/types";
+import {
+  EXECUTION_ENVIRONMENT,
+  type EquivalenceCheckResult,
+  type EquivalenceInput,
+  type ExecutionEnvironment,
+} from "../contracts/equivalence-contracts";
+
+function parseEnvironment(value: unknown): ExecutionEnvironment | null {
+  return value === EXECUTION_ENVIRONMENT.VM || value === EXECUTION_ENVIRONMENT.JSDOM ? value : null;
+}
+
+// 単純な optional string フィールド一覧。型は文字列のみ、無効値は error 行化する。
+const OPTIONAL_STRING_FIELDS = [
+  "module_base_dir",
+  "mount_html",
+  "aspect",
+  "candidate_kind",
+  "enclosure_type",
+] as const;
+
+function assignOptionalStringFields(
+  obj: Record<string, unknown>,
+  input: EquivalenceInput,
+): string | null {
+  for (const field of OPTIONAL_STRING_FIELDS) {
+    const value = obj[field];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "string") return `'${field}' field must be a string when present`;
+    input[field] = value;
+  }
+  return null;
+}
 
 const EXIT_EQUAL = 0;
 const EXIT_NOT_EQUAL = 1;
-const EXIT_ERROR = 2;
+const EXIT_INCONCLUSIVE = 2;
+// `error` verdict と入力パース失敗 (どちらも「使える verdict が出せなかった」) を 3 に統一。
+const EXIT_ERROR = 3;
 const EXIT_BATCH_OK = 0;
 const EXIT_BATCH_IO_FAILURE = 2;
 
@@ -40,6 +73,13 @@ function parseInput(raw: string): EquivalenceInput | string {
     }
     input.timeout_ms = obj.timeout_ms;
   }
+  if (obj.environment !== undefined && obj.environment !== null) {
+    const env = parseEnvironment(obj.environment);
+    if (env === null) return "'environment' field must be 'vm' or 'jsdom' when present";
+    input.environment = env;
+  }
+  const stringFieldError = assignOptionalStringFields(obj, input);
+  if (stringFieldError !== null) return stringFieldError;
   return input;
 }
 
@@ -56,6 +96,7 @@ export async function runCheckEquivalence(): Promise<number> {
 
   if (result.verdict === "equal") return EXIT_EQUAL;
   if (result.verdict === "not_equal") return EXIT_NOT_EQUAL;
+  if (result.verdict === "inconclusive") return EXIT_INCONCLUSIVE;
   return EXIT_ERROR;
 }
 
@@ -98,13 +139,24 @@ function parseBatchLine(raw: string): EquivalenceInput | { id: string | undefine
     if (typeof obj.setup !== "string") return { id, error: "'setup' field must be a string when present" };
     input.setup = obj.setup;
   }
+  if (obj.environment !== undefined && obj.environment !== null) {
+    const env = parseEnvironment(obj.environment);
+    if (env === null) return { id, error: "'environment' field must be 'vm' or 'jsdom' when present" };
+    input.environment = env;
+  }
+  const stringFieldError = assignOptionalStringFields(obj, input);
+  if (stringFieldError !== null) return { id, error: stringFieldError };
   return input;
 }
 
 function errorResult(id: string | undefined, message: string): EquivalenceCheckResult {
+  // batch 行のパース失敗 (slow/fast 欠落 / timeout_ms 不正 / 非 JSON 等) も
+  // 「使える verdict が出せなかった」= executor-error と同じ分類 (ADR-0018) なので
+  // verdict_reason を付ける (Gateway 側 _error と揃える)。
   const result: EquivalenceCheckResult = {
     verdict: "error",
     observations: [],
+    verdict_reason: "executor-error",
     error_message: message,
   };
   if (id !== undefined) result.id = id;

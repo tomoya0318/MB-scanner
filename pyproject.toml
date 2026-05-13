@@ -1,30 +1,15 @@
 [project]
-name = "mb-scanner"
-version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-authors = [
-    { name = "tomoya0318", email = "s266227@wakayama-u.ac.jp" }
-]
+name = "mb-scanner-workspace"
+version = "0.0.0"
+description = "Workspace root for MB-scanner (mb_scanner core + research-side analysis)"
 requires-python = ">=3.13"
-dependencies = [
-    "pydantic-settings",
-    "typer",
-    "sqlalchemy",
-    "pydantic>=2.11.7",
-    "PyGithub",
-    "joblib>=1.4.2",
-    "matplotlib>=3.9.0",
-    "numpy>=1.26.0",
-    "scipy>=1.11.0",
-]
 
-[project.scripts]
-mbs = "mb_scanner.adapters.cli:main"
+[tool.uv.workspace]
+members = ["mb_scanner", "research"]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+[tool.uv.sources]
+mb-scanner = { workspace = true }
+research = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -35,6 +20,8 @@ dev = [
     "joblib-stubs>=1.5.3.0.20251223",
     "scipy-stubs>=1.17.0.2",
     "import-linter>=2.11",
+    "mb-scanner",
+    "research",
 ]
 
 [tool.ruff]
@@ -93,50 +80,41 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "**/__init__.py" = ["F401"]  # 未使用import (re-exportの場合)
-"mb_scanner/domain/entities/sarif.py" = ["N815"]  # SARIF標準フォーマットのcamelCaseを維持
-"mb_scanner/adapters/cli/**/*.py" = ["B008"]  # typer.Optionをデフォルト引数で使用 (Typerの正しい使い方)
-"mb_scanner/domain/ports/**/*.py" = ["D102"]  # Protocolメソッドはクラスdocstringで代替
-"mb_scanner/adapters/repositories/**/*.py" = ["D102"]  # Protocol実装のメソッドはインターフェース定義を参照
+"mb_scanner/src/mb_scanner/domain/entities/sarif.py" = ["N815"]  # SARIF標準フォーマットのcamelCaseを維持
+"mb_scanner/src/mb_scanner/adapters/cli/**/*.py" = ["B008"]  # typer.Optionをデフォルト引数で使用 (Typerの正しい使い方)
+"mb_scanner/src/mb_scanner/domain/ports/**/*.py" = ["D102"]  # Protocolメソッドはクラスdocstringで代替
+"mb_scanner/src/mb_scanner/adapters/repositories/**/*.py" = ["D102"]  # Protocol実装のメソッドはインターフェース定義を参照
 "tests/**/*.py" = ["D101", "D102", "D103"]  # テストのクラス/メソッド/関数の docstring 強制は過剰
 
 [tool.ruff.lint.isort]
 # プロジェクト内のモジュールを正しく認識
-known-first-party = ["mb_scanner"]
+known-first-party = ["mb_scanner", "research"]
 # 標準ライブラリ、サードパーティ、ファーストパーティの順に並び替え
 force-sort-within-sections = true
 
 [tool.ruff.format]
 # Ruffのフォーマッターに関する設定 (Blackとほぼ互換)
-# -----------------------------------------------
-# 文字列のクォートをダブルクォートに統一する。
 quote-style = "double"
-# インデントにスペースを使う。
 indent-style = "space"
-# 改行コードをLFに統一する。
 line-ending = "lf"
 
 [tool.pytest.ini_options]
-# pytestの設定
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-# テスト実行時の追加オプション
 addopts = [
-    "--strict-markers",  # 未定義のマーカーを警告
-    "--tb=short",        # トレースバックを短縮表示
-    "--disable-warnings", # 警告を無効化（必要に応じて削除可能）
+    "--strict-markers",
+    "--tb=short",
+    "--disable-warnings",
 ]
-# カスタムマーカー（必要に応じて追加）
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
 ]
 
 [tool.coverage.run]
-# カバレッジ測定対象のソースディレクトリ
-source = ["mb_scanner"]
-# 除外するファイル・ディレクトリ
+source = ["mb_scanner/src/mb_scanner"]
 omit = [
     "*/tests/*",
     "*/__pycache__/*",
@@ -145,7 +123,6 @@ omit = [
 ]
 
 [tool.coverage.report]
-# カバレッジレポートの設定
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
@@ -167,40 +144,14 @@ exclude = [
     "mb-analyzer",            # TypeScript 側の node_modules 等を対象外に
     "mb-analyzer-legacy",     # 旧 TypeScript 側
     "**/node_modules",
+    "tmp",                    # 作業 dir (研究の試行錯誤スクリプト、過去 0001-0021 含む)
 ]
 stubPath = "stubs"
 reportMissingTypeStubs = false
 
 # テストディレクトリ専用の設定
-# テストコードではMock、fixture、parametrizeなど型推論が難しいケースが多いため、
-# 以下のチェックを緩和している:
-# - reportPrivateUsage: テストではprivateアクセスが必要な場合がある
-# - reportUnknown*: Mock、fixture等で型が不明になりやすい
-# - reportArgumentType: parametrizeや辞書アンパック時の型不一致を許容
+# research/ は試行錯誤しやすさを優先して basic モードに緩める (mb_scanner 本体は strict 維持)
 executionEnvironments = [
-    { root = "tests", reportPrivateUsage = "none", reportUnknownMemberType = "none", reportUnknownArgumentType = "none", reportUnknownVariableType = "none", reportMissingParameterType = "none", reportUnknownParameterType = "none", reportArgumentType = "none", reportUnknownLambdaType = "none" }
+    { root = "tests", reportPrivateUsage = "none", reportUnknownMemberType = "none", reportUnknownArgumentType = "none", reportUnknownVariableType = "none", reportMissingParameterType = "none", reportUnknownParameterType = "none", reportArgumentType = "none", reportUnknownLambdaType = "none" },
+    { root = "research", reportUnknownVariableType = "none", reportUnknownMemberType = "none", reportUnknownArgumentType = "none", reportUnknownParameterType = "none", reportUnknownLambdaType = "none", reportMissingTypeArgument = "none" },
 ]
-
-[tool.importlinter]
-root_packages = ["mb_scanner"]
-include_external_packages = true
-
-[[tool.importlinter.contracts]]
-name = "Clean Architecture layer dependencies"
-type = "layers"
-layers = [
-    "mb_scanner.infrastructure",
-    "mb_scanner.adapters",
-    "mb_scanner.use_cases",
-    "mb_scanner.domain",
-]
-# adapters は infrastructure を参照する（CLI=composition root, repositories=ORM実装）
-ignore_imports = [
-    "mb_scanner.adapters.** -> mb_scanner.infrastructure.**",
-]
-
-[[tool.importlinter.contracts]]
-name = "Domain must not depend on infrastructure frameworks"
-type = "forbidden"
-source_modules = ["mb_scanner.domain"]
-forbidden_modules = ["sqlalchemy", "typer", "github", "matplotlib"]

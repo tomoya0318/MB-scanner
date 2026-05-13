@@ -1,5 +1,5 @@
-export { checkEquivalence } from "./checker";
-export { deriveOverallVerdict } from "./verdict";
+export { checkEquivalence } from "./selakovic";
+export { deriveOverallVerdict, deriveVerdictReason, VERDICT_REASON, type VerdictReason } from "./common/comparison/verdict";
 export type {
   EquivalenceCheckResult,
   EquivalenceInput,
@@ -7,4 +7,4 @@ export type {
   OracleObservation,
   OracleVerdict,
   Verdict,
-} from "../shared/types";
+} from "../contracts/equivalence-contracts";

@@ -15,7 +15,7 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "types": ["node"]
+    "types": ["node", "vitest/importMeta"]
   },
   "include": ["src/**/*.ts", "tests/**/*.ts", "build.mjs", "vitest.config.ts", "eslint.config.js"]
 }

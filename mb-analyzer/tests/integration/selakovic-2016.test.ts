@@ -8,8 +8,10 @@
  * 注意: 従来研究は意味論的等価性を検証していないため、実際には差分入力で diverge する
  * ケース (例: EJS #136b の out-of-range, Angular #4359 の負数) を含む。
  */
+import { tmpdir } from "node:os";
+
 import { describe, expect, it } from "vitest";
-import { checkEquivalence } from "../../src/equivalence-checker/checker";
+import { checkEquivalence } from "../../src/equivalence-checker/selakovic/checker";
 
 describe("Selakovic 2016 integration", () => {
   describe("Underscore #1222 — for-in+hasOwnProperty → Object.keys+for-loop", () => {
@@ -117,6 +119,109 @@ describe("Selakovic 2016 integration", () => {
         fast: `x & 1`,
       });
       expect(result.verdict).toBe("not_equal");
+    });
+  });
+
+  /**
+   * Phase 0〜2b の 97 件再走 (`tmp/0006_phase2b-equivalence-checker/verify-97-*.md` /
+   * `tmp/0007_equivalence-verdict-conservative-reclassification/final-results.md`) で実際に偽 verdict を
+   * 踏んだ / 修正で解消したケースを最小再現で pin する。real vm/jsdom を使うので integration 層に置く。
+   */
+  describe("tmp 由来の偽 verdict 再発防止", () => {
+    it("C-1: 両側が同じ ReferenceError で落ちると inconclusive(both-sides-threw) — 偽 equal にしない", async () => {
+      const result = await checkEquivalence({ setup: "", slow: `undefinedVar.foo()`, fast: `undefinedVar.foo()` });
+      expect(result.verdict).toBe("inconclusive");
+      expect(result.verdict_reason).toBe("both-sides-threw");
+    });
+
+    it("C-2: 片方だけ ReferenceError (f1-body 抽出 artefact) は not_equal", async () => {
+      const result = await checkEquivalence({ setup: "", slow: `1`, fast: `el.x` });
+      expect(result.verdict).toBe("not_equal");
+    });
+
+    it("C-3: モジュール解決失敗のメッセージに <lib>_before/after が混じっても両側同じく落ちたと判定する", async () => {
+      const result = await checkEquivalence({
+        environment: "jsdom",
+        module_base_dir: tmpdir(),
+        setup: "",
+        slow: `require('./fixture_before/does-not-exist.js')`,
+        fast: `require('./fixture_after/does-not-exist.js')`,
+      });
+      expect(result.verdict).toBe("inconclusive");
+      expect(result.verdict_reason).toBe("both-sides-threw");
+    });
+
+    it("C-4: f1 body の top-level temp 変数が global に漏れても external-observation の profile で吸収して equal (jsdom)", async () => {
+      const input = {
+        environment: "jsdom" as const,
+        setup: `const obj = { a: 1, b: 2, c: 3 };`,
+        slow: `var values = []; for (var key in obj) values.push(obj[key]); values`,
+        fast: `var keys = Object.keys(obj); var values = new Array(keys.length); for (var i = 0; i < keys.length; i++) values[i] = obj[keys[i]]; values`,
+      };
+      expect((await checkEquivalence(input)).verdict).toBe("equal");
+      // vm 環境では external-observation に profile が渡らないので、漏れた temp 変数の差がそのまま not_equal になる (現仕様)
+      expect((await checkEquivalence({ setup: input.setup, slow: input.slow, fast: input.fast })).verdict).toBe(
+        "not_equal",
+      );
+    });
+
+    it("C-7: 初期 mount HTML のまま DOM を触らない body は positive evidence が無く inconclusive(no-positive-evidence)", async () => {
+      const result = await checkEquivalence({
+        environment: "jsdom",
+        mount_html: `<div id="demo1"></div>`,
+        setup: "",
+        slow: `console.log("noop");`,
+        fast: `console.log("noop");`,
+      });
+      expect(result.verdict).toBe("inconclusive");
+      expect(result.verdict_reason).toBe("no-positive-evidence");
+    });
+
+    it("C-8: mount_html の #demo* 要素に両側が DOM 書き込みすると dom_mutation=equal で全体 equal", async () => {
+      const result = await checkEquivalence({
+        environment: "jsdom",
+        mount_html: `<div id="demo1"></div>`,
+        setup: "",
+        slow: `document.getElementById("demo1").innerHTML = "x";`,
+        fast: `document.getElementById("demo1").textContent = "x";`,
+      });
+      expect(result.verdict).toBe("equal");
+      expect(result.observations.find((o) => o.oracle === "dom_mutation")?.verdict).toBe("equal");
+    });
+
+    it("C-9: cross-realm Error (vm context で生成) のメッセージが exception oracle に正しく載る", async () => {
+      const result = await checkEquivalence({ setup: "", slow: `throw new TypeError("boom");`, fast: `42` });
+      expect(result.verdict).toBe("not_equal");
+      expect(result.observations.find((o) => o.oracle === "exception")?.slow_value).toBe("TypeError: boom");
+    });
+
+    it("C-10: setup の const/let が body から見えて argument_mutation の pre/post 観測対象になる", async () => {
+      const result = await checkEquivalence({ setup: `const obj = { a: 1 };`, slow: `obj.a = 2;`, fast: `obj.a = 2;` });
+      expect(result.verdict).toBe("equal");
+      // 観測されている (= obj が tracked) ことが要点。tracked でなければ N/A になる。
+      expect(result.observations.find((o) => o.oracle === "argument_mutation")?.verdict).toBe("equal");
+    });
+
+    it("C-11: 片側が無限ループで timeout すると exception として捕捉され not_equal", async () => {
+      const result = await checkEquivalence({ setup: "", slow: `while (true) {}`, fast: `1`, timeout_ms: 200 });
+      expect(result.verdict).toBe("not_equal");
+    });
+
+    it("C-12: JSX を含む body は VM eval の SyntaxError として捕捉され not_equal", async () => {
+      const result = await checkEquivalence({ setup: "", slow: `<div/>`, fast: `1` });
+      expect(result.verdict).toBe("not_equal");
+      expect(result.observations.find((o) => o.oracle === "exception")?.slow_value).toContain("SyntaxError");
+    });
+
+    it("C-13: workload が中間結果を捨てても C6 (interaction_trace) が slow/fast の差を検出する (angular-10351 の本質; checker のバグではない)", async () => {
+      const result = await checkEquivalence({
+        environment: "jsdom",
+        setup: `var host = __recorder.wrap({ run: function (impl) { return impl(40); } }, "host");`,
+        slow: `(function () { host.run(function (n) { return n + 2; }); })()`,
+        fast: `(function () { host.run(function () { return undefined; }); })()`,
+      });
+      expect(result.verdict).toBe("not_equal");
+      expect(result.observations.find((o) => o.oracle === "interaction_trace")?.verdict).toBe("not_equal");
     });
   });
 });

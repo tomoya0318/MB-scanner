@@ -3,7 +3,7 @@
  */
 import { describe, it } from "vitest";
 import * as fc from "fast-check";
-import { checkException } from "../../../src/equivalence-checker/oracles/exception";
+import { checkException } from "../../../src/equivalence-checker/common/comparison/oracles/exception";
 import { exceptionArbitrary } from "../../fixtures/arbitraries";
 import { capture } from "../../fixtures/capture";
 

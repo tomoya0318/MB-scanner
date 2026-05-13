@@ -1,16 +1,6 @@
 # アーキテクチャ・設計ガイド
 
-## ai-guide 3 軸の住み分け
-
-`ai-guide/` は用途別に 3 軸で構成されています。書きたい内容の語尾で振り分け、重複を避けてください:
-
-| 文書 | 性質 | 文体 | 想定読者 |
-|---|---|---|---|
-| **`architecture/`** (本文書) | **Contract** — 〜すべき / 〜禁止 / 〜と一致 | 表・条件文 | `check-architecture` skill, レビュー時の自分 |
-| [`quality-check/`](../quality-check/index.md) | **Process** — 〜を確認する / 〜で検証する | 手順書 | `check-tests` skill, QA |
-| [`code-map.md`](../code-map.md) | **Reference** — 〜する仕組み / 〜のため〜 | 物語・図・データフロー | 論文執筆、onboarding |
-
-**drift 防止**: 意味論的な詳細（オラクル責務・観測軸・verdict 合成など）は `code-map.md` に集約し、本文書からはリンクのみを置く。**矛盾時は architecture/ を正とする**（契約が優先）。
+ドキュメント配置の規約 (4 軸の住み分け、コメント層分離、in-tree README) は [`doc-strategy/index.md`](../doc-strategy/index.md) に集約。本文書は **Contract — TS / Python 双方の依存方向ルール、契約、共通コーディング規約** を扱う。
 
 ---
 
@@ -36,7 +26,7 @@ MB-Scanner は、GitHub 上の多数の JavaScript リポジトリに対して C
 両コードベースとも Clean Architecture を採用し、依存方向が外側 → 内側に向かう構造を取ります。
 
 - **Python 側**: `domain → use_cases → adapters → infrastructure` の 4 層を `import-linter` で機械強制
-- **TypeScript 側**: `shared → equivalence-checker → pruning → ... → cli` のゾーン構造を ESLint `import/no-restricted-paths` で機械強制
+- **TypeScript 側**: `{contracts, ast} (末端層) → preprocessing → equivalence-checker → pruning → … → cli (composition root)` のゾーン構造を ESLint `import/no-restricted-paths` で機械強制 (各機能の `common/` は `selakovic/` を import 禁止 = dataset 非依存層)
 
 詳細な契約は言語別ドキュメント参照。
 
@@ -77,6 +67,27 @@ MB-Scanner は、GitHub 上の多数の JavaScript リポジトリに対して C
 
 - Python → Node へ送る際は `model_dump_json(exclude_defaults=False, exclude_none=False)` を明示
 - 将来のリファクタで timeout_ms などがシリアライズから落ちる事故を防ぐ
+
+---
+
+## 共通コーディング規約 (両側)
+
+機械強制できないが両コードベースで揃えたい規約をここに集約します。判定基準は **両言語に同じ意図で適用したいスタイルで、機械強制できないもの**。言語固有の具体化は [`mb-scanner.md`](mb-scanner.md) / [`mb-analyzer.md`](mb-analyzer.md) の「コーディング規約」節へ。
+
+### ファイル内の宣言順序: bottom-up
+
+データ宣言ファイル / モジュールは bottom-up で並べます:
+
+1. 公開型 (`export type` / `class` / Pydantic Model)
+2. private helper (補助定数 / 内部 function)
+3. builder / factory function
+4. ★ exported const = ファイルの contract
+
+理由: ファイル末尾の「結論」を読む時点で依存部品が出揃っている状態にすることで、読み手が前方参照のために戻る必要がなくなる。Python は def hoisting が無いため物理的にこの順序が必須となるケースが多い。TypeScript は `function` 宣言の hoisting で `export const X = build()` を上に置けるが、本規約では bottom-up に揃える。
+
+代表例:
+- TS: `mb-analyzer/src/pruning/rules/whitelist.ts`, `blacklist.ts`
+- Python: `mb_scanner/domain/entities/*.py`
 
 ---
 

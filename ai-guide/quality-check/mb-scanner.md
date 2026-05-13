@@ -34,6 +34,8 @@ tests/
 
 - **関数名**: `test_` プレフィックス + 条件 + 期待結果（例: `test_save_project_new`、`test_execute_raises_on_duplicate`）
 
+> Python 側では in-source testing (実装ファイル内にテストを同居させる方式) は採用しない。テストは常に `tests/` ツリーに配置する。TypeScript 側 (`mb-analyzer/`) のみ ADR-0007 で内部ヘルパ専用の in-source 規約を持つが、Python 側に持ち込むかは別 ADR で判断する。
+
 ---
 
 ## フィクスチャ (conftest.py)
