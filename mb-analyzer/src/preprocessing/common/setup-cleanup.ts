@@ -61,6 +61,11 @@ export function containsNode(root: Node, target: Node): boolean {
 /**
  * statement 列を結合して 1 つの JS コード文字列に generate する。Program AST を
  * 構築して `generate()` に通す。空配列なら空文字を返す。
+ *
+ * コメントは出力しない: `File.comments=[]` だけだと Node に attach された
+ * leadingComments / trailingComments は @babel/generator が依然出力するため、
+ * generate 側に明示的に `{ comments: false }` を渡す。preprocess の slow/fast/setup
+ * は元 lib のコメントを引きずる必要が無い (むしろ candidate サイズが膨らむ)。
  */
 export function statementsToCode(statements: readonly Statement[]): string {
   if (statements.length === 0) return "";
@@ -75,7 +80,7 @@ export function statementsToCode(statements: readonly Statement[]): string {
     comments: [],
     errors: [],
   } as unknown as File;
-  return generate(fakeFile);
+  return generate(fakeFile, { comments: false });
 }
 
 /**

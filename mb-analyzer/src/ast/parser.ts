@@ -32,17 +32,26 @@ function resolveGenerator(): typeof generateModule {
   return (generateModule as unknown as { default?: typeof generateModule }).default ?? generateModule;
 }
 
-export function generate(file: File): string {
-  return resolveGenerator()(file).code;
+/**
+ * `comments: false` を渡すと Node に attach された leading/trailing コメントを除去して出力。
+ * デフォルト (`undefined`) は @babel/generator のデフォルト挙動 = コメントを残す
+ * (既存呼び出しの後方互換)。
+ */
+export interface GenerateOptions {
+  comments?: boolean;
+}
+
+export function generate(file: File, opts: GenerateOptions = {}): string {
+  return resolveGenerator()(file, { comments: opts.comments }).code;
 }
 
 /**
  * 任意の Node を generate する。`generate(file)` は File 専用なので、Node 単独を
  * generate したいケース (snippetOfNode の fallback 等) で使う。失敗時は空文字。
  */
-export function tryGenerateNode(node: Node): string {
+export function tryGenerateNode(node: Node, opts: GenerateOptions = {}): string {
   try {
-    return resolveGenerator()(node).code;
+    return resolveGenerator()(node, { comments: opts.comments }).code;
   } catch {
     return "";
   }

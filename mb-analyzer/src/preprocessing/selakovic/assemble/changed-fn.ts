@@ -136,6 +136,38 @@ if (import.meta.vitest) {
       expect(buildChangedFnCandidate(unit, after, f1d)).toBeNull();
     });
 
+    it("変更関数本体の leading / trailing コメントは slow/fast から落ちる (元 lib のコメントが candidate を膨らませない)", () => {
+      const libBeforeWithComments = `
+var lib = {};
+lib.norm = function (x) {
+  // before: ascii-rule comment
+  /* leading block */
+  return x % 2 === 0; // trailing line
+};
+`;
+      const libAfterWithComments = `
+var lib = {};
+lib.norm = function (x) {
+  // after: bit-shift comment
+  return (x & 1) === 0;
+};
+`;
+      const f1d = extractF1(inline)!;
+      const unit = fnUnitFor(libBeforeWithComments, libAfterWithComments);
+      const c = buildChangedFnCandidate(unit, libAfterWithComments, f1d)!;
+      expect(c).not.toBeNull();
+      // slow = __HOLE__(before body) + workload。before 側の // / /* */ コメントは消える。
+      expect(c.slow).not.toContain("before: ascii-rule");
+      expect(c.slow).not.toContain("trailing line");
+      expect(c.slow).not.toContain("/*");
+      // fast = __HOLE__(after body) + workload。after 側のコメントも消える。
+      expect(c.fast).not.toContain("after: bit-shift");
+      // setup の「after 本体インライン部分」は holeLibSource が元ソースを span-slice しているため
+      // コメントが残るのが現状仕様 (lib 全文の他部分と同じく lib bootstrap の挙動を変えないため)。
+      // candidate サイズへの影響は slow/fast を経由した pruning 対象範囲のみなので問題なし。
+      expect(c.setup).toContain("after: bit-shift");
+    });
+
     it("angular controller wrapper の f1 → null (v1 では embedded のみ)", () => {
       const angularInline = `
         var app = angular.module("benchApp", []);
