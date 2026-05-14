@@ -264,11 +264,15 @@ vm.runInContext(finalProgram, context, { timeout: ... });
 
 旧契約 (= `workload` フィールドなし) は **後方互換**: 現状の 2 回 runInContext モデルで動かす (lib-embedded `single` / `lib` / `body` / fallback 用)。
 
-### D-α: spike (1 日)
+### D-α: spike (1 日) — **完了 (2026-05-13、約 1.5 時間で success 判定)**
+
+**結果**: `notes/spike-v3.log` 参照。14 tests 全件緑、success 判定。クリーンケース 4 件すべて中身のある equal、Ember 3174/4329_1 も bootstrap-invocation 込みで equal 相当 (v1 の argument_mutation oracle error が body 観測注入で解消する可能性が示唆された)。
+
+**設計の進化**: ADR-0023 の元案「workload 側で observe hook (`<accessName> = function () {...}`) を立てる」は **AMD/IIFE 内ローカル名** (`_s.startsWith` 等、bootstrap 後の global からは `_.str.startsWith` でしか到達できない) で ReferenceError or 別オブジェクト代入になる限界が判明。代わりに **body 内部に観測ラッパ (`var __r = (function () { ... }).call(this); __OBS.push(...); return __r;`) を注入する** 形に修正 = `mb-analyzer/src/preprocessing/common/placeholder.ts` の `wrapBodyObserved`。これで access name resolution 不要、AMD/IIFE 内ローカルにも強い汎用設計に。
 
 **目的**: placeholder substitution 方式が `__HOLE__` 方式と同等以上の動作を 12 issue で示すか実証。
 
-**ファイル**: `mb-analyzer/tests/preprocessing/spike-placeholder.test.ts` (新規、git untracked、実証完了後に削除)
+**ファイル**: `mb-analyzer/tests/preprocessing/spike-placeholder.test.ts` (新規、git untracked、実証完了後 = D-β 完了後に削除)、`mb-analyzer/src/preprocessing/common/placeholder.ts` (新規、D-β で本実装に流用予定)
 
 **対象 12 issue** (spike v2 と同じ):
 - クリーンケース: Underscore.string 347_1 / 347_2、jQuery 367、Underscore 1222
@@ -303,16 +307,41 @@ D-α が success なら以下を一気に書き直す:
 | `mb_scanner/domain/entities/equivalence.py` | paired-change |
 | `mb_scanner/domain/entities/pruning.py` | paired-change |
 | `mb-analyzer/src/preprocessing/common/function-hole.ts` | **大幅縮減**: `liftableNames` / `pickLiftedDeps` / `holeLibSource` / `buildHoleFunction` を削除 (or `placeholder.ts` 新規 + 旧削除)、`paramNames` / `functionBlockBody` / `countSubtreeNodes` は残す |
-| `mb-analyzer/src/preprocessing/common/placeholder.ts` (新規 or function-hole.ts 改題) | `replaceBodyWithPlaceholder` / `resolveAccessName` / `buildObserveHook` / `wrapObservedWorkload` |
+| `mb-analyzer/src/preprocessing/common/placeholder.ts` (D-α PR で新規追加済、D-β で `function-hole.ts` から 3 関数を統合 + 旧削除) | 現状の関数: `buildPlaceholderLib` / `wrapBodyObserved` / `wrapObservedWorkload` / `substituteBody` (= D-α spike で確定、`resolveAccessName` / `buildObserveHook` は AMD/IIFE 内ローカル名で破綻したため body 観測注入に変更 = 不要)。D-β で `paramNames` / `functionBlockBody` / `countSubtreeNodes` を統合 |
 | `mb-analyzer/src/preprocessing/selakovic/assemble/changed-fn.ts` | **書き直し**: 4 値 (`setup`/`workload`/`slow`/`fast`) を出力 |
-| `mb-analyzer/src/equivalence-checker/common/sandbox/executors/jsdom.ts` | placeholder model 経路追加 (`workload !== undefined` で 1 回 runInContext、旧形式は 2 回 runInContext 維持) |
+| `mb-analyzer/src/equivalence-checker/common/sandbox/executors/jsdom.ts` | **無改修** (= 2 引数 API のまま、setup state snapshot 機構を維持) |
 | `mb-analyzer/src/equivalence-checker/common/sandbox/executors/vm.ts` | 同 |
+| `mb-analyzer/src/preprocessing/selakovic/pipeline.ts` (or 呼び出し側) | 4 値契約を 2 引数に展開する経路を追加 (= `workload !== undefined` のとき `executor({ setup: substituteBody(originalSetup, slow/fast), body: workload })` を 2 回呼ぶ) |
 | `mb-analyzer/tests/preprocessing/selakovic.test.ts` | changed-fn 関連 assertion を 4 値に書き直し |
 | `tests/domain/entities/test_preprocessing.py` / `test_equivalence.py` / `test_pruning.py` | `workload` round-trip テスト追加 |
-| `ai-guide/adr/0024-preprocess-placeholder-substitution.md` | **新規起票** |
-| `ai-guide/adr/0022-preprocess-workload-reachability.md` | Status を `accepted, superseded by 0024` に更新 |
+| `ai-guide/adr/0023-preprocess-placeholder-substitution.md` | D-α PR で accepted 済。D-β プロセス中に CANDIDATE_KIND 再設計 (案 X/Y/Z) で実装の細部が動いたら §結果 / §影響 を反映 |
+| `ai-guide/adr/0022-preprocess-workload-reachability.md` | D-α PR で `superseded by 0023` 済 |
+| `ai-guide/adr/0024-preprocess-candidate-kind-restructure.md` (= CANDIDATE_KIND 再設計の議論結果が案 Y / Z なら新規起票、案 X なら不要) | 起票判断は D-β 着手前議論で確定 |
 
 **テスト**: 全 vitest + uv run pytest + mise run check-arch を緑に。
+
+#### D-β 着手前に議論必須 (= 着手前に決め、結果を ADR に書く)
+
+- **`CANDIDATE_KIND` の再設計**: 現状 `single` / `lib` / `body` / `changed-fn` の 4 値がフラットに並んでいるが、preprocess の目的論は **「`changed-fn` を抜き出すこと」が主、`single`/`lib`/`body` は `changed-fn` が出せない経路の fallback embedded** という階層構造になっている (v2 でこの階層が顕在化)。
+  - 現状の `CANDIDATE_KIND` docstring (`preprocessing-contracts.ts:62-66`) は `__HOLE__` 言及があり、いずれにせよ書き直し必要
+  - **議論する案** (D-β 着手前に決める):
+    - **案 X (現状維持、後方互換)**: 列挙値そのまま、`workload?` フィールドだけ追加。docstring を v2 (placeholder substitution、body 観測注入) に書き直す。paired-change 最小。
+    - **案 Y (主役 / fallback で再分類)**: `CHANGED_FN` (主役) + `EMBEDDED_FALLBACK` (= 旧 `single`/`lib`/`body` 統合) の 2 値に縮約、ASPECT × SPLIT_KIND 等で副情報を別フィールドに分離。目的論が型から読める。contracts 変更大、ADR-0014 / 0022 との関係整理が必要。
+    - **案 Z (階層化)**: `CHANGED_FN` + `EMBEDDED` の 2 値 + 別フィールドに `split_kind: single | lib | body`。直交軸を分離。組み合わせ爆発なし。
+  - 案 Y / Z を取るなら **新規 ADR-0024 を起票** (= ADR-0023 とは別軸の決定)、ADR-0014 (case-split for both-changed) と ADR-0022 (`__HOLE__` 方式) の参照関係も整理。案 X なら ADR は ADR-0023 だけで足りる。
+
+- **executor 周辺の意図表現リファクタ**: D-α spike Step F で「executor は無改修で placeholder model に乗る」を確認 (= 既存の 2 引数 API + setup state snapshot 機構が argument_mutation oracle 用に必要)。ただし PR #13 のレビュー過程で **API 名 / 内部実装 / error 区分** に意図を表現する余地があることが明らかになった。3 提案とも executor + `equivalence-checker/selakovic/checker.ts` に閉じた変更で、`CANDIDATE_KIND` 再設計や contracts paired-change から独立に進められる。
+  - **提案 1: 外向き API リネーム**: `executeSandboxed({ setup, body })` → `executeSandboxed({ setup, workload })`。`body` の generic 名は placeholder model の `workload` 概念および `wrapBodyObserved` の引数 `body` と被って誤解を招くため。影響範囲: executor 定義 2 ファイル + `selakovic/checker.ts` 2 か所 + 既存テスト 27 件 + spike-placeholder.test.ts。**Python paired-change 不要** (= TS internal API、`PreprocessingResult` には `body` フィールドなし)。
+  - **提案 2: 内部実装の意図表現**: `vm.runInContext` の 1 回目と 2 回目を別関数に分けて意図を関数名で表現:
+    - `prepareSandbox(sandbox, setupCode, timeoutMs): void` — sandbox を準備する副作用呼び出し、戻り値は期待しない
+    - `evaluateWorkload(sandbox, workloadCode, timeoutMs): WorkloadEvaluation` — workload を評価して戻り値 / 例外 / timeout を構造化して返す
+    - `executeSandboxed` 本体は `prepareSandbox → takeSnapshot → evaluateWorkload → diffSnapshot → buildCapture` の流れ
+    - 影響範囲: executor 内部のみ、外向き API・既存テスト挙動は不変
+  - **提案 3: error の phase 区別 (`SandboxSetupError`)**: 既存も setup と body の失敗を別経路で扱う (= setup 段階は throw、body 段階は `ExecutionCapture.exception` に capture) が、型 / 名前で区別されておらず `verdict_reason: executor-error` 一括で setup phase か想定外 crash かが判別しにくい。setup 段階の例外を `SandboxSetupError` で型分離し、`checker.ts` で `verdict_reason: setup-failure` (= 新規 `VERDICT_REASON` 値) に分類する。
+    - **⚠️ VM cross-realm Error 制約に注意**: `vm.runInContext` 内で生成された Error は別 realm の `Error.prototype` を継承するので outer の `instanceof Error` が false になる (Node.js vm 固有、`checker.ts:86-89` + `extractErrorMessage` 参照)。`SandboxSetupError` で型分離するなら **必ず outer realm で new する**: `prepareSandbox` の catch ブロック内 (= host コードなので outer realm) で `throw new SandboxSetupError(e)` する設計にする。vm 内で wrapped Error を生成すると `checker.ts` 側の `instanceof SandboxSetupError` が false になって型分離が機能しない。`cause` 側の元 Error は依然 cross-realm なので message 取得は既存の `extractErrorMessage` 経由
+    - 影響範囲: executor 内部 + `checker.ts` の catch 分岐 + `VERDICT_REASON` に `setup-failure` 値追加 (= **Python paired-change 1 行**、`mb_scanner/domain/entities/equivalence.py` の対応文字列)
+  - **設計判断: contracts paired-change を最小化する案**: 提案 3 で `setup-failure` を新規導入せず、既存 `EXECUTOR_ERROR` を維持して `error_message` にプレフィックス (`"[setup phase] ..."`) を付ける案も可。ログから判別はできるが verdict_reason 集計では区別できなくなる。判断はトレードオフ
+  - D-β で contracts + changed-fn.ts を触るタイミングで一緒にやる方が rebase コストが低い。3 提案は連動するが独立にも実装可能 (= 提案 1 だけ / 1+2 だけ / 全部、の段階的採用も可)
 
 ### D-γ: DROP 可視化 + 全件再走 + 79 issue 達成確認 (1 日)
 
@@ -361,7 +390,7 @@ D-α が success なら以下を一気に書き直す:
 - `mb-analyzer/src/preprocessing/common/function-hole.ts` (lambda-lift / `__HOLE__` 系 = 200 行のうち 150 行以上削除)
 - `mb-analyzer/src/preprocessing/selakovic/assemble/changed-fn.ts` (書き直し)
 - `mb-analyzer/tests/preprocessing/selakovic.test.ts` の changed-fn 関連 assertion (書き直し)
-- ADR-0022 (Status を `superseded by 0024` に)
+- ADR-0022 (Status を `superseded by 0023` に = D-α PR で実施済)
 
 ---
 
@@ -374,7 +403,7 @@ D-α が success なら以下を一気に書き直す:
 | PR-3 で extracted.jsonl 等の大ファイルが git に入る | `.gitignore` で `research/.../inputs/` を除外、commit 前に確認 |
 | feature/hydra-pruning 削除の前に他作業が乗っていた | 削除前に `git log feature/hydra-pruning ^main` で確認、もし 1 commit (`abb05b8`) 以外があれば一旦保留 |
 | D-α で AMD 内ローカル問題が拭えない (= partial) | hybrid 案 (= `_s.foo = ...` 形のみ placeholder、AMD 内ローカルは `__HOLE__` を残す) を検討、または「AMD 内ローカルは設計対象外」と認めて 79 達成数字を訂正 |
-| D-α が fail (撤退) | v1 のまま研究を閉じる、`comparison.md` に「placeholder 検討したが Selakovic 級では不採用」と記録、ADR-0024 は status `rejected` |
+| D-α が fail (撤退) | v1 のまま研究を閉じる、`comparison.md` に「placeholder 検討したが Selakovic 級では不採用」と記録、ADR-0023 は status `rejected` (= D-α PR で success 判定済なのでこの分岐は発火しなかった) |
 
 ---
 

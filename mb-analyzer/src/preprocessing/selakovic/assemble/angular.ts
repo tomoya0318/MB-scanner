@@ -17,7 +17,7 @@ export interface AngularRunnableOptions {
   readonly ctrlName: string;
   readonly ctrlParams: readonly string[];
   /** controller body 内で f1 定義より前の非ハーネス statement のコード。 */
-  readonly preF1Code: string;
+  readonly preWorkloadCode: string;
   /** f1 の body のコード (外側の `{}` を含まない statement 列)。 */
   readonly f1BodyCode: string;
 }
@@ -36,7 +36,7 @@ export function buildAngularRunnable(opts: AngularRunnableOptions): string {
     "// ---- bootstrap (reconstructed module/controller, measurement harness stripped) ----",
     `var __selakovic_app = angular.module(${moduleNameJson}, []);`,
     `__selakovic_app.controller(${ctrlNameJson}, function (${params}) {`,
-    opts.preF1Code,
+    opts.preWorkloadCode,
     ";",
     "var f1 = function () {",
     opts.f1BodyCode,
@@ -65,19 +65,19 @@ if (import.meta.vitest) {
     moduleName: "myApp",
     ctrlName: "Ctrl",
     ctrlParams: ["$scope", "$http"] as const,
-    preF1Code: "var __PRE_F1_MARKER__ = 2;",
+    preWorkloadCode: "var __PRE_WORKLOAD_MARKER__ = 2;",
     f1BodyCode: "var __F1_BODY_MARKER__ = 3;",
   };
 
   describe("buildAngularRunnable (in-source)", () => {
-    it("自己完結 IIFE に lib / module・controller 再構成 / preF1 / f1 body を埋め込む", () => {
+    it("自己完結 IIFE に lib / module・controller 再構成 / preWorkload / f1 body を埋め込む", () => {
       const code = buildAngularRunnable({ ...base, ctrlParams: [...base.ctrlParams] });
       expect(code.startsWith("(function () {")).toBe(true);
       expect(code.trimEnd().endsWith("})()")).toBe(true);
       expect(code).toContain(base.libSource); // 測定対象 lib
       expect(code).toContain('angular.module("myApp", []);'); // module 再構成
       expect(code).toContain('.controller("Ctrl", function ($scope, $http) {'); // ctrl 再構成 (params join)
-      expect(code).toContain(base.preF1Code); // f1 より前の非ハーネス statement
+      expect(code).toContain(base.preWorkloadCode); // f1 より前の非ハーネス statement
       expect(code).toContain(`var f1 = function () {\n${base.f1BodyCode}\n};`); // f1 body は反復回数そのまま (ADR-0013)
       expect(code).toContain("__selakovic_inj.get('$controller')(\"Ctrl\", { $scope: __selakovic_root });"); // 実体化
       // f1 定義後・呼び出し前に注入 service (ctrlParams) を記録 Proxy で包む (C6)

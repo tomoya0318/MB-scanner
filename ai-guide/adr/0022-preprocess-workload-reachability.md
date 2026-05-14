@@ -1,6 +1,6 @@
 # ADR-0022: preprocess を workload-reachability driven な changed-fn 候補に再設計 (v1 = `__HOLE__` 方式)
 
-- **Status**: accepted (v2 = ADR-0023 で placeholder substitution に置き換え予定)
+- **Status**: accepted, superseded by 0023 (2026-05-13 D-α spike success で 0023 が accepted に昇格)
 - **Date**: 2026-05-13
 - **Related**: ADR-0011 (preprocessing Tier 2 構造 — 本 ADR の changed-fn 候補が新 candidate_kind として乗る), ADR-0014 (case-split for both-changed — co-evolution の 1 candidate 化判定はそのまま継承), ADR-0016 (fork lockfile = `<script src>` CDN dep の vendoring), ADR-0018 (等価検証 verdict 保守化 — `inconclusive` を本 ADR の vacuous equal 対策として利用), `mb-analyzer/src/preprocessing/common/{change-units,reachability,function-hole}.ts`, `mb-analyzer/src/preprocessing/selakovic/assemble/changed-fn.ts`, `mb-analyzer/src/preprocessing/selakovic/pipeline.ts:appendChangedFnCandidates`, `research/src/research/preprocess_workload_reachability/notes/v1-{plan,notes,prompt-history}.md`
 

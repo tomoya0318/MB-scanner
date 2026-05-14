@@ -136,6 +136,14 @@ mb-analyzer-legacy/           # [DEPRECATED] 旧 pnpm workspace monorepo
 
 詳細は [`index.md`](index.md) の「Python ↔ Node の JSON 契約」参照。
 
+## Preprocess の主要フィールドの意味
+
+`mb-analyzer/src/contracts/preprocessing-contracts.ts` の `PreprocessingResult` の主要フィールド:
+
+- **`setup`**: equivalence-checker の sandbox executor (`vm.ts` / `jsdom.ts`) の `setup` 引数に渡される文字列。sandbox で `body` を実行する前に context を整える generic な「準備コード」。中身の構成は `candidate_kind` ごとに異なる。詳細 (changed-fn の 2 要素 `libs` + `preWorkload` 構成など) は [`../code-map.md`](../code-map.md) §Selakovic 前処理器 §setup 構築規約 を参照。
+- **`slow` / `fast`**: 等価検証で比較する 2 セットの本体コード (before / after)。`candidate_kind` ごとに「embedded 全文」「変更関数本体のみ」など中身が変わる。
+- **`workload`** (changed-fn のみ、optional): placeholder model で `slow` / `fast` と分離された workload IIFE。executor の `body` 引数に渡される。詳細 [ADR-0023](../adr/0023-preprocess-placeholder-substitution.md) §設計の核。
+
 ---
 
 ## 新機能の追加ガイド
@@ -192,6 +200,19 @@ mb-analyzer-legacy/           # [DEPRECATED] 旧 pnpm workspace monorepo
 - **section divider** (例: `// --- 内部ヘルパ ---`) は避ける。export 有無と関数名で区切りは伝わる
 - **export for testing の理由説明を JSDoc に書かない**: 参照元 (`tests/`) を見れば自明で冗長
 - **ADR 参照**: `// 判断: ai-guide/adr/NNNN-xxx.md` 1 行に絞る
+
+### Magic 識別子の命名規則
+
+`mb-analyzer/` 内で「ツール側 (preprocess / pruning / sandbox) が触る identifier」は **役割で記法を分ける** (= 識別子の見た目から「置換マーカー / 実行時変数」が即判別できる):
+
+- **置換マーカー** (preprocess / pruning): **`$` 系**
+  - preprocess: `$BODY$` (single, textual replace、AST に載らない、`setup.replace('$BODY$', body)` で sandbox 投入前に消える — `preprocessing/common/placeholder.ts`)
+  - pruning: `$P0`, `$P1`, ... (AST identifier、連番で複数共存 — `pruning/common/rules/replacement.ts` の `PLACEHOLDER_NAME_PATTERN = /^\$P\d+$/` が単一ソース、ADR-0009)
+- **sandbox 実行時の internal 変数**: **`__NAME__`** (両端 underscore)
+  - 例: `__OBS__` (戻り値観測配列) / `__OBS_R__` (1 回の呼び出し戻り値の一時保持)
+  - `__OBS__` は setup の最先頭で `let __OBS__ = [];` として宣言・初期化 (`placeholder.ts` の `declareObservationGlobal` helper)。sandbox top-level の lexical binding なので `wrapBodyObserved` / `wrapObservedWorkload` から closure 経由で参照される (= `globalThis.__OBS__` 経由のアクセスは top-level `let` の特性上**不可**、これは scope を跨いだ誤参照を仕様レベルで防ぐ意図)
+
+新しく magic 識別子を導入するときは、置換マーカーなら `$` 系、sandbox に残る実行時変数なら `__` 系で命名する。詳細・案 B/C を不採用にした理由は [ADR-0023](../adr/0023-preprocess-placeholder-substitution.md) §命名規則 を参照。
 
 ### 静的解析ツール
 

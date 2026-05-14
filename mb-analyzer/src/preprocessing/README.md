@@ -94,7 +94,7 @@ src/preprocessing/
     │   └── lib-pair.ts          ← loadLibPair (<lib>_before/after を dir scan で読んで Record<path, source> に)
     ├── decompose/           ← 段1 役割分解: 片側 (before|after) の source → 構造化ピース (pure)
     │   ├── inline-script.ts     ← extractInlineScripts (v_*.html から inline <script> を抽出)
-    │   ├── f1.ts                ← extractF1 (inline <script> から f1 を特定 → body / preF1 / 計測ハーネス に分解。top-level / Angular controller-wrapper の 2 種)
+    │   ├── f1.ts                ← extractF1 (inline <script> から f1 を特定 → body / preWorkload / 計測ハーネス に分解。top-level / Angular controller-wrapper の 2 種)
     │   └── test-case.ts         ← extractTest (test_case_*.js から init/setupTest/test を特定 → test() body を切り出し)
     ├── route/               ← 段2 作用点ルーティング: before×after のピースを比較して分類 (pure)
     │   ├── aspect.ts            ← routeAspect (lib 変化×body 変化 → A/B/A+B/fallback) + statementsChanged (body の AST diff が空でないか)

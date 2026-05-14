@@ -63,7 +63,7 @@ describe("preprocess — client / top-level f1", () => {
     const results = preprocess({
       kind: "client",
       before_inline: inlineBefore, // f1 body = keys[i] % 2 === 0 — lib (helpers.even) を一度も呼んでいない
-      after_inline: inlineBefore, // inline (f1 body + preF1) は不変、lib だけが変わる
+      after_inline: inlineBefore, // inline (f1 body + preWorkload) は不変、lib だけが変わる
       lib_before_files: {
         "lib.js": "var helpers = {};\nhelpers.even = function (index) { return index % 2 == 0; };\nhelpers.label = 'v1';",
       },
@@ -114,7 +114,7 @@ describe("preprocess — client / top-level f1", () => {
     const cf = results[1]!;
     expect(cf.candidate_kind).toBe(CANDIDATE_KIND.CHANGED_FN);
     expect(cf.enclosure_type).toBe("FunctionExpression"); // lib.norm = function(){...}
-    // setup = lib 全文 (norm だけ穴あき + ガード + after 本体インライン fallback) + preF1 (空)
+    // setup = lib 全文 (norm だけ穴あき + ガード + after 本体インライン fallback) + preWorkload (空)
     expect(cf.setup).toContain("var slice = [].slice;");
     expect(cf.setup).toContain("var lib = {};");
     expect(cf.setup).toContain("globalThis.__HOLE__.call(this, slice, x)"); // 内部依存 slice が lambda-lift で引数化
@@ -157,7 +157,7 @@ describe("preprocess — client / top-level f1", () => {
       expect(r.setup).toContain("/* handlebars 1.1.0 stub */");
       expect(r.setup!.indexOf("jquery 2.1.3 stub")).toBeLessThan(r.setup!.indexOf("handlebars 1.1.0 stub"));
     }
-    // embedded の setup は dep だけ (lib は slow/fast 側) / changed-fn の setup は dep + 穴あき lib + preF1
+    // embedded の setup は dep だけ (lib は slow/fast 側) / changed-fn の setup は dep + 穴あき lib + preWorkload
     const embedded = results.find((r) => r.candidate_kind === CANDIDATE_KIND.SINGLE)!;
     expect(embedded.setup).toMatch(/^\/\* jquery 2\.1\.3 stub \*\//);
     const cf = results.find((r) => r.candidate_kind === CANDIDATE_KIND.CHANGED_FN)!;
@@ -234,7 +234,7 @@ describe("preprocess — client / top-level f1", () => {
     expect(r.fast).toMatch(/i\s*<\s*50000/);
     expect(r.slow).toContain("arr.push");
     expect(r.fast).toContain("arr.unshift");
-    expect(r.setup).toContain("var arr = []"); // preF1 statement は setup へ
+    expect(r.setup).toContain("var arr = []"); // preWorkload statement は setup へ
     expect(r.setup).not.toContain("execute");
   });
 

@@ -45,7 +45,7 @@ export interface F1Decomposition {
   /** f1 の body (BlockStatement) — slow/fast の母集団。 */
   readonly f1Body: BlockStatement;
   /** Program 直下 (top-level) or controller body 内で f1 定義より前の非ハーネス statement (= setup の一部)。 */
-  readonly preF1Statements: readonly Statement[];
+  readonly preWorkloadStatements: readonly Statement[];
   /** 計測ハーネス statement (= 破棄対象)。 */
   readonly harnessStatements: readonly Statement[];
   /** angular-controller-wrapper のとき: bootstrap 再構成に必要な情報。 */
@@ -109,15 +109,15 @@ function findF1(file: File): F1Hit | null {
 function decomposeTopLevel(file: File, f1Fn: F1Fn, f1Body: BlockStatement): F1Decomposition {
   const body = file.program.body;
   const f1Idx = body.findIndex((stmt) => isF1DefStatement(stmt, f1Fn));
-  const preF1: Statement[] = [];
+  const preWorkload: Statement[] = [];
   const harness: Statement[] = [];
   body.forEach((stmt, idx) => {
     if (idx === f1Idx) return;
     if (isHarnessStatement(stmt)) harness.push(stmt);
-    else if (f1Idx === -1 || idx < f1Idx) preF1.push(stmt);
+    else if (f1Idx === -1 || idx < f1Idx) preWorkload.push(stmt);
     // f1 定義より後ろの非ハーネス statement は捨てる (= レポート系の残骸)
   });
-  return { wrapperKind: "top-level", f1Body, preF1Statements: preF1, harnessStatements: harness };
+  return { wrapperKind: "top-level", f1Body, preWorkloadStatements: preWorkload, harnessStatements: harness };
 }
 
 function decomposeAngularWrapper(
@@ -147,18 +147,18 @@ function decomposeAngularWrapper(
 
   const ctrlBody = ctrlFn.body.body;
   const f1Idx = ctrlBody.findIndex((stmt) => isF1DefStatement(stmt, hit.fn));
-  const preF1: Statement[] = [];
+  const preWorkload: Statement[] = [];
   const harness: Statement[] = [];
   ctrlBody.forEach((stmt, idx) => {
     if (idx === f1Idx) return;
     if (isHarnessStatement(stmt)) harness.push(stmt);
-    else if (f1Idx === -1 || idx < f1Idx) preF1.push(stmt);
+    else if (f1Idx === -1 || idx < f1Idx) preWorkload.push(stmt);
   });
 
   return {
     wrapperKind: "angular-controller-wrapper",
     f1Body,
-    preF1Statements: preF1,
+    preWorkloadStatements: preWorkload,
     harnessStatements: harness,
     angular: { moduleName, ctrlMethod, ctrlName, ctrlParams },
   };
@@ -267,8 +267,8 @@ if (import.meta.vitest) {
       expect(d).not.toBeNull();
       expect(d?.wrapperKind).toBe("top-level");
       expect(d?.angular).toBeUndefined();
-      // preF1 = var obj / for / var keys の 3 つ (harness は除外)
-      expect(d?.preF1Statements).toHaveLength(3);
+      // preWorkload = var obj / for / var keys の 3 つ (harness は除外)
+      expect(d?.preWorkloadStatements).toHaveLength(3);
       // harness = execute / mean / console.log / $.ajax の 4 つ
       expect(d?.harnessStatements).toHaveLength(4);
     });
@@ -287,7 +287,7 @@ if (import.meta.vitest) {
       expect(d?.angular?.moduleName).toBe("myApp");
       expect(d?.angular?.ctrlName).toBe("Ctrl");
       expect(d?.angular?.ctrlParams).toEqual(["$scope", "$http"]);
-      expect(d?.preF1Statements).toHaveLength(1); // var keys
+      expect(d?.preWorkloadStatements).toHaveLength(1); // var keys
       expect(d?.harnessStatements).toHaveLength(1); // execute(f1, 10)
     });
 

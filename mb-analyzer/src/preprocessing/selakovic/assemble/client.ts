@@ -28,14 +28,14 @@ export function buildClientLibCandidate(
   libSourceAfter: string,
   kind: CandidateKind,
 ): PreprocessingResult {
-  const preF1 = statementsToCode([...f1Before.preF1Statements]);
+  const preWorkload = statementsToCode([...f1Before.preWorkloadStatements]);
   if (f1Before.wrapperKind === "angular-controller-wrapper" && f1Before.angular !== undefined) {
     const a = f1Before.angular;
     return {
       layout: LAYOUT_KIND.CLIENT,
       setup: "",
-      slow: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preF1Code: preF1, f1BodyCode: f1BodyRaw(f1Before) }),
-      fast: buildAngularRunnable({ libSource: libSourceAfter, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preF1Code: preF1, f1BodyCode: f1BodyRaw(f1Before) }),
+      slow: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1Before) }),
+      fast: buildAngularRunnable({ libSource: libSourceAfter, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1Before) }),
       enclosure_type: "angular-controller-wrapper",
       candidate_kind: kind,
       environment: ENV_JSDOM,
@@ -44,8 +44,8 @@ export function buildClientLibCandidate(
   return {
     layout: LAYOUT_KIND.CLIENT,
     setup: "",
-    slow: flatRunnable(libSourceBefore, preF1, f1BodyWrapped(f1Before), clientRecorderHook(libSourceBefore)),
-    fast: flatRunnable(libSourceAfter, preF1, f1BodyWrapped(f1Before), clientRecorderHook(libSourceAfter)),
+    slow: flatRunnable(libSourceBefore, preWorkload, f1BodyWrapped(f1Before), clientRecorderHook(libSourceBefore)),
+    fast: flatRunnable(libSourceAfter, preWorkload, f1BodyWrapped(f1Before), clientRecorderHook(libSourceAfter)),
     enclosure_type: "lib-file",
     candidate_kind: kind,
     environment: ENV_JSDOM,
@@ -60,14 +60,14 @@ export function buildClientBodyCandidate(
   libNeededInSetup: boolean,
   kind: CandidateKind,
 ): PreprocessingResult {
-  const preF1 = statementsToCode([...f1Before.preF1Statements]);
+  const preWorkload = statementsToCode([...f1Before.preWorkloadStatements]);
   if (f1Before.wrapperKind === "angular-controller-wrapper" && f1Before.angular !== undefined) {
     const a = f1Before.angular;
     return {
       layout: LAYOUT_KIND.CLIENT,
       setup: "",
-      slow: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preF1Code: preF1, f1BodyCode: f1BodyRaw(f1Before) }),
-      fast: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preF1Code: preF1, f1BodyCode: f1BodyRaw(f1After) }),
+      slow: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1Before) }),
+      fast: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1After) }),
       enclosure_type: "angular-controller-wrapper",
       candidate_kind: kind,
       environment: ENV_JSDOM,
@@ -75,7 +75,7 @@ export function buildClientBodyCandidate(
   }
   const setupParts: string[] = [];
   if (libNeededInSetup && libSourceBefore.length > 0) setupParts.push(libSourceBefore);
-  if (preF1.length > 0) setupParts.push(preF1);
+  if (preWorkload.length > 0) setupParts.push(preWorkload);
   return {
     layout: LAYOUT_KIND.CLIENT,
     setup: setupParts.join("\n;\n"),
@@ -96,14 +96,14 @@ export function buildClientCombinedCandidate(
   libSourceBefore: string,
   libSourceAfter: string,
 ): PreprocessingResult {
-  const preF1 = statementsToCode([...f1Before.preF1Statements]);
+  const preWorkload = statementsToCode([...f1Before.preWorkloadStatements]);
   if (f1Before.wrapperKind === "angular-controller-wrapper" && f1Before.angular !== undefined) {
     const a = f1Before.angular;
     return {
       layout: LAYOUT_KIND.CLIENT,
       setup: "",
-      slow: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preF1Code: preF1, f1BodyCode: f1BodyRaw(f1Before) }),
-      fast: buildAngularRunnable({ libSource: libSourceAfter, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preF1Code: preF1, f1BodyCode: f1BodyRaw(f1After) }),
+      slow: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1Before) }),
+      fast: buildAngularRunnable({ libSource: libSourceAfter, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1After) }),
       enclosure_type: "angular-controller-wrapper",
       candidate_kind: CANDIDATE_KIND.SINGLE,
       environment: ENV_JSDOM,
@@ -112,8 +112,8 @@ export function buildClientCombinedCandidate(
   return {
     layout: LAYOUT_KIND.CLIENT,
     setup: "",
-    slow: flatRunnable(libSourceBefore, preF1, f1BodyWrapped(f1Before), clientRecorderHook(libSourceBefore)),
-    fast: flatRunnable(libSourceAfter, preF1, f1BodyWrapped(f1After), clientRecorderHook(libSourceAfter)),
+    slow: flatRunnable(libSourceBefore, preWorkload, f1BodyWrapped(f1Before), clientRecorderHook(libSourceBefore)),
+    fast: flatRunnable(libSourceAfter, preWorkload, f1BodyWrapped(f1After), clientRecorderHook(libSourceAfter)),
     enclosure_type: "lib-file+f1-body",
     candidate_kind: CANDIDATE_KIND.SINGLE,
     environment: ENV_JSDOM,
@@ -121,19 +121,19 @@ export function buildClientCombinedCandidate(
 }
 
 /**
- * `[libSource]\n;\n[recorderHook]\n[preF1]\n;\n[bodyCode]` を 1 つの実行可能スクリプトに連結する (top-level f1 用)。
+ * `[libSource]\n;\n[recorderHook]\n[preWorkload]\n;\n[bodyCode]` を 1 つの実行可能スクリプトに連結する (top-level f1 用)。
  * `recorderHook` は `lib-file` 系で `globalThis.__recorder` があれば lib グローバルを記録 Proxy で包む文
  * (`recorder-hooks.ts`)。lib を持たない場合は空文字を渡す。
  */
-function flatRunnable(libSource: string, preF1Code: string, bodyCode: string, recorderHook = ""): string {
+function flatRunnable(libSource: string, preWorkloadCode: string, bodyCode: string, recorderHook = ""): string {
   const parts: string[] = [];
   if (libSource.length > 0) {
     parts.push(libSource);
     parts.push(";");
   }
   if (recorderHook.length > 0) parts.push(recorderHook);
-  if (preF1Code.length > 0) {
-    parts.push(preF1Code);
+  if (preWorkloadCode.length > 0) {
+    parts.push(preWorkloadCode);
     parts.push(";");
   }
   parts.push(bodyCode);
