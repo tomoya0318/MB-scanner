@@ -183,6 +183,19 @@ jq -s 'map(select(.verdict == "error"))' "$1" > "${1%.jsonl}-errors.json"
 | 7 | dynamic-coverage escalation の実装 (Phase 2 v2) | 大 (5-7 日) |
 | 8 | angular の `buildAngularRunnable` を placeholder 対応に | placeholder v2 D-γ 派生で実施予定 |
 | 9 | server 系の changed-fn 対応 | 大 (5-7 日) |
+| 10 | 過去 ADR の `(setup, body)` 表記 sweep | 0.1 日 |
+
+### #10 詳細
+
+D-β 着手前の executor 周辺リファクタ PR (= `tmp/0001_executor-intent-refactor/`) で `executeSandboxed({ setup, body })` → `{ setup, workload }` に API リネームしたが、過去 ADR の説明テキストに残った `(setup, body, timeout)` 表記 2 箇所は本 PR スコープ外として残置。
+
+対象:
+- `ai-guide/adr/0012-equivalence-checker-execution-environment.md:67` — Playwright 側の `(setup, body)` 表記
+- `ai-guide/adr/0015-equivalence-checker-layering-and-dom-oracle.md:75` — `(setup, body, timeout)` 表記
+
+性質: 過去 ADR の改訂で、API リネームと別軸 (= drift 修復目的)。本 PR と分離した方が PR の意図 (= executor 周辺の意図表現リファクタ) がぶれず、レビューもしやすい。
+
+実装: 各 ADR の該当 1 行を `(setup, workload, timeout)` に書き換える + ADR 末尾に「2026-MM-DD: API 名 `body` → `workload` リネーム (ADR-0023) に追従して文中表記を更新」を Status コメントで残す。
 
 ---
 
