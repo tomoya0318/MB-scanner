@@ -330,6 +330,19 @@ D-α が success なら以下を一気に書き直す:
     - **案 Z (階層化)**: `CHANGED_FN` + `EMBEDDED` の 2 値 + 別フィールドに `split_kind: single | lib | body`。直交軸を分離。組み合わせ爆発なし。
   - 案 Y / Z を取るなら **新規 ADR-0024 を起票** (= ADR-0023 とは別軸の決定)、ADR-0014 (case-split for both-changed) と ADR-0022 (`__HOLE__` 方式) の参照関係も整理。案 X なら ADR は ADR-0023 だけで足りる。
 
+- **executor 周辺の意図表現リファクタ**: D-α spike Step F で「executor は無改修で placeholder model に乗る」を確認 (= 既存の 2 引数 API + setup state snapshot 機構が argument_mutation oracle 用に必要)。ただし PR #13 のレビュー過程で **API 名 / 内部実装 / error 区分** に意図を表現する余地があることが明らかになった。3 提案とも executor + `equivalence-checker/selakovic/checker.ts` に閉じた変更で、`CANDIDATE_KIND` 再設計や contracts paired-change から独立に進められる。
+  - **提案 1: 外向き API リネーム**: `executeSandboxed({ setup, body })` → `executeSandboxed({ setup, workload })`。`body` の generic 名は placeholder model の `workload` 概念および `wrapBodyObserved` の引数 `body` と被って誤解を招くため。影響範囲: executor 定義 2 ファイル + `selakovic/checker.ts` 2 か所 + 既存テスト 27 件 + spike-placeholder.test.ts。**Python paired-change 不要** (= TS internal API、`PreprocessingResult` には `body` フィールドなし)。
+  - **提案 2: 内部実装の意図表現**: `vm.runInContext` の 1 回目と 2 回目を別関数に分けて意図を関数名で表現:
+    - `prepareSandbox(sandbox, setupCode, timeoutMs): void` — sandbox を準備する副作用呼び出し、戻り値は期待しない
+    - `evaluateWorkload(sandbox, workloadCode, timeoutMs): WorkloadEvaluation` — workload を評価して戻り値 / 例外 / timeout を構造化して返す
+    - `executeSandboxed` 本体は `prepareSandbox → takeSnapshot → evaluateWorkload → diffSnapshot → buildCapture` の流れ
+    - 影響範囲: executor 内部のみ、外向き API・既存テスト挙動は不変
+  - **提案 3: error の phase 区別 (`SandboxSetupError`)**: 既存も setup と body の失敗を別経路で扱う (= setup 段階は throw、body 段階は `ExecutionCapture.exception` に capture) が、型 / 名前で区別されておらず `verdict_reason: executor-error` 一括で setup phase か想定外 crash かが判別しにくい。setup 段階の例外を `SandboxSetupError` で型分離し、`checker.ts` で `verdict_reason: setup-failure` (= 新規 `VERDICT_REASON` 値) に分類する。
+    - **⚠️ VM cross-realm Error 制約に注意**: `vm.runInContext` 内で生成された Error は別 realm の `Error.prototype` を継承するので outer の `instanceof Error` が false になる (Node.js vm 固有、`checker.ts:86-89` + `extractErrorMessage` 参照)。`SandboxSetupError` で型分離するなら **必ず outer realm で new する**: `prepareSandbox` の catch ブロック内 (= host コードなので outer realm) で `throw new SandboxSetupError(e)` する設計にする。vm 内で wrapped Error を生成すると `checker.ts` 側の `instanceof SandboxSetupError` が false になって型分離が機能しない。`cause` 側の元 Error は依然 cross-realm なので message 取得は既存の `extractErrorMessage` 経由
+    - 影響範囲: executor 内部 + `checker.ts` の catch 分岐 + `VERDICT_REASON` に `setup-failure` 値追加 (= **Python paired-change 1 行**、`mb_scanner/domain/entities/equivalence.py` の対応文字列)
+  - **設計判断: contracts paired-change を最小化する案**: 提案 3 で `setup-failure` を新規導入せず、既存 `EXECUTOR_ERROR` を維持して `error_message` にプレフィックス (`"[setup phase] ..."`) を付ける案も可。ログから判別はできるが verdict_reason 集計では区別できなくなる。判断はトレードオフ
+  - D-β で contracts + changed-fn.ts を触るタイミングで一緒にやる方が rebase コストが低い。3 提案は連動するが独立にも実装可能 (= 提案 1 だけ / 1+2 だけ / 全部、の段階的採用も可)
+
 ### D-γ: DROP 可視化 + 全件再走 + 79 issue 達成確認 (1 日)
 
 **DROP 可視化** (元の案 D):
