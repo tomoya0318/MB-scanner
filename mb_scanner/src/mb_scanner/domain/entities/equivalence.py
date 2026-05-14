@@ -120,8 +120,9 @@ class EquivalenceCheckResult(BaseModel):
     verdict: Verdict
     observations: list[OracleObservation] = Field(default_factory=list[OracleObservation])
     # verdict == INCONCLUSIVE のときの理由分類 ("no-observable-channel" / "both-sides-threw" /
-    # "no-positive-evidence")、または executor crash / setup throw 由来の ERROR 時の "executor-error"。
-    # equal / not_equal では None。ADR-0018 参照。
+    # "no-positive-evidence")、または ERROR 時の throw phase 分類 ("setup-failure" = setup 段階の
+    # SandboxSetupError 由来 / "executor-error" = workload 段階以降の crash・serialize 失敗・pipeline 失敗)。
+    # equal / not_equal では None。ADR-0018 / ADR-0023 §D-β 参照。
     verdict_reason: str | None = None
     error_message: str | None = None
     effective_timeout_ms: int | None = None

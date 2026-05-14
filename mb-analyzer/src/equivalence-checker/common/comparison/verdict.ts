@@ -26,8 +26,10 @@ const POSITIVE_EVIDENCE_ORACLES: readonly Oracle[] = [
 
 /**
  * `inconclusive` verdict の理由文字列 (ADR-0018)。`equal` / `not_equal` では `null`。
- * `executor-error` は executor crash / setup throw 由来の `error` verdict 用で、checker 本体が
- * 直接セットする (`deriveVerdictReason` は返さない)。
+ * `setup-failure` / `executor-error` は `error` verdict 用で、checker 本体が直接セットする
+ * (`deriveVerdictReason` は返さない)。両者は executor の throw phase で区別する:
+ * setup 段階での throw は `SandboxSetupError` で型分離して `setup-failure`、それ以外
+ * (workload 段階 / serialize 失敗 / 想定外 crash) は `executor-error`。
  */
 export const VERDICT_REASON = {
   /** 全 oracle が not_applicable (観測チャネルゼロ)。 */
@@ -36,7 +38,9 @@ export const VERDICT_REASON = {
   BOTH_SIDES_THREW: "both-sides-threw",
   /** 例外も無く positive-evidence oracle もすべて not_applicable (dom_mutation / external_observation だけが equal 等)。 */
   NO_POSITIVE_EVIDENCE: "no-positive-evidence",
-  /** executor crash / setup throw / serialize 失敗。 */
+  /** setup 段階 (= `vm.runInContext(setup, ...)`) で throw された場合の error verdict。`SandboxSetupError` 由来。 */
+  SETUP_FAILURE: "setup-failure",
+  /** workload 段階以降の executor crash / serialize 失敗 / 想定外 throw。 */
   EXECUTOR_ERROR: "executor-error",
 } as const;
 export type VerdictReason = (typeof VERDICT_REASON)[keyof typeof VERDICT_REASON];

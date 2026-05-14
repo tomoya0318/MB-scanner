@@ -66,7 +66,8 @@ describe("runCheckEquivalence", () => {
   });
 
   it("checker が error を返すと exit 3", async () => {
-    // setup 自体が throw → checker トップ catch で verdict=error
+    // setup 自体が throw → executor 側で SandboxSetupError として型分離されて checker トップ catch に届く
+    // → verdict=error / verdict_reason=setup-failure (ADR-0023 §D-β)
     restoreStdin = feedStdin(
       JSON.stringify({ setup: `throw new Error("setup boom")`, slow: "1", fast: "1" }),
     );
@@ -76,7 +77,7 @@ describe("runCheckEquivalence", () => {
     expect(code).toBe(3);
     const result = parseStdout(stdoutSpy.writes);
     expect(result.verdict).toBe("error");
-    expect(result.verdict_reason).toBe("executor-error");
+    expect(result.verdict_reason).toBe("setup-failure");
   });
 
   it("両側が同じ例外で落ちるだけ (positive evidence 無し) は inconclusive / exit 2", async () => {

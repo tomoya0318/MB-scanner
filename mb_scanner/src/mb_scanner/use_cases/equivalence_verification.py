@@ -33,11 +33,14 @@ _POSITIVE_EVIDENCE_ORACLES = frozenset(
 #                          または唯一の positive evidence が dom_mutation だけ (bootstrap 由来とみなす)
 # - no-positive-evidence : 例外も無く positive-evidence oracle (return_value/argument_mutation/interaction_trace/
 #                          dom_mutation) がすべて not_applicable (external_observation だけが equal 等)
-# executor-error は executor crash / setup throw / Gateway・CLI 層の pipeline 失敗由来の error verdict 用で、
-# checker / Gateway / batch CLI が直接セットする (derive_verdict_reason は返さない)。
+# setup-failure / executor-error は error verdict 用で、checker / Gateway / batch CLI が直接セットする
+# (derive_verdict_reason は返さない)。両者は executor の throw phase で区別する:
+# - setup-failure : setup 段階 (vm.runInContext(setup, ...)) の throw。SandboxSetupError 由来 (ADR-0023 §D-β)。
+# - executor-error: workload 段階以降の executor crash / serialize 失敗 / Gateway・CLI 層の pipeline 失敗。
 VERDICT_REASON_NO_OBSERVABLE_CHANNEL = "no-observable-channel"
 VERDICT_REASON_BOTH_SIDES_THREW = "both-sides-threw"
 VERDICT_REASON_NO_POSITIVE_EVIDENCE = "no-positive-evidence"
+VERDICT_REASON_SETUP_FAILURE = "setup-failure"
 VERDICT_REASON_EXECUTOR_ERROR = "executor-error"
 
 
@@ -63,8 +66,7 @@ def derive_overall_verdict(observations: list[OracleObservation]) -> Verdict:
     if all(v == OracleVerdict.NOT_APPLICABLE for v in verdicts):
         return Verdict.INCONCLUSIVE
     positive_evidence = [
-        o for o in observations
-        if o.oracle in _POSITIVE_EVIDENCE_ORACLES and o.verdict != OracleVerdict.NOT_APPLICABLE
+        o for o in observations if o.oracle in _POSITIVE_EVIDENCE_ORACLES and o.verdict != OracleVerdict.NOT_APPLICABLE
     ]
     if not positive_evidence:
         return Verdict.INCONCLUSIVE
