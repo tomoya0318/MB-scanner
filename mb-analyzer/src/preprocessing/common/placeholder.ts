@@ -1,25 +1,46 @@
 /**
  * placeholder substitution model の組み立て部品 (= dataset 非依存の汎用ヘルパ)。
  *
- * 責務: 4 つの汎用 string transform を提供する。dataset 構造 (Selakovic 物理レイアウト) や
+ * 責務: 5 つの汎用 string transform を提供する。dataset 構造 (Selakovic 物理レイアウト) や
  * 対象言語ドメイン要件 (jsperf / Angular / Ember 等) には立ち入らない。それらは
  * 呼び出し側 (`preprocessing/selakovic/*`) で吸収する。
  *
- *  1. `replaceFunctionBody`: 関数本体の AST span を `{ $BODY$ }` プレースホルダで置換した文字列を返す
- *  2. `wrapBodyObserved`: 関数本体の statement 列を、戻り値を観測配列 `__OBS__` に push して返す形にラップ
- *  3. `wrapObservedWorkload`: workload (= 観測対象の呼び出し列) を、完了値として観測配列を返す形にラップ
- *  4. `substituteBody`: 1. の出力の `$BODY$` を 2. の出力で差し替える
+ *  1. `declareObservationGlobal`: setup の最先頭に `let __OBS__ = [];` を prepend する
+ *     (= 観測配列を宣言・初期化し、後続の `wrapBodyObserved` / `wrapObservedWorkload` から
+ *     closure 経由で参照可能にする)
+ *  2. `replaceFunctionBody`: 関数本体の AST span を `{ $BODY$ }` プレースホルダで置換した文字列を返す
+ *  3. `wrapBodyObserved`: 関数本体の statement 列を、戻り値を観測配列 `__OBS__` に push して返す形にラップ
+ *  4. `wrapObservedWorkload`: workload (= 観測対象の呼び出し列) を、完了値として観測配列を返す形にラップ
+ *  5. `substituteBody`: 2. の出力の `$BODY$` を 3. の出力で差し替える
  *
  * 呼び出し側はこれらを組み合わせて 4 値契約 `{setup, workload, slow, fast}` を構築する。
- * 中身の構成 (= `setup = libs + preWorkload` 等) は ADR-0023 §4 値契約の具体形 + code-map §setup 構築規約。
+ * 中身の構成 (= `setup = (let __OBS__ 宣言) + libs + preWorkload` 等) は ADR-0023 §4 値契約の具体形
+ * + code-map §setup 構築規約。
  *
  * 命名規則 (architecture/mb-analyzer.md §Magic 識別子の命名規則):
  *  - 置換マーカー `$BODY$`: テキスト置換専用、`substituteBody` で sandbox 投入前に消える
  *  - sandbox 実行時の internal 変数 `__OBS__` (戻り値観測配列) / `__OBS_R__` (1 回の呼び出し戻り値の一時保持):
- *    両端 underscore で sandbox 専用と明示
+ *    両端 underscore で sandbox 専用と明示。`__OBS__` は setup 最先頭の `let __OBS__ = [];` で
+ *    宣言され、`wrapBodyObserved` / `wrapObservedWorkload` は単独参照 (= `globalThis.` プレフィックス不要)
  */
 
 const PLACEHOLDER = "$BODY$";
+
+/**
+ * `setup` の最先頭に `let __OBS__ = [];` を prepend して返す。
+ *
+ * 観測配列を sandbox top-level の lexical binding として宣言・初期化する役割。これによって:
+ *  - `wrapBodyObserved` / `wrapObservedWorkload` が出力する `__OBS__` 参照は closure 経由で全関数から見える
+ *  - 初期値 `[]` があるので、bootstrap-invocation で `__OBS__.push(...)` が走っても TypeError にならない
+ *  - top-level `let` の特性で `globalThis.__OBS__` 経由のアクセスは不可 (= scope を跨いだ誤参照を仕様レベルで防止)
+ *
+ * 注意: 本関数の出力は **setup の最先頭** に置かれる前提。dep prelude (jquery 等を `<script src>` から
+ * 取り込んだソース) を別途 setup に連結する場合も、`let __OBS__` 宣言が dep prelude より前に来るよう
+ * 呼び出し側で順序保証する。
+ */
+export function declareObservationGlobal(setup: string): string {
+  return `let __OBS__ = [];\n;\n${setup}`;
+}
 
 /**
  * `source` のうち、指定された関数本体の AST span (`fnBodySpan.start..fnBodySpan.end`、`{` から `}` までを含む)
@@ -42,19 +63,20 @@ export function replaceFunctionBody(
  *  - 関数式 `(function () { <bodyCode> }).call(this)` で囲い、戻り値を `__OBS_R__` に一時保持。これで:
  *    - `bodyCode` 内の `return` 文がラッパの外側に脱出しない (= ラッパは元の関数の `return __OBS_R__;` で終わる)
  *    - 関数式は新しいスコープを作るので、`bodyCode` 内の `var` 宣言や `this` の扱いは元のセマンティクスを維持
- *    - 結果として元 `bodyCode` 内に同名 `var __OBS_R__` が出現してもスコープが分離して衝突しない
+ *    - 結果として元 `bodyCode` 内に同名 `__OBS_R__` の宣言が出現してもスコープが分離して衝突しない
  *  - 戻り値は `JSON.stringify` して `__OBS__` 配列の末尾に push。serialize 不能 (循環参照 / 環境固有オブジェクト等)
  *    は catch して `"<unserializable>"` を push (= 観測が落ちないことを保証)
- *  - `__OBS__` の初期化は `|| []` で defensive (= `wrapObservedWorkload` の reset より先に push されうるケース、
- *    例えば呼び出し側で setup 内に同じ関数が複数回 invoke されるケース、をカバー。push された値は
- *    `wrapObservedWorkload` の reset で破棄される = 純粋な workload 観測だけが残る、`wrapObservedWorkload` 参照)
+ *  - `__OBS__` は `declareObservationGlobal` で setup 最先頭に宣言済の前提なので、本ラッパは直接 push する
+ *    (= bootstrap-invocation で `wrapObservedWorkload` の reset より先に push されても、宣言時の初期値 `[]`
+ *    があるので TypeError にならない。push された値は workload IIFE の reset で破棄される = 純粋な workload
+ *    観測だけが残る、`wrapObservedWorkload` 参照)
  */
 export function wrapBodyObserved(bodyCode: string): string {
   return [
-    `var __OBS_R__ = (function () {`,
+    `let __OBS_R__ = (function () {`,
     bodyCode,
     `}).call(this);`,
-    `(globalThis.__OBS__ = globalThis.__OBS__ || []).push((function () { try { return JSON.stringify(__OBS_R__); } catch (e) { return "<unserializable>"; } })());`,
+    `__OBS__.push((function () { try { return JSON.stringify(__OBS_R__); } catch (e) { return "<unserializable>"; } })());`,
     `return __OBS_R__;`,
   ].join("\n");
 }
@@ -64,18 +86,19 @@ export function wrapBodyObserved(bodyCode: string): string {
  * 関数式呼び出しでラップする。
  *
  *  - 関数式 `(function () { ...; return ...; })()` の完了値が sandbox 実行の戻り値として観測できる
- *  - 先頭で `globalThis.__OBS__ = []` を **無条件** で実行: setup 段階や workload 開始までに push された
- *    値はここで破棄される。これにより `workloadBodyCode` 内の呼び出しによる観測値だけが完了値に乗る
- *  - 末尾で `JSON.stringify(globalThis.__OBS__)` を返す
+ *  - 先頭で `__OBS__ = []` を **無条件** で実行: setup 段階や workload 開始までに push された値はここで破棄される。
+ *    これにより `workloadBodyCode` 内の呼び出しによる観測値だけが完了値に乗る
+ *    (`__OBS__` は `declareObservationGlobal` で既に宣言済の前提なので、ここは既存変数への代入 = `var` 不要)
+ *  - 末尾で `JSON.stringify(__OBS__)` を返す
  *
  * 「setup 段階の観測値も活かす」設計に切り替えたい場合は、ここの reset を条件化する (ADR-0023 §設計のポイント参照)。
  */
 export function wrapObservedWorkload(workloadBodyCode: string): string {
   return [
     "(function () {",
-    "  globalThis.__OBS__ = [];",
+    "  __OBS__ = [];",
     workloadBodyCode,
-    "  return JSON.stringify(globalThis.__OBS__);",
+    "  return JSON.stringify(__OBS__);",
     "})()",
   ].join("\n");
 }
@@ -104,6 +127,21 @@ if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
   const { parse } = await import("../../ast/parser");
 
+  describe("declareObservationGlobal (in-source)", () => {
+    it("setup の最先頭に let __OBS__ = []; を prepend する", () => {
+      const out = declareObservationGlobal("var x = 1;");
+      expect(out).toMatch(/^let __OBS__ = \[\];/);
+      expect(out).toContain("var x = 1;");
+    });
+    it("空 setup でも宣言行は付く", () => {
+      expect(declareObservationGlobal("")).toMatch(/^let __OBS__ = \[\];/);
+    });
+    it("生成結果が valid な JS として parse できる", () => {
+      const out = declareObservationGlobal("var x = 1;\nfunction f() { return x; }");
+      expect(() => parse(out)).not.toThrow();
+    });
+  });
+
   describe("replaceFunctionBody (in-source)", () => {
     it("指定された関数本体の AST span を { $BODY$ } で置換する", () => {
       const src = "var g = function (x) { return x + 1; };";
@@ -120,14 +158,15 @@ if (import.meta.vitest) {
   describe("wrapBodyObserved / wrapObservedWorkload (in-source)", () => {
     it("wrapBodyObserved: 戻り値を __OBS__ に push、元の return を維持", () => {
       const wrapped = wrapBodyObserved("return x + 1;");
-      expect(wrapped).toContain("var __OBS_R__ = (function () {");
+      expect(wrapped).toContain("let __OBS_R__ = (function () {");
       expect(wrapped).toContain("return x + 1;");
       expect(wrapped).toContain("}).call(this);");
-      expect(wrapped).toContain("globalThis.__OBS__");
+      expect(wrapped).toContain("__OBS__.push");
+      expect(wrapped).not.toContain("globalThis."); // 単独参照、globalThis. プレフィックスは付かない
       expect(wrapped).toContain("return __OBS_R__;");
     });
-    it("wrapBodyObserved: 元 body 内に同名 var __OBS_R__ があってもスコープ分離で衝突しない", () => {
-      const wrapped = wrapBodyObserved("var __OBS_R__ = 99; return __OBS_R__;");
+    it("wrapBodyObserved: 元 body 内に同名 __OBS_R__ 宣言があってもスコープ分離で衝突しない", () => {
+      const wrapped = wrapBodyObserved("let __OBS_R__ = 99; return __OBS_R__;");
       expect(() => parse(`function f() { ${wrapped} }`)).not.toThrow();
     });
     it("wrapBodyObserved: 関数本体に差し込んで valid な構文を生む", () => {
@@ -137,10 +176,16 @@ if (import.meta.vitest) {
     it("wrapObservedWorkload: __OBS__ init → workload → 完了値で JSON.stringify を返す形", () => {
       const wrapped = wrapObservedWorkload("api.f(1); api.f(2);");
       expect(wrapped).toMatch(/^\(function \(\) \{/);
-      expect(wrapped).toContain("globalThis.__OBS__ = [];");
-      expect(wrapped).toContain("return JSON.stringify(globalThis.__OBS__);");
+      expect(wrapped).toContain("__OBS__ = [];");
+      expect(wrapped).toContain("return JSON.stringify(__OBS__);");
+      expect(wrapped).not.toContain("globalThis."); // 単独参照
       expect(wrapped).toMatch(/\}\)\(\)$/);
       expect(() => parse(wrapped)).not.toThrow();
+    });
+    it("wrapObservedWorkload: declareObservationGlobal と組み合わせて top-level program として parse できる", () => {
+      const setup = declareObservationGlobal("");
+      const workload = wrapObservedWorkload("");
+      expect(() => parse(`${setup}\n;\n${workload}`)).not.toThrow();
     });
   });
 

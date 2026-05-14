@@ -209,7 +209,8 @@ mb-analyzer-legacy/           # [DEPRECATED] 旧 pnpm workspace monorepo
   - preprocess: `$BODY$` (single, textual replace、AST に載らない、`setup.replace('$BODY$', body)` で sandbox 投入前に消える — `preprocessing/common/placeholder.ts`)
   - pruning: `$P0`, `$P1`, ... (AST identifier、連番で複数共存 — `pruning/common/rules/replacement.ts` の `PLACEHOLDER_NAME_PATTERN = /^\$P\d+$/` が単一ソース、ADR-0009)
 - **sandbox 実行時の internal 変数**: **`__NAME__`** (両端 underscore)
-  - 例: `__OBS__` (戻り値観測配列、`globalThis.__OBS__` として最終 program に残り `placeholder.ts` の `wrapBodyObserved` / `wrapObservedWorkload` が読み書き)
+  - 例: `__OBS__` (戻り値観測配列) / `__OBS_R__` (1 回の呼び出し戻り値の一時保持)
+  - `__OBS__` は setup の最先頭で `let __OBS__ = [];` として宣言・初期化 (`placeholder.ts` の `declareObservationGlobal` helper)。sandbox top-level の lexical binding なので `wrapBodyObserved` / `wrapObservedWorkload` から closure 経由で参照される (= `globalThis.__OBS__` 経由のアクセスは top-level `let` の特性上**不可**、これは scope を跨いだ誤参照を仕様レベルで防ぐ意図)
 
 新しく magic 識別子を導入するときは、置換マーカーなら `$` 系、sandbox に残る実行時変数なら `__` 系で命名する。詳細・案 B/C を不採用にした理由は [ADR-0023](../adr/0023-preprocess-placeholder-substitution.md) §命名規則 を参照。
 

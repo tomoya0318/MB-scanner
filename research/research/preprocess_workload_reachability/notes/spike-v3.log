@@ -3,14 +3,16 @@
 # (git untracked、D-β 完了後に削除予定)
 #
 # 設計の核 (ADR-0023 D-α spike を経た最終形):
-#   - setup = lib (after) の変更関数 body `{ ... }` を `{ $BODY$ }` に置換 + preF1 (+ dep 連結)
-#   - slow / fast body = wrapBodyObserved(originalBody) = IIFE で囲って戻り値を __OBS__ に push → return
+#   - setup = lib (after) の変更関数 body `{ ... }` を `{ $BODY$ }` に置換 + preWorkload (+ dep 連結)
+#   - slow / fast body = wrapBodyObserved(originalBody) = 関数式で囲って戻り値を __OBS__ に push → return
 #   - workload = (function () { __OBS__ = []; <f1 body>; return JSON.stringify(__OBS__); })()
-#   - executor: setup.replace('$BODY$', body) + ';\n' + workload で 1 回 vm.runInContext / jsdom.runInContext
+#   - sandbox 投入直前に setup の最先頭に `let __OBS__ = [];` 宣言を prepend (declareObservationGlobal)
+#   - executor: 既存の 2 引数 API (setup, body) に展開、executor 自体は無改修
 #
 # 命名 (ADR-0023 §命名規則、architecture/mb-analyzer.md §Magic 識別子の命名規則):
 #   - 置換マーカー: $BODY$ ($ 系)、pruning の $P0..$Pn と同系統
-#   - sandbox 実行時変数: __OBS__ (__ 系で両端 underscore)
+#   - sandbox 実行時変数: __OBS__ / __OBS_R__ (__ 系で両端 underscore)
+#   - top-level `let __OBS__` で宣言、`globalThis.` プレフィックス不要 (= 誤参照防止)
 #
 # v1 (__HOLE__ 方式) との差:
 #   - lambda-lift 不要 (closure で見える)

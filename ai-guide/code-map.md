@@ -535,6 +535,20 @@ setup = [libs, preWorkload].filter((s) => s.length > 0).join("\n;\n")
 
 `$BODY$` プレースホルダは sandbox 実行直前に `before` / `after` の変更関数本体 (観測ラップ済) で差し替えられる (`preprocessing/common/placeholder.ts` の `substituteBody`)。
 
+加えて executor に渡す直前で **`let __OBS__ = [];` 宣言** が setup の最先頭に prepend される (`declareObservationGlobal` helper)。これにより `wrapBodyObserved` / `wrapObservedWorkload` が出力する `__OBS__` 参照が sandbox top-level の lexical binding として全関数から closure 経由で見える。executor.setup 引数の最終形は:
+
+```
+let __OBS__ = [];
+;
+[dep prelude (= <script src> 由来の jquery / handlebars 等、ある場合のみ)]
+;
+[libs ($BODY$ 差し込み済)]
+;
+[preWorkload]
+```
+
+`__OBS__` 宣言を dep prelude より前に置く (= TDZ 安全)。連結順序は呼び出し側 (`pipeline.ts` または D-β の `changed-fn.ts`) で保証する。
+
 例: Underscore 1222 (`_.values` の changed-fn) では:
 
 ```js
