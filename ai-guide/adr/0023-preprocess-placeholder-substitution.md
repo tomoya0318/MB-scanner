@@ -92,7 +92,7 @@ const fastResult = await executeSandboxed({ setup: fastSetup, body: workload, ti
   - preprocess: `$BODY$` (single, textual replace、AST に載らない、`setup.replace('$BODY$', body)` で sandbox 投入前に消える)
   - pruning: `$P0`, `$P1`, ... (AST identifier、連番で複数共存、ADR-0009 §単一ソース、`pruning/common/rules/replacement.ts` の `PLACEHOLDER_NAME_PATTERN = /^\$P\d+$/`)
 - **sandbox 実行時の internal 変数**: **`__NAME__`** (両端 underscore で囲む)
-  - 本 ADR では `__OBS__` (戻り値観測配列、`globalThis.__OBS____` として最終 program に残る)
+  - 本 ADR では `__OBS__` (戻り値観測配列、`globalThis.__OBS__` として最終 program に残る)
 
 検討した代替: 案 B (全部 `$X$` で揃える = `$OBS$`) / 案 C (全部 `__X__` で揃える = `__BODY__` / `__P0__`)。いずれも見た目は揃うが、「置換マーカー (= ツールが処理して消える) と実行時変数 (= sandbox に残る) を見た目で混同」する誤読リスク + pruning の `$P0..$Pn` 単一ソース (ADR-0009) を動かす広範変更コストで不採用。
 

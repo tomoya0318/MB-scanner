@@ -307,15 +307,16 @@ D-α が success なら以下を一気に書き直す:
 | `mb_scanner/domain/entities/equivalence.py` | paired-change |
 | `mb_scanner/domain/entities/pruning.py` | paired-change |
 | `mb-analyzer/src/preprocessing/common/function-hole.ts` | **大幅縮減**: `liftableNames` / `pickLiftedDeps` / `holeLibSource` / `buildHoleFunction` を削除 (or `placeholder.ts` 新規 + 旧削除)、`paramNames` / `functionBlockBody` / `countSubtreeNodes` は残す |
-| `mb-analyzer/src/preprocessing/common/placeholder.ts` (新規 or function-hole.ts 改題) | `replaceBodyWithPlaceholder` / `resolveAccessName` / `buildObserveHook` / `wrapObservedWorkload` |
+| `mb-analyzer/src/preprocessing/common/placeholder.ts` (D-α PR で新規追加済、D-β で `function-hole.ts` から 3 関数を統合 + 旧削除) | 現状の関数: `buildPlaceholderLib` / `wrapBodyObserved` / `wrapObservedWorkload` / `substituteBody` (= D-α spike で確定、`resolveAccessName` / `buildObserveHook` は AMD/IIFE 内ローカル名で破綻したため body 観測注入に変更 = 不要)。D-β で `paramNames` / `functionBlockBody` / `countSubtreeNodes` を統合 |
 | `mb-analyzer/src/preprocessing/selakovic/assemble/changed-fn.ts` | **書き直し**: 4 値 (`setup`/`workload`/`slow`/`fast`) を出力 |
 | `mb-analyzer/src/equivalence-checker/common/sandbox/executors/jsdom.ts` | **無改修** (= 2 引数 API のまま、setup state snapshot 機構を維持) |
 | `mb-analyzer/src/equivalence-checker/common/sandbox/executors/vm.ts` | 同 |
 | `mb-analyzer/src/preprocessing/selakovic/pipeline.ts` (or 呼び出し側) | 4 値契約を 2 引数に展開する経路を追加 (= `workload !== undefined` のとき `executor({ setup: substituteBody(originalSetup, slow/fast), body: workload })` を 2 回呼ぶ) |
 | `mb-analyzer/tests/preprocessing/selakovic.test.ts` | changed-fn 関連 assertion を 4 値に書き直し |
 | `tests/domain/entities/test_preprocessing.py` / `test_equivalence.py` / `test_pruning.py` | `workload` round-trip テスト追加 |
-| `ai-guide/adr/0024-preprocess-placeholder-substitution.md` | **新規起票** |
-| `ai-guide/adr/0022-preprocess-workload-reachability.md` | Status を `accepted, superseded by 0024` に更新 |
+| `ai-guide/adr/0023-preprocess-placeholder-substitution.md` | D-α PR で accepted 済。D-β プロセス中に CANDIDATE_KIND 再設計 (案 X/Y/Z) で実装の細部が動いたら §結果 / §影響 を反映 |
+| `ai-guide/adr/0022-preprocess-workload-reachability.md` | D-α PR で `superseded by 0023` 済 |
+| `ai-guide/adr/0024-preprocess-candidate-kind-restructure.md` (= CANDIDATE_KIND 再設計の議論結果が案 Y / Z なら新規起票、案 X なら不要) | 起票判断は D-β 着手前議論で確定 |
 
 **テスト**: 全 vitest + uv run pytest + mise run check-arch を緑に。
 
@@ -376,7 +377,7 @@ D-α が success なら以下を一気に書き直す:
 - `mb-analyzer/src/preprocessing/common/function-hole.ts` (lambda-lift / `__HOLE__` 系 = 200 行のうち 150 行以上削除)
 - `mb-analyzer/src/preprocessing/selakovic/assemble/changed-fn.ts` (書き直し)
 - `mb-analyzer/tests/preprocessing/selakovic.test.ts` の changed-fn 関連 assertion (書き直し)
-- ADR-0022 (Status を `superseded by 0024` に)
+- ADR-0022 (Status を `superseded by 0023` に = D-α PR で実施済)
 
 ---
 
@@ -389,7 +390,7 @@ D-α が success なら以下を一気に書き直す:
 | PR-3 で extracted.jsonl 等の大ファイルが git に入る | `.gitignore` で `research/.../inputs/` を除外、commit 前に確認 |
 | feature/hydra-pruning 削除の前に他作業が乗っていた | 削除前に `git log feature/hydra-pruning ^main` で確認、もし 1 commit (`abb05b8`) 以外があれば一旦保留 |
 | D-α で AMD 内ローカル問題が拭えない (= partial) | hybrid 案 (= `_s.foo = ...` 形のみ placeholder、AMD 内ローカルは `__HOLE__` を残す) を検討、または「AMD 内ローカルは設計対象外」と認めて 79 達成数字を訂正 |
-| D-α が fail (撤退) | v1 のまま研究を閉じる、`comparison.md` に「placeholder 検討したが Selakovic 級では不採用」と記録、ADR-0024 は status `rejected` |
+| D-α が fail (撤退) | v1 のまま研究を閉じる、`comparison.md` に「placeholder 検討したが Selakovic 級では不採用」と記録、ADR-0023 は status `rejected` (= D-α PR で success 判定済なのでこの分岐は発火しなかった) |
 
 ---
 
