@@ -1,0 +1,174 @@
+# spike-placeholder.test.ts (v3 = placeholder substitution、body 観測注入) 実走ログ — 2026-05-13
+# vitest v3.2.4 / 14 tests / 13.4s / `mb-analyzer/tests/preprocessing/spike-placeholder.test.ts`
+# (git untracked、D-β 完了後に削除予定)
+#
+# 設計の核 (ADR-0023 D-α spike を経た最終形):
+#   - setup = lib (after) の変更関数 body `{ ... }` を `{ $BODY$ }` に置換 + preF1 (+ dep 連結)
+#   - slow / fast body = wrapBodyObserved(originalBody) = IIFE で囲って戻り値を __OBS__ に push → return
+#   - workload = (function () { __OBS__ = []; <f1 body>; return JSON.stringify(__OBS__); })()
+#   - executor: setup.replace('$BODY$', body) + ';\n' + workload で 1 回 vm.runInContext / jsdom.runInContext
+#
+# 命名 (ADR-0023 §命名規則、architecture/mb-analyzer.md §Magic 識別子の命名規則):
+#   - 置換マーカー: $BODY$ ($ 系)、pruning の $P0..$Pn と同系統
+#   - sandbox 実行時変数: __OBS__ (__ 系で両端 underscore)
+#
+# v1 (__HOLE__ 方式) との差:
+#   - lambda-lift 不要 (closure で見える)
+#   - `if (__HOLE__)` ガード不要 (body は元の場所で実行)
+#   - 観測 hook (access name 解決) 不要 (body 内側で __OBS__.push)
+#
+# 判定: success — クリーンケース 4 件すべて「中身のある equal + 観測値一致」、Ember 3174/4329_1 でも
+# bootstrap-invocation 込みで動作 + equal verdict 相当の観測。
+# 撤退条件 (1.5 日超 / クリーンケースで observe []) には到達せず、約 1.5 時間で完了。
+
+############### Step B: 人工データのサニティ ###############
+
+  --- sanity 1: operator precedence (lib 内 single fn) ---
+    libBefore: lib.norm = function (x) { return slice.call([x]).length % 2 === 0; }
+    libAfter:  lib.norm = function (x) { return slice.call([x]).length & 1 === 0; }
+    workload:  lib.norm(0); lib.norm(1); lib.norm(2);
+    slow __OBS__: ["false","false","false"]   (length=1, 1%2 → 1, 1===0 → false)
+    fast __OBS__: ["0","0","0"]               (length & (1===0) = length & 0 = 0)
+    → ✓ slow/fast で異なる観測値、body 観測注入が原理的に動く
+
+  --- sanity 2: closure dep (lambda-lift 不要) ---
+    libBefore: lib.startsWith uses makeString(starts)
+    libAfter:  lib.startsWith uses String(starts)
+    workload:  lib.startsWith("image.gif", "image"); lib.startsWith(".vimrc", "vim");
+    両側 __OBS__: ["true","false"]   (意味論等価)
+    → ✓ makeString が closure で見える、lambda-lift なしで動く
+
+############### Step C: 実 dataset クリーンケース 4 件 ###############
+
+  --- Underscore.string 347_1 (startsWith) ---
+    fn units: _s.endsWith, _s.startsWith
+    setup 19862 chars / slow 391 chars / fast 388 chars   (v1: setup 104503 chars = lift 含)
+    slow __OBS__: ["true","true","true","true","true","true","true","true"]   (8 calls)
+    fast __OBS__: 同左 (意味論等価)
+    → ✓ equal verdict 相当、access name (_.str.startsWith) で workload が呼んでも body 観測注入で問題なし
+
+  --- Underscore.string 347_2 (startsWith / endsWith、5 changed nodes) ---
+    fn units: _s.endsWith, _s.startsWith
+    slow __OBS__ / fast __OBS__: ["true"×8] 両側一致
+    → ✓ equal verdict 相当
+
+  --- Underscore 1222 (_.values) ---
+    fn units: _.values
+    preF1: var map = {}; for (var i = 0; i < 10; i++) { map["prop" + i] = i; }
+    slow __OBS__: ["[0,1,2,3,4,5,6,7,8,9]","[0,1,2,3,4,5,6,7,8,9]","[0,1,2,3,4,5,6,7,8,9]"]
+    fast __OBS__: 同左 (意味論等価、object iteration 順序保持)
+    → ✓ equal verdict 相当
+
+  --- jQuery 367 (jQuery.fn.index) ---
+    fn units: jQuery.fn.index
+    setup 235686 chars / slow 383 chars / fast 424 chars   (v1: setup 236197 chars)
+    workload: jQuery("<div/>").index(); jQuery("#foo").index(); jQuery("#bar").index();
+    slow __OBS__: ["-1","0","1","-1","0","1","-1","0","1"]   (9 calls = 3 iter × 3 calls)
+    fast __OBS__: 同左
+    → ✓ equal verdict 相当、jsdom 環境で動作
+
+############### Step C 続: 軽い 2 件 (Underscore 1223 / jQuery 248) ###############
+
+  --- Underscore 1223 (_.forEach = _.each、bootstrap 中も呼ばれる) ---
+    fn units: _.forEach
+    setup 42632 chars / slow 630 chars / fast 663 chars   (v1: setup 127590 chars = lift 含)
+    slow __OBS__: [null,null,null]   (each は undefined を返すので null)
+    fast __OBS__: [null,null,null]
+    → ✓ 両側一致 (= each の戻り値証拠は弱いが両側 null で equal 相当)
+    → bootstrap-invocation: workload IIFE 先頭の __OBS__ = [] reset で bootstrap 観測は捨てた
+
+  --- jQuery 248 (jQuery.fn.html、`<embed>` を inner html) ---
+    fn units: jQuery.fn.html
+    setup 245052 chars / slow 1037 chars / fast 1041 chars
+    両側 ERROR: TypeError: Cannot read properties of null (reading '1')
+    → △ 両側 same error → placeholder model 起因ではなく jQuery 1.x + jsdom 環境の `<embed>` 処理の既知問題
+       (v1 spike-v2 では equal 中身ありだった = jstat / 別 jQuery 等の global state 差が影響していた可能性)
+       D-γ の brain-2 docker (= フル設定 jsdom executor) で再評価予定
+
+############### Step D: Ember fn unit なし (DROP 正解、static 確認のみ) ###############
+
+  --- Ember 4263 (handlebars <script src> 欠落) ---
+    fn units: 0 / stmt units: 3 / unanchored: 0
+    変更: Ember.VERSION / element = … / Ember.merge(preRender, {...}) = 全部 stmt-level
+    → ✓ composePlaceholderCandidate = null となる経路 = embedded fallback / DROP の経路で正しい
+
+  --- Ember 9991 (micro-reconstruct: lib に通してない) ---
+    fn units: 0 / stmt units: 2 / unanchored: 0
+    変更: Ember.VERSION + hasThisCache = 新 module var、named fn を介さない
+    → ✓ fn unit なし = DROP が正解 (threats #3、placeholder model でも同じ判定)
+
+############### Step E: Ember bootstrap-invocation 込み、jsdom + jquery/handlebars 連結 ###############
+
+  --- Ember 3174 (Ember.assert) ---
+    fn units: Ember.assert
+    setup 918854 chars   (v1: setup 1098395 chars = lift 含、含めなくても十分大きい)
+    deps prelude: jquery 1.7.2 (tmp/jquery.js) + handlebars 1.1.0   (issue_3174 override)
+    workload: Ember.assert("a", true); Ember.assert("b", true); Ember.assert("c", true);
+    slow __OBS__: [null,null,null]   (assert は undefined を返す)
+    fast __OBS__: [null,null,null]
+    → ✓ 両側一致 = equal verdict 相当
+    → 特筆: v1 spike-v2 では verdict=error (argument_mutation oracle が Ember 引数 serialize できず)。
+       placeholder model では body 観測注入で return_value 系の観測しかしないので argument_mutation 非関与 = equal 相当に改善
+
+  --- Ember 4329_1 (Ember.cacheFor) ---
+    fn units: Ember.cacheFor
+    setup 1236014 chars   (v1: setup 1415558 chars)
+    deps prelude: jquery 2.1.3 + handlebars 1.1.0   (category default)
+    workload: var o1 = {}; Ember.cacheFor(o1, "k1"); Ember.cacheFor(o1, "k2"); Ember.cacheFor(o1, "k1");
+    slow __OBS__: [null,null,null]   (cacheFor は cache 未存在で undefined)
+    fast __OBS__: [null,null,null]
+    → ✓ 両側一致 = equal verdict 相当
+    → 特筆: v1 では argument_mutation oracle で error → placeholder model で equal 相当に改善
+
+  --- Ember 4158 (Ember.guidFor) ---
+    fn units: Class, Ember.generateGuid, Ember.guidFor   (3 件)
+    setup 1207008 chars / slow 872 chars / fast 956 chars
+    両側 ERROR: Error: Assertion Failed: Ember Views require jQuery 1.7, 1.8, 1.9, 1.10, or 2.0
+    → △ 両側 same error → Ember View module の version check と category default の jquery 2.1.3 の衝突
+       (sandbox 限界、placeholder model 起因ではない。v1 spike-v2 でも fn 特定・hole・実行 OK で argument_mutation error)
+       D-γ の brain-2 docker (= フル jsdom + 正しい jquery version) で再評価予定
+
+  --- Ember 5547 (ComputedPropertyPrototype.set、co-evolution) ---
+    fn units: ComputedPropertyPrototype.set
+    setup 2075338 chars / slow 1664 chars / fast 346 chars
+    両側 ERROR: Error: Assertion Failed: Ember.Object.create no longer supports defining computed properties.
+                Define computed properties using extend() or reopen() before calling create().
+    → △ spike の合成 workload 設計ミス (= Ember.computed の使い方が古い API)、placeholder model 起因ではない
+       D-γ で実際の v_after.html の f1 を使うときに再評価予定
+
+############### Summary ###############
+
+| カテゴリ                | 件数 | success | partial / sandbox 限界 |
+|------------------------|------|---------|----------------------|
+| サニティ (synthetic)    | 2    | 2       | 0                    |
+| クリーンケース          | 4    | 4       | 0                    |
+| 軽い系                  | 2    | 1       | 1 (248 jQuery+jsdom)  |
+| Ember (fn unit なし)    | 2    | 2       | 0                    |
+| Ember (bootstrap 込み)  | 4    | 2       | 2 (4158 / 5547 sandbox/workload) |
+| **合計**               | 14   | 11      | 3 (placeholder 起因 0) |
+
+############### Step F: 既存 executor 経由のサニティ (D-β 移行可能性検証、追加で 1 件実施) ###############
+
+  --- Underscore.string 347_1 (startsWith) を executeVmSandboxed 経由で実走 ---
+    展開: executor.setup = substituteBody(composed.setup, slow/fastBody) (= lib + preF1、body 差し込み済)
+          executor.body  = composed.workload                              (= workload IIFE)
+    slow return_value: "[\"true\",\"true\",\"true\",\"true\",\"true\",\"true\",\"true\",\"true\"]"
+    fast return_value: 同左 (両側一致)
+    slow exception:   null
+    arg_snapshots:    _ (Underscore.string object) の pre snapshot が取れている = argument_mutation oracle 用機構が動作
+    → ✓ 既存 executor の (setup, body) 2 引数 API + 2 回 runInContext + snapshot 機構をそのまま再利用できる
+    → ✓ ADR-0023 当初の「1 回 runInContext で executor を新設」案は撤回、現状の executor 無改修で済む
+    → ✓ D-β で書く範囲が contracts paired-change + changed-fn.ts (= 4 値出力 → 2 引数展開) + function-hole.ts 削除 に縮小
+
+判定: **success** (= D-β 本実装切り替えへ進む)
+  - クリーンケース 4 件すべて中身のある equal、Ember 3174/4329_1 も bootstrap 込みで equal 相当
+  - △ 3 件はいずれも placeholder model 起因ではない (sandbox 限界 / spike workload 設計ミス)
+  - v1 で残った argument_mutation oracle error が body 観測注入で改善する可能性が示唆された
+
+D-β で行うこと (ADR-0023 §結果 / 影響 参照):
+  - contracts に `workload?: string` 追加 (preprocessing / equivalence / pruning、TS + Python paired)
+  - changed-fn.ts 書き直し (4 値出力)
+  - executor jsdom.ts / vm.ts に placeholder model 経路追加 (旧契約は後方互換)
+  - selakovic.test.ts の changed-fn assertion 書き直し
+  - function-hole.ts 大幅縮減 or placeholder.ts に統合 + 旧削除
+  - 既存の placeholder.ts (本 spike で作成済) を本実装の起点に

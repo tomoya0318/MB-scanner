@@ -264,11 +264,15 @@ vm.runInContext(finalProgram, context, { timeout: ... });
 
 旧契約 (= `workload` フィールドなし) は **後方互換**: 現状の 2 回 runInContext モデルで動かす (lib-embedded `single` / `lib` / `body` / fallback 用)。
 
-### D-α: spike (1 日)
+### D-α: spike (1 日) — **完了 (2026-05-13、約 1.5 時間で success 判定)**
+
+**結果**: `notes/spike-v3.log` 参照。14 tests 全件緑、success 判定。クリーンケース 4 件すべて中身のある equal、Ember 3174/4329_1 も bootstrap-invocation 込みで equal 相当 (v1 の argument_mutation oracle error が body 観測注入で解消する可能性が示唆された)。
+
+**設計の進化**: ADR-0023 の元案「workload 側で observe hook (`<accessName> = function () {...}`) を立てる」は **AMD/IIFE 内ローカル名** (`_s.startsWith` 等、bootstrap 後の global からは `_.str.startsWith` でしか到達できない) で ReferenceError or 別オブジェクト代入になる限界が判明。代わりに **body 内部に観測ラッパ (`var __r = (function () { ... }).call(this); __OBS.push(...); return __r;`) を注入する** 形に修正 = `mb-analyzer/src/preprocessing/common/placeholder.ts` の `wrapBodyObserved`。これで access name resolution 不要、AMD/IIFE 内ローカルにも強い汎用設計に。
 
 **目的**: placeholder substitution 方式が `__HOLE__` 方式と同等以上の動作を 12 issue で示すか実証。
 
-**ファイル**: `mb-analyzer/tests/preprocessing/spike-placeholder.test.ts` (新規、git untracked、実証完了後に削除)
+**ファイル**: `mb-analyzer/tests/preprocessing/spike-placeholder.test.ts` (新規、git untracked、実証完了後 = D-β 完了後に削除)、`mb-analyzer/src/preprocessing/common/placeholder.ts` (新規、D-β で本実装に流用予定)
 
 **対象 12 issue** (spike v2 と同じ):
 - クリーンケース: Underscore.string 347_1 / 347_2、jQuery 367、Underscore 1222
@@ -305,14 +309,25 @@ D-α が success なら以下を一気に書き直す:
 | `mb-analyzer/src/preprocessing/common/function-hole.ts` | **大幅縮減**: `liftableNames` / `pickLiftedDeps` / `holeLibSource` / `buildHoleFunction` を削除 (or `placeholder.ts` 新規 + 旧削除)、`paramNames` / `functionBlockBody` / `countSubtreeNodes` は残す |
 | `mb-analyzer/src/preprocessing/common/placeholder.ts` (新規 or function-hole.ts 改題) | `replaceBodyWithPlaceholder` / `resolveAccessName` / `buildObserveHook` / `wrapObservedWorkload` |
 | `mb-analyzer/src/preprocessing/selakovic/assemble/changed-fn.ts` | **書き直し**: 4 値 (`setup`/`workload`/`slow`/`fast`) を出力 |
-| `mb-analyzer/src/equivalence-checker/common/sandbox/executors/jsdom.ts` | placeholder model 経路追加 (`workload !== undefined` で 1 回 runInContext、旧形式は 2 回 runInContext 維持) |
+| `mb-analyzer/src/equivalence-checker/common/sandbox/executors/jsdom.ts` | **無改修** (= 2 引数 API のまま、setup state snapshot 機構を維持) |
 | `mb-analyzer/src/equivalence-checker/common/sandbox/executors/vm.ts` | 同 |
+| `mb-analyzer/src/preprocessing/selakovic/pipeline.ts` (or 呼び出し側) | 4 値契約を 2 引数に展開する経路を追加 (= `workload !== undefined` のとき `executor({ setup: substituteBody(originalSetup, slow/fast), body: workload })` を 2 回呼ぶ) |
 | `mb-analyzer/tests/preprocessing/selakovic.test.ts` | changed-fn 関連 assertion を 4 値に書き直し |
 | `tests/domain/entities/test_preprocessing.py` / `test_equivalence.py` / `test_pruning.py` | `workload` round-trip テスト追加 |
 | `ai-guide/adr/0024-preprocess-placeholder-substitution.md` | **新規起票** |
 | `ai-guide/adr/0022-preprocess-workload-reachability.md` | Status を `accepted, superseded by 0024` に更新 |
 
 **テスト**: 全 vitest + uv run pytest + mise run check-arch を緑に。
+
+#### D-β 着手前に議論必須 (= 着手前に決め、結果を ADR に書く)
+
+- **`CANDIDATE_KIND` の再設計**: 現状 `single` / `lib` / `body` / `changed-fn` の 4 値がフラットに並んでいるが、preprocess の目的論は **「`changed-fn` を抜き出すこと」が主、`single`/`lib`/`body` は `changed-fn` が出せない経路の fallback embedded** という階層構造になっている (v2 でこの階層が顕在化)。
+  - 現状の `CANDIDATE_KIND` docstring (`preprocessing-contracts.ts:62-66`) は `__HOLE__` 言及があり、いずれにせよ書き直し必要
+  - **議論する案** (D-β 着手前に決める):
+    - **案 X (現状維持、後方互換)**: 列挙値そのまま、`workload?` フィールドだけ追加。docstring を v2 (placeholder substitution、body 観測注入) に書き直す。paired-change 最小。
+    - **案 Y (主役 / fallback で再分類)**: `CHANGED_FN` (主役) + `EMBEDDED_FALLBACK` (= 旧 `single`/`lib`/`body` 統合) の 2 値に縮約、ASPECT × SPLIT_KIND 等で副情報を別フィールドに分離。目的論が型から読める。contracts 変更大、ADR-0014 / 0022 との関係整理が必要。
+    - **案 Z (階層化)**: `CHANGED_FN` + `EMBEDDED` の 2 値 + 別フィールドに `split_kind: single | lib | body`。直交軸を分離。組み合わせ爆発なし。
+  - 案 Y / Z を取るなら **新規 ADR-0024 を起票** (= ADR-0023 とは別軸の決定)、ADR-0014 (case-split for both-changed) と ADR-0022 (`__HOLE__` 方式) の参照関係も整理。案 X なら ADR は ADR-0023 だけで足りる。
 
 ### D-γ: DROP 可視化 + 全件再走 + 79 issue 達成確認 (1 日)
 
