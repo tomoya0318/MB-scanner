@@ -62,7 +62,7 @@ export type Aspect = (typeof ASPECT)[keyof typeof ASPECT];
  * - `changed-fn`: `aspect: lib` (lib 内 patch) について、workload が (推移的に) exercise する変更関数を 1 つ
  *   `<lib>_*.js` から切り出した pruning 向け candidate。slow/fast = `__HOLE__` に変更前/後の関数本体
  *   (lambda-lift = lib 内部の補助関数・変数を引数化) + 観測する形 (戻り値を記録して返す) + workload、
- *   setup = lib 全文 (変更関数だけ穴空き、ガード + after 本体インライン fallback) + 依存 lib + preF1。
+ *   setup = lib 全文 (変更関数だけ穴空き、ガード + after 本体インライン fallback) + 依存 lib + preWorkload。
  *   1 issue で 0〜数個出る — 同 issue の embedded (`single`) と併存し、等価検証/pruning はこの小さい版を使う。
  */
 export const CANDIDATE_KIND = {

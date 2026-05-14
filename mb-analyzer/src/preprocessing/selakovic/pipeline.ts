@@ -153,8 +153,8 @@ function appendChangedFnCandidates(
   const fnUnits = cu.units.filter((u): u is FnChangeUnit => u.kind === "fn" && u.afterFn !== null);
   if (fnUnits.length === 0) return; // fn unit なし (stmt unit / version-bump だけ) → embedded のみ
 
-  // workload root = f1 の preF1 + body (aspect: lib なので f1 は before で固定)。
-  const graph = buildCallGraph(cu.beforeAst, [{ name: "f1", body: [...f1Before.preF1Statements, ...f1Before.f1Body.body] }]);
+  // workload root = f1 の preWorkload + body (aspect: lib なので f1 は before で固定)。
+  const graph = buildCallGraph(cu.beforeAst, [{ name: "f1", body: [...f1Before.preWorkloadStatements, ...f1Before.f1Body.body] }]);
   for (const u of fnUnits) {
     if (!isReachedByAnyWorkload(graph, u.name)) continue; // 変更関数 u を呼ぶ workload が無い → DROP (change-not-exercised)
     const candidate = buildChangedFnCandidate(u, libSourceAfter, f1Before);

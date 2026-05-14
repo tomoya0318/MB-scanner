@@ -68,7 +68,7 @@ function collectReferencedNames(subtree: Node): Set<string> {
  *
  * @param libAst         patch 対象 lib の AST (before か after — 候補選別では before を使う)
  * @param workloadRoots  workload の根。`body` はその workload を構成する statement / ノード列
- *                       (データセットでは `[{ name: "f1", body: [...preF1Statements, ...f1BodyStatements] }]`)
+ *                       (データセットでは `[{ name: "f1", body: [...preWorkloadStatements, ...f1BodyStatements] }]`)
  */
 export function buildCallGraph(
   libAst: File,

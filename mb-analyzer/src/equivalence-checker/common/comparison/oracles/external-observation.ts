@@ -101,7 +101,7 @@ if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
   // 観点: 外部観測可能な副作用 (console 呼び出し列 + 新規 global key 集合) の差分を両側で比較。
   // 両側とも空 → N/A、console args の serialize 中に循環参照 → error、console 列 (順序込み) + globals 集合一致 → equal。
-  // 統合観点: `f1` body / preF1 が `<script>` で top-level 実行されると `var i` / `var keys` 等の scaffolding 変数が
+  // 統合観点: `f1` body / preWorkload が `<script>` で top-level 実行されると `var i` / `var keys` 等の scaffolding 変数が
   // 片側だけ global に漏れて偽 not_equal を生む (underscore-1224)。AngularJS の `ng-<timestamp>` cache key global も同様
   // (angular-7759_4)。`ignoreNewGlobalPatterns` で `/^ng/` や 1 文字 / よくある loop/temp 変数名を除外すると一致する。
   const cap = (o: Partial<ExecutionCapture> = {}): ExecutionCapture => ({

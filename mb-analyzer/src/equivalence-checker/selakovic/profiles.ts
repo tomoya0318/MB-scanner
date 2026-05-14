@@ -41,7 +41,7 @@ export const DOM_NORMALIZE_PROFILE: DomNormalizeProfile = {
  * O4 (external-observation): `new_globals` から除外するパターン。
  * - `/^ng/` = AngularJS が立てる `ngContext` 等 (angular-7759_4 の偽 not_equal 解消)。
  * - `/^__selakovic/` = runnable scaffolding 由来の漏れ。
- * - 一文字 / よくある loop・temp 変数名 = `f1` body / preF1 が `<script>` として top-level 実行されるため
+ * - 一文字 / よくある loop・temp 変数名 = `f1` body / preWorkload が `<script>` として top-level 実行されるため
  *   `var i` / `for(var keys ...)` 等が global に漏れる (= workload/lib の意図した state ではない script 実行 artifact)。
  *   underscore-1224 の偽 not_equal (`new_globals` が片側だけ `keys` を含む) 解消。
  */

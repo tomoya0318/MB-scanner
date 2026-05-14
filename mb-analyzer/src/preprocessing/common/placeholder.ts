@@ -1,57 +1,53 @@
 /**
- * v2 = placeholder substitution 方式 (ADR-0023) の組み立て部品。
+ * placeholder substitution model の組み立て部品 (= dataset 非依存の汎用ヘルパ)。
  *
- * 設計の核 (= 1 仕掛けに簡素化):
- *  - **setup** = lib (after) のうち変更関数の body `{ ... }` を `{ $BODY$ }` に置換した文字列 + preF1。
- *    bootstrap 中は `$BODY$` が構文として残ると parse error なので、executor 側で `slow` / `fast` の body
- *    文字列に **テキスト置換** してから既存 executor の (setup, body) 2 引数 API に渡す
- *    (= setup = substituteBody(originalSetup, slow/fast), body = workload)。これで既存の 2 回
- *    runInContext + snapshot 機構 (argument_mutation oracle 用) を再利用できる (= ADR-0023 §設計)。
- *  - **slow / fast body** = 変更関数の before / after 本体を「観測する形」(= `var __OBS_R__ = (function () { ... }).call(this);
- *    __OBS__.push(JSON.stringify(__OBS_R__)); return __OBS_R__;`) にラップした文字列 → `$BODY$` に差し込まれる。
- *  - **workload** = `(function () { __OBS__ = []; <f1 body>; return JSON.stringify(__OBS__); })()` の IIFE。
- *    完了値が `__OBS__` の serialize 結果になるので、`return_value` oracle が「変更関数を何回どんな値で呼んだか」を
- *    観測できる。bootstrap 中の呼び出しは workload IIFE 先頭で `__OBS__ = []` reset で捨てる (= 純粋な workload 観測)。
+ * 責務: 4 つの汎用 string transform を提供する。dataset 構造 (Selakovic 物理レイアウト) や
+ * 対象言語ドメイン要件 (jsperf / Angular / Ember 等) には立ち入らない。それらは
+ * 呼び出し側 (`preprocessing/selakovic/*`) で吸収する。
  *
- * v1 (`__HOLE__` 方式) との差 (= 3 仕掛け → 1 仕掛け):
- *  - lambda-lift 不要: `makeString` 等の lib 内部依存は lib IIFE の closure で自然に見える
- *  - `if (__HOLE__)` ガード不要: body は元の場所に書かれてるので bootstrap-invocation の経路を分けない
- *  - 観測 hook (access name 解決) 不要: body 内部で `__OBS__.push` を直接呼ぶので IIFE/AMD 内ローカル名でも観測できる
+ *  1. `replaceFunctionBody`: 関数本体の AST span を `{ $BODY$ }` プレースホルダで置換した文字列を返す
+ *  2. `wrapBodyObserved`: 関数本体の statement 列を、戻り値を観測配列 `__OBS__` に push して返す形にラップ
+ *  3. `wrapObservedWorkload`: workload (= 観測対象の呼び出し列) を、完了値として観測配列を返す形にラップ
+ *  4. `substituteBody`: 1. の出力の `$BODY$` を 2. の出力で差し替える
  *
- * 「観測 hook を外から立てる」案も検討したが (ADR-0023 §設計の最初のスケッチ)、`_s.startsWith` のような
- * lib IIFE 内ローカル名は bootstrap 後の global からは `_.str.startsWith` 等の別エイリアスでしかアクセスできず、
- * `<name> = function () {...}` 形の上書きが ReferenceError or 別オブジェクトへの代入になる。body 内側に観測を
- * 注入する方が汎用 (AMD/IIFE 内ローカルにも強い)。
+ * 呼び出し側はこれらを組み合わせて 4 値契約 `{setup, workload, slow, fast}` を構築する。
+ * 中身の構成 (= `setup = libs + preWorkload` 等) は ADR-0023 §4 値契約の具体形 + code-map §setup 構築規約。
+ *
+ * 命名規則 (architecture/mb-analyzer.md §Magic 識別子の命名規則):
+ *  - 置換マーカー `$BODY$`: テキスト置換専用、`substituteBody` で sandbox 投入前に消える
+ *  - sandbox 実行時の internal 変数 `__OBS__` (戻り値観測配列) / `__OBS_R__` (1 回の呼び出し戻り値の一時保持):
+ *    両端 underscore で sandbox 専用と明示
  */
 
 const PLACEHOLDER = "$BODY$";
 
 /**
- * `libAfterSrc` の `afterFnBody.start..afterFnBody.end` (= `{ ... }`) を `{ $BODY$ }` に置換した文字列を返す。
- * placeholder のままだと parse error なので、executor に渡す前に `setup.replace(PLACEHOLDER, body)` で
- * body を差し込んでおく前提 (= `substituteBody`)。差し込んだ後の文字列を既存 executor の `setup` 引数に
- * 渡し、`body` 引数には `workload` を渡す。
+ * `source` のうち、指定された関数本体の AST span (`fnBodySpan.start..fnBodySpan.end`、`{` から `}` までを含む)
+ * を `{ $BODY$ }` で置換した文字列を返す。
+ *
+ * `$BODY$` プレースホルダのままでは構文として valid でないので、呼び出し側は `substituteBody` で差し込んで
+ * から `source` を実行コンテキストに投入する。
  */
-export function buildPlaceholderLib(
-  libAfterSrc: string,
-  afterFnBody: { start: number; end: number },
+export function replaceFunctionBody(
+  source: string,
+  fnBodySpan: { start: number; end: number },
 ): string {
-  return libAfterSrc.slice(0, afterFnBody.start) + `{ ${PLACEHOLDER} }` + libAfterSrc.slice(afterFnBody.end);
+  return source.slice(0, fnBodySpan.start) + `{ ${PLACEHOLDER} }` + source.slice(fnBodySpan.end);
 }
 
 /**
- * 変更関数の body 文字列 (= statement 列のソース) を「観測する形」にラップして返す。`$BODY$` に差し込まれる
- * 文字列断片。`__OBS__` は `globalThis` 上の配列で、setup (= bootstrap-invocation 経由) と workload (= `wrapObservedWorkload`)
- * の双方から push されうる。
+ * 関数本体の statement 列を「観測する形」(= 戻り値を観測配列 `__OBS__` に push して返す) にラップした文字列を返す。
+ * `replaceFunctionBody` が用意した `$BODY$` プレースホルダに差し込まれる断片を生成する用途。
  *
- *  - IIFE `.call(this)` で囲って戻り値を `__OBS_R__` (= sandbox 専用 internal 変数、両端 underscore で命名規則統一)
- *    に保持 → `__OBS__.push` に JSON.stringify → 元の return 動作を維持
- *  - `var __OBS_R__` は本ラッパが差し込まれた関数 body 直下に置かれ、元 body 内の同名 `var` 宣言は IIFE 内側に閉じる
- *    (= JS の var hoisting で別スコープになる) ので衝突しない
- *  - serialize 不能 (循環参照 / DOM ノード等) は catch して `"<unserializable>"` を push
- *  - `__OBS__` の初期化は `|| []` で defensive (= bootstrap-invocation で workload IIFE より先に呼ばれた場合に
- *    `__OBS__` 未定義の状態を経由する。push された値は `wrapObservedWorkload` の reset で破棄される = 純粋な
- *    workload 観測だけが残る、§wrapObservedWorkload docstring 参照)
+ *  - 関数式 `(function () { <bodyCode> }).call(this)` で囲い、戻り値を `__OBS_R__` に一時保持。これで:
+ *    - `bodyCode` 内の `return` 文がラッパの外側に脱出しない (= ラッパは元の関数の `return __OBS_R__;` で終わる)
+ *    - 関数式は新しいスコープを作るので、`bodyCode` 内の `var` 宣言や `this` の扱いは元のセマンティクスを維持
+ *    - 結果として元 `bodyCode` 内に同名 `var __OBS_R__` が出現してもスコープが分離して衝突しない
+ *  - 戻り値は `JSON.stringify` して `__OBS__` 配列の末尾に push。serialize 不能 (循環参照 / 環境固有オブジェクト等)
+ *    は catch して `"<unserializable>"` を push (= 観測が落ちないことを保証)
+ *  - `__OBS__` の初期化は `|| []` で defensive (= `wrapObservedWorkload` の reset より先に push されうるケース、
+ *    例えば呼び出し側で setup 内に同じ関数が複数回 invoke されるケース、をカバー。push された値は
+ *    `wrapObservedWorkload` の reset で破棄される = 純粋な workload 観測だけが残る、`wrapObservedWorkload` 参照)
  */
 export function wrapBodyObserved(bodyCode: string): string {
   return [
@@ -64,13 +60,15 @@ export function wrapBodyObserved(bodyCode: string): string {
 }
 
 /**
- * f1 body を `(function () { __OBS__ = []; <f1 body>; return JSON.stringify(__OBS__); })()` IIFE で包む。
- * 完了値が `__OBS__` の serialize 結果になる (= sandbox の `Script.runInContext` の戻り値として観測できる)。
+ * workload (= 観測対象の関数を呼び出す statement 列) を、完了値として観測配列 `__OBS__` の serialize 結果を返す
+ * 関数式呼び出しでラップする。
  *
- * `__OBS__ = []` の **無条件 reset** で bootstrap-invocation 中の観測は **捨てる**、純粋な workload 観測だけを残す
- * 設計 (= `wrapBodyObserved` の defensive `|| []` 初期化との非対称はこの意図 = bootstrap で push されても workload
- * 開始時点でリセット)。将来「bootstrap 観測も活かす」案 (ADR-0023 §レビュー観点 1) に切り替える場合は、ここの reset を
- * 条件化する。
+ *  - 関数式 `(function () { ...; return ...; })()` の完了値が sandbox 実行の戻り値として観測できる
+ *  - 先頭で `globalThis.__OBS__ = []` を **無条件** で実行: setup 段階や workload 開始までに push された
+ *    値はここで破棄される。これにより `workloadBodyCode` 内の呼び出しによる観測値だけが完了値に乗る
+ *  - 末尾で `JSON.stringify(globalThis.__OBS__)` を返す
+ *
+ * 「setup 段階の観測値も活かす」設計に切り替えたい場合は、ここの reset を条件化する (ADR-0023 §設計のポイント参照)。
  */
 export function wrapObservedWorkload(workloadBodyCode: string): string {
   return [
@@ -83,13 +81,13 @@ export function wrapObservedWorkload(workloadBodyCode: string): string {
 }
 
 /**
- * `setup` (= `buildPlaceholderLib` の出力 + preF1) の `$BODY$` プレースホルダを body 文字列で差し替える。
- * `String.prototype.replace` は `$&` 等の特殊置換シーケンスを解釈するので、body 内の `$` が壊れないよう
- * 関数置換 (`() => body`) で 1 回だけ置換する。
+ * `setup` 内の `$BODY$` プレースホルダを `body` 文字列で差し替える。
  *
- * **前提: setup に `$BODY$` は厳密に 1 個だけある** (= `buildPlaceholderLib` は変更関数 body 1 つに対して 1 個埋め込む)。
- * 0 個 / 2 個以上は呼び出し側の組み立てミスなので throw して silent 不整合を防ぐ。将来複数 placeholder を扱う拡張が
- * 必要なら本関数を `substituteBodies(setup, bodies: string[])` に拡張する (= 個数固定の検査を維持しつつ複数化)。
+ * `String.prototype.replace` の特殊置換シーケンス (`$&` / `$1` 等) を回避するため関数置換 (`() => body`) を使う。
+ *
+ * **前提: setup に `$BODY$` は厳密に 1 個**。0 個 / 2 個以上は呼び出し側の組み立てミスとして throw し、
+ * silent な部分置換 / 未置換を防ぐ。複数 placeholder を扱う拡張が必要なら本関数を
+ * `substituteBodies(setup, bodies: string[])` 等に拡張して個数固定の検査を維持する。
  */
 export function substituteBody(setup: string, body: string): string {
   const count = setup.split(PLACEHOLDER).length - 1;
@@ -105,25 +103,22 @@ export const BODY_PLACEHOLDER = PLACEHOLDER;
 if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
   const { parse } = await import("../../ast/parser");
-  // 観点: placeholder lib の組み立て / body 観測ラップ / observed workload ラッパ / body 差し込み。
-  // 設計の核 = executor の setup 引数 = substituteBody(originalSetup, wrapBodyObserved(originalBody))、
-  // body 引数 = workload。既存 executor の 2 引数 API + snapshot 機構をそのまま使う。
 
-  describe("buildPlaceholderLib (in-source)", () => {
-    it("関数本体 { ... } を { $BODY$ } に置換", () => {
+  describe("replaceFunctionBody (in-source)", () => {
+    it("指定された関数本体の AST span を { $BODY$ } で置換する", () => {
       const src = "var g = function (x) { return x + 1; };";
       const ast = parse(src);
       const stmts = (ast as unknown as { program: { body: Array<{ declarations?: Array<{ init?: { body?: { type?: string; start: number; end: number } } }> }> } }).program.body;
       const init = stmts[0]?.declarations?.[0]?.init;
       if (!init?.body || init.body.type !== "BlockStatement") throw new Error("body not found");
-      const placeholdered = buildPlaceholderLib(src, { start: init.body.start, end: init.body.end });
+      const placeholdered = replaceFunctionBody(src, { start: init.body.start, end: init.body.end });
       expect(placeholdered).toContain("{ $BODY$ }");
       expect(placeholdered).not.toContain("return x + 1");
     });
   });
 
   describe("wrapBodyObserved / wrapObservedWorkload (in-source)", () => {
-    it("wrapBodyObserved: IIFE で囲って __OBS_R__ を __OBS__ に push、元の return を維持", () => {
+    it("wrapBodyObserved: 戻り値を __OBS__ に push、元の return を維持", () => {
       const wrapped = wrapBodyObserved("return x + 1;");
       expect(wrapped).toContain("var __OBS_R__ = (function () {");
       expect(wrapped).toContain("return x + 1;");
@@ -131,16 +126,15 @@ if (import.meta.vitest) {
       expect(wrapped).toContain("globalThis.__OBS__");
       expect(wrapped).toContain("return __OBS_R__;");
     });
-    it("wrapBodyObserved: 元 body 内に同名 var __OBS_R__ があっても IIFE 内側スコープに閉じて衝突しない", () => {
+    it("wrapBodyObserved: 元 body 内に同名 var __OBS_R__ があってもスコープ分離で衝突しない", () => {
       const wrapped = wrapBodyObserved("var __OBS_R__ = 99; return __OBS_R__;");
-      // 元 body の var __OBS_R__ は IIFE 内側、外側の var __OBS_R__ は IIFE の戻り値を受ける別スコープ
       expect(() => parse(`function f() { ${wrapped} }`)).not.toThrow();
     });
-    it("wrapBodyObserved: 関数本体に差し込んで parse できる構文を作る", () => {
+    it("wrapBodyObserved: 関数本体に差し込んで valid な構文を生む", () => {
       const wrapped = wrapBodyObserved("return x + 1;");
       expect(() => parse(`function f(x) { ${wrapped} }`)).not.toThrow();
     });
-    it("wrapObservedWorkload: __OBS__ init → workload → return JSON.stringify を IIFE 化", () => {
+    it("wrapObservedWorkload: __OBS__ init → workload → 完了値で JSON.stringify を返す形", () => {
       const wrapped = wrapObservedWorkload("api.f(1); api.f(2);");
       expect(wrapped).toMatch(/^\(function \(\) \{/);
       expect(wrapped).toContain("globalThis.__OBS__ = [];");
@@ -151,7 +145,7 @@ if (import.meta.vitest) {
   });
 
   describe("substituteBody (in-source)", () => {
-    it("$BODY$ プレースホルダを body 文字列で差し替え", () => {
+    it("$BODY$ プレースホルダを body 文字列で差し替える", () => {
       const setup = "var f = function (x) { $BODY$ };";
       expect(substituteBody(setup, "return x + 1;")).toBe("var f = function (x) { return x + 1; };");
     });
@@ -162,7 +156,7 @@ if (import.meta.vitest) {
     it("setup に $BODY$ が 0 個なら throw (silent 不整合の防止)", () => {
       expect(() => substituteBody("var f = 1;", "x")).toThrow(/exactly 1 \$BODY\$/);
     });
-    it("setup に $BODY$ が 2 個以上なら throw (将来複数 placeholder 拡張時の構造強制)", () => {
+    it("setup に $BODY$ が 2 個以上なら throw (個数固定の構造強制)", () => {
       expect(() => substituteBody("var f = $BODY$; var g = $BODY$;", "x")).toThrow(/exactly 1 \$BODY\$/);
     });
   });

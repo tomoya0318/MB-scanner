@@ -27,7 +27,7 @@ const ENV_JSDOM: ExecutionEnvironmentHint = "jsdom";
  * `findChangeUnits` に渡したのと同じ after lib ソース (`unit.afterFn` の span がここを指す)。
  *
  * 構造:
- *  - `setup` = lib (after、変更関数の body だけ穴あき + ガード + after 本体インライン fallback) + preF1
+ *  - `setup` = lib (after、変更関数の body だけ穴あき + ガード + after 本体インライン fallback) + preWorkload
  *    （`<script src>` の CDN 依存 lib は `pipeline.ts` が全候補の `setup` 先頭に一括連結する — plan §C1）
  *  - `slow` = `globalThis.__HOLE__ = function(<liftDeps>, <fnParams>){…変更前の本体…+ 戻り値を __OBS に記録}` ＋ 観測する形の workload
  *  - `fast` = 同じく `__HOLE__` に変更後の本体 ＋ 観測する形の workload
@@ -57,12 +57,12 @@ export function buildChangedFnCandidate(
   const holeParams = [...liftDeps, ...aParams];
 
   const holedLib = holeLibSource(libAfterSrc, afterBody, liftDeps, aParams);
-  const preF1 = statementsToCode([...f1Decomposition.preF1Statements]);
+  const preWorkload = statementsToCode([...f1Decomposition.preWorkloadStatements]);
   const workload = wrapWorkloadObserved(statementsToCode([...f1Decomposition.f1Body.body]));
 
   return {
     layout: LAYOUT_KIND.CLIENT,
-    setup: [holedLib, preF1].filter((s) => s.length > 0).join("\n;\n"),
+    setup: [holedLib, preWorkload].filter((s) => s.length > 0).join("\n;\n"),
     slow: `globalThis.__HOLE__ = ${buildHoleFunction(holeParams, statementsToCode(beforeBody.body as readonly Statement[]))};\n;\n${workload}`,
     fast: `globalThis.__HOLE__ = ${buildHoleFunction(holeParams, statementsToCode(afterBody.body as readonly Statement[]))};\n;\n${workload}`,
     enclosure_type: afterFn.type,
@@ -105,7 +105,7 @@ if (import.meta.vitest) {
       const r = c!;
       expect(r.candidate_kind).toBe(CANDIDATE_KIND.CHANGED_FN);
       expect(r.enclosure_type).toBe("FunctionExpression"); // lib.norm = function(){...}
-      // setup: lib 全文 (norm だけ穴あき) + preF1 (ここでは preF1 は空) — slice/lib の宣言は残り、norm の本体は __HOLE__ 呼び出しに
+      // setup: lib 全文 (norm だけ穴あき) + preWorkload (ここでは preWorkload は空) — slice/lib の宣言は残り、norm の本体は __HOLE__ 呼び出しに
       expect(r.setup).toContain("var slice = [].slice;");
       expect(r.setup).toContain("var lib = {};");
       expect(r.setup).toContain("globalThis.__HOLE__.call(this, slice, x)"); // 内部依存 slice が lift され引数化
