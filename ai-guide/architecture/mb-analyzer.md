@@ -136,6 +136,14 @@ mb-analyzer-legacy/           # [DEPRECATED] 旧 pnpm workspace monorepo
 
 詳細は [`index.md`](index.md) の「Python ↔ Node の JSON 契約」参照。
 
+## Preprocess の主要フィールドの意味
+
+`mb-analyzer/src/contracts/preprocessing-contracts.ts` の `PreprocessingResult` の主要フィールド:
+
+- **`setup`**: equivalence-checker の sandbox executor (`vm.ts` / `jsdom.ts`) の `setup` 引数に渡される文字列。sandbox で `body` を実行する前に context を整える generic な「準備コード」。中身の構成は `candidate_kind` ごとに異なる。詳細 (changed-fn の 2 要素 `libs` + `preWorkload` 構成など) は [`../code-map.md`](../code-map.md) §Selakovic 前処理器 §setup 構築規約 を参照。
+- **`slow` / `fast`**: 等価検証で比較する 2 セットの本体コード (before / after)。`candidate_kind` ごとに「embedded 全文」「変更関数本体のみ」など中身が変わる。
+- **`workload`** (changed-fn のみ、optional): placeholder model で `slow` / `fast` と分離された workload IIFE。executor の `body` 引数に渡される。詳細 [ADR-0023](../adr/0023-preprocess-placeholder-substitution.md) §設計の核。
+
 ---
 
 ## 新機能の追加ガイド
