@@ -18,6 +18,7 @@ import {
   snapshotValue,
 } from "../capture/snapshot";
 import type { ConsoleCall, ExceptionCapture, ExecutionCapture } from "../capture/types";
+import { SandboxSetupError } from "../errors";
 import { freezeContextNonDeterminism } from "../transforms/non-determinism";
 
 /**
@@ -33,21 +34,29 @@ import { freezeContextNonDeterminism } from "../transforms/non-determinism";
  * - server SUT が前提にしがちな最小 Node グローバル (`process` / `Buffer` / `global` / `setImmediate`) を注入する。
  * - `mount_html` が来たら、その HTML (`<script>` 除去後) を `<body>` に流し込んで mount する (react-808 の `#demo*` 不在対策)。
  * - 実行後の `dom.serialize()` を `capture.dom_html` に詰める (C2 DOM-mutation oracle の取得側)。
- * - `recordInteractions` が真なら記録 Proxy を `globalThis.__recorder` として context に注入し、body 実行後に
+ * - `recordInteractions` が真なら記録 Proxy を `globalThis.__recorder` として context に注入し、workload 実行後に
  *   `recorder.trace` を `capture.interaction_trace` に詰める (C6 の取得側)。runnable 側が `globalThis.__recorder` を見て
  *   workload が叩く境界オブジェクトを wrap する (`preprocessing/selakovic/assemble/*`)。注入しなければ runnable は素通り。
  * - `vm.ts` (素 vm 版) と同じ `ExecutionCapture` 形を返す (= oracle 層はこの型のみに依存)。
  */
 export interface JsdomExecuteOptions {
   setup: string;
-  body: string;
+  workload: string;
   timeout_ms: number;
   /** 相対 `require('./x')` を解決する基準ディレクトリ (絶対パス)。省略時は relative require が throw。 */
   module_base_dir?: string;
   /** mount する HTML (`<body>` の中身、または `<!doctype>`/`<html>` で始まる完全な文書)。`<script>` は除去される。 */
   mount_html?: string;
-  /** 真なら記録 Proxy を `globalThis.__recorder` として注入し、body 実行後の `recorder.trace` を `capture.interaction_trace` に詰める。 */
+  /** 真なら記録 Proxy を `globalThis.__recorder` として注入し、workload 実行後の `recorder.trace` を `capture.interaction_trace` に詰める。 */
   recordInteractions?: boolean;
+}
+
+/** workload 段階の評価結果 (戻り値 / 例外 / timeout を構造化)。 */
+interface WorkloadEvaluation {
+  returnValue: string;
+  returnIsUndefined: boolean;
+  exception: ExceptionCapture | null;
+  timedOut: boolean;
 }
 
 const DEFAULT_DOCUMENT = "<!doctype html><html><head></head><body></body></html>";
@@ -62,6 +71,46 @@ function buildDocument(mountHtml: string | undefined): string {
   const head = stripped.trimStart().slice(0, 32).toLowerCase();
   if (head.startsWith("<!doctype") || head.startsWith("<html")) return stripped;
   return `<!doctype html><html><head></head><body>${stripped}</body></html>`;
+}
+
+/**
+ * setup フェーズを context 上で実行する副作用呼び出し (戻り値なし)。
+ * setup 内での throw は `SandboxSetupError` で型分離して outer realm に投げる
+ * (= checker.ts の outer catch が `verdict_reason: "setup-failure"` に分類するため、ADR-0023 §D-β)。
+ * cross-realm 制約: vm.ts と同じく `new SandboxSetupError(e)` は host コード (= outer realm) で生成する。
+ */
+function prepareSandbox(setupCode: string, context: vm.Context, timeoutMs: number): void {
+  if (setupCode.length === 0) return;
+  try {
+    vm.runInContext(normalizeSetup(setupCode), context, { timeout: timeoutMs, displayErrors: false });
+  } catch (e) {
+    throw new SandboxSetupError(e);
+  }
+}
+
+/**
+ * workload を context 上で評価して `{ returnValue, returnIsUndefined, exception, timedOut }` を返す。
+ * vm.ts と並走する同形 helper。例外は戻り値に詰めて返り、outer には throw しない。
+ */
+async function evaluateWorkload(
+  workloadCode: string,
+  context: vm.Context,
+  timeoutMs: number,
+): Promise<WorkloadEvaluation> {
+  let exception: ExceptionCapture | null = null;
+  let timedOut = false;
+  let returnValue = "undefined";
+  let returnIsUndefined = true;
+  try {
+    const result: unknown = vm.runInContext(workloadCode, context, { timeout: timeoutMs, displayErrors: false });
+    const resolved = await resolveIfPromise(result);
+    if (resolved !== undefined) returnIsUndefined = false;
+    returnValue = snapshotValue(resolved);
+  } catch (e) {
+    if (isTimeoutError(e)) timedOut = true;
+    exception = captureException(e);
+  }
+  return { returnValue, returnIsUndefined, exception, timedOut };
 }
 
 export async function executeInJsdom(options: JsdomExecuteOptions): Promise<ExecutionCapture> {
@@ -85,8 +134,8 @@ export async function executeInJsdom(options: JsdomExecuteOptions): Promise<Exec
   }
   const baselineKeys = new Set(Object.keys(ctxRecord));
 
-  // body 実行前の DOM を覚えておく (= 初期 mount HTML の正規化前)。
-  // body 実行後にこれと比較して `dom_changed` を立てる。両側 false なら dom_mutation oracle は
+  // workload 実行前の DOM を覚えておく (= 初期 mount HTML の正規化前)。
+  // workload 実行後にこれと比較して `dom_changed` を立てる。両側 false なら dom_mutation oracle は
   // N/A を返す (= 「両側とも DOM を変更しなかった」を positive evidence に誤認しないため、ADR-0018)。
   let initialDomHtml: string | null = null;
   try {
@@ -95,25 +144,11 @@ export async function executeInJsdom(options: JsdomExecuteOptions): Promise<Exec
     initialDomHtml = null;
   }
 
-  if (options.setup.length > 0) {
-    vm.runInContext(normalizeSetup(options.setup), context, { timeout: options.timeout_ms, displayErrors: false });
-  }
+  prepareSandbox(options.setup, context, options.timeout_ms);
 
   const { setupKeys, trackedKeys, preSnapshots } = snapshotSetupState(ctxRecord, baselineKeys);
 
-  let exception: ExceptionCapture | null = null;
-  let timedOut = false;
-  let returnValue = "undefined";
-  let returnIsUndefined = true;
-  try {
-    const result: unknown = vm.runInContext(options.body, context, { timeout: options.timeout_ms, displayErrors: false });
-    const resolved = await resolveIfPromise(result);
-    if (resolved !== undefined) returnIsUndefined = false;
-    returnValue = snapshotValue(resolved);
-  } catch (e) {
-    if (isTimeoutError(e)) timedOut = true;
-    exception = captureException(e);
-  }
+  const evaluation = await evaluateWorkload(options.workload, context, options.timeout_ms);
 
   let domHtml: string | null = null;
   try {
@@ -121,7 +156,7 @@ export async function executeInJsdom(options: JsdomExecuteOptions): Promise<Exec
   } catch {
     domHtml = null;
   }
-  // 初期 mount HTML との文字列比較で「body 実行で DOM が変わったか」を判定する。
+  // 初期 mount HTML との文字列比較で「workload 実行で DOM が変わったか」を判定する。
   // 厳密な正規化 (属性順 / 空白 collapse / framework ノイズ) は dom_mutation oracle が profile で行うが、
   // ここの目的は「何か触ったか」の 0/1 判定なので素の文字列比較で十分 (両側に同じ初期 HTML を流すので
   // 比較は対称)。`domHtml` か `initialDomHtml` が serialize 失敗で null なら undefined のまま (= 不明)。
@@ -131,13 +166,13 @@ export async function executeInJsdom(options: JsdomExecuteOptions): Promise<Exec
   }
 
   const capture: ExecutionCapture = {
-    return_value: returnValue,
-    return_is_undefined: returnIsUndefined,
+    return_value: evaluation.returnValue,
+    return_is_undefined: evaluation.returnIsUndefined,
     arg_snapshots: collectArgSnapshots(ctxRecord, trackedKeys, preSnapshots),
-    exception,
+    exception: evaluation.exception,
     console_log: [...consoleCalls],
     new_globals: collectNewGlobals(ctxRecord, baselineKeys, setupKeys),
-    timed_out: timedOut,
+    timed_out: evaluation.timedOut,
     dom_html: domHtml,
   };
   if (domChanged !== undefined) capture.dom_changed = domChanged;
