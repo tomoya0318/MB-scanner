@@ -244,7 +244,7 @@ describe("runPrune", () => {
     expect(stderrSpy.writes.join("")).toContain("'timeout_ms' field must be in [1, 60000]");
   });
 
-  it("等価検証コンテキスト (environment / module_base_dir / mount_html / aspect 等) を渡しても受理される", async () => {
+  it("等価検証コンテキスト (environment / module_base_dir / mount_html) を渡しても受理される", async () => {
     restoreStdin = feedStdin(
       JSON.stringify({
         slow: "1 + 1",
@@ -254,9 +254,6 @@ describe("runPrune", () => {
         environment: "vm",
         module_base_dir: "/abs/issue",
         mount_html: "<div></div>",
-        aspect: "lib",
-        candidate_kind: "single",
-        enclosure_type: "f1-body",
       }),
     );
 
@@ -298,9 +295,6 @@ describe("runPrune", () => {
         environment: null,
         module_base_dir: null,
         mount_html: null,
-        aspect: null,
-        candidate_kind: null,
-        enclosure_type: null,
       }),
     );
 

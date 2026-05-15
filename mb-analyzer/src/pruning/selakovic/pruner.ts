@@ -9,17 +9,14 @@ import { prune as prunePure } from "../common/engine";
  *
  * `pruning/common/engine.prune` は `(setup, slow, fast, timeout_ms)` の最小契約で `checkEquivalence` を
  * 呼ぶので、その 4 つは `common/` 側が毎 iteration ごとに渡す。`environment` / `module_base_dir` /
- * `mount_html` / `aspect` / `candidate_kind` / `enclosure_type` は候補ごとに不変なので、ここで closure に
- * 閉じ込めて毎回マージする。`common/` はこれらの存在を知らない (= pruning アルゴリズムは dataset 非依存)。
+ * `mount_html` は候補ごとに不変なので、ここで closure に閉じ込めて毎回マージする。
+ * `common/` はこれらの存在を知らない (= pruning アルゴリズムは dataset 非依存)。
  */
 function buildEquivContext(input: PruningInput): Partial<EquivalenceInput> {
   const ctx: Partial<EquivalenceInput> = {};
   if (input.environment !== undefined) ctx.environment = input.environment;
   if (input.module_base_dir !== undefined) ctx.module_base_dir = input.module_base_dir;
   if (input.mount_html !== undefined) ctx.mount_html = input.mount_html;
-  if (input.aspect !== undefined) ctx.aspect = input.aspect;
-  if (input.candidate_kind !== undefined) ctx.candidate_kind = input.candidate_kind;
-  if (input.enclosure_type !== undefined) ctx.enclosure_type = input.enclosure_type;
   return ctx;
 }
 
@@ -43,7 +40,7 @@ if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
 
   describe("buildEquivContext (in-source)", () => {
-    it("等価検証コンテキストの 6 フィールドだけを抽出する (slow/fast/setup/timeout_ms/max_iterations は含めない)", () => {
+    it("等価検証コンテキストの 3 フィールドだけを抽出する (slow/fast/setup/timeout_ms/max_iterations は含めない)", () => {
       const ctx = buildEquivContext({
         id: "x",
         slow: "a",
@@ -54,17 +51,11 @@ if (import.meta.vitest) {
         environment: "jsdom",
         module_base_dir: "/abs/issue",
         mount_html: "<div></div>",
-        aspect: "A",
-        candidate_kind: "single",
-        enclosure_type: "server-test-case",
       });
       expect(ctx).toStrictEqual({
         environment: "jsdom",
         module_base_dir: "/abs/issue",
         mount_html: "<div></div>",
-        aspect: "A",
-        candidate_kind: "single",
-        enclosure_type: "server-test-case",
       });
     });
 
