@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""extracted.jsonl の中身を集計する (0022 版 — Phase 5 §新 candidate の検証)。
+"""extracted.jsonl の中身を集計する (ADR-0024 版)。
 
-- candidate_kind / aspect / enclosure_type 別の件数
-- changed-fn 候補の `before_node_count` (= 変更関数本体のノード数) の分布
-- 「`aspect: lib` の issue だが changed-fn を出せなかった」件数 (= workload が変更関数を呼ばない / fn unit 無し /
-   build 失敗 のいずれか — issue 単位で `aspect == "lib"` の候補があるのに同 issue に changed-fn が無いものを数える)
+ADR-0024 で extracted.jsonl は「1 行 = 1 IssueResult (内部 candidates: list)」構造。
+旧 candidate_kind / aspect (flat) → issue.issue_meta.aspect, candidate.candidate_meta.target_side,
+candidate.candidate_meta.is_workload_reachable で集計。
 
-usage: python tmp/0022_preprocess-workload-reachability-redesign/inspect_candidates.py
+usage: python research/research/preprocess_workload_reachability/code/inspect_candidates.py
 """
 
 from __future__ import annotations
@@ -20,52 +19,86 @@ WORK = os.path.abspath(os.path.dirname(__file__))
 EXTRACTED = os.path.join(WORK, "extracted.jsonl")
 
 
-def issue_key(rec_id: str) -> str:
-    return rec_id.split("#", 1)[0]
-
-
 def main() -> int:
-    recs = [json.loads(l) for l in open(EXTRACTED) if l.strip()]
-    n = len(recs)
-    excluded = [r for r in recs if r.get("excluded")]
-    ok = [r for r in recs if not r.get("excluded")]
+    issues = [json.loads(line) for line in open(EXTRACTED) if line.strip()]
+    n_issues = len(issues)
+    issue_excluded = [i for i in issues if i.get("issue_excluded")]
+    issue_ok = [i for i in issues if not i.get("issue_excluded")]
 
-    kind_c: Counter[str] = Counter(str(r.get("candidate_kind")) for r in ok)
-    aspect_c: Counter[str] = Counter(str(r.get("aspect")) for r in ok)
-    encl_c: Counter[str] = Counter(str(r.get("enclosure_type")) for r in ok)
-    excl_c: Counter[str] = Counter(str(r.get("excluded")) for r in excluded)
+    # issue level 集計
+    aspect_c: Counter[str] = Counter()
+    layout_c: Counter[str] = Counter()
+    wrapper_c: Counter[str] = Counter()
+    issue_excl_c: Counter[str] = Counter(str(i.get("issue_excluded")) for i in issue_excluded)
+    for i in issue_ok:
+        imeta = i.get("issue_meta") or {}
+        aspect_c[str(imeta.get("aspect"))] += 1
+        layout_c[str(imeta.get("layout"))] += 1
+        wrapper_c[str(imeta.get("wrapper_kind"))] += 1
 
-    changed_fn = [r for r in ok if r.get("candidate_kind") == "changed-fn"]
-    sizes = sorted(r["before_node_count"] for r in changed_fn if isinstance(r.get("before_node_count"), int))
-
-    # aspect: lib の issue 集合 / そのうち changed-fn を持つ issue
-    lib_issues = {issue_key(r["id"]) for r in ok if r.get("aspect") == "lib" and "id" in r}
-    lib_issues_with_cf = {issue_key(r["id"]) for r in changed_fn if "id" in r}
-    lib_no_cf = sorted(lib_issues - lib_issues_with_cf)
-
-    # changed-fn が複数出てる issue (= 同 issue で workload-reachable な変更関数が複数)
+    # candidate level 集計
+    target_side_c: Counter[str] = Counter()
+    workload_reachable_c: Counter[bool] = Counter()
+    encl_node_c: Counter[str] = Counter()
+    cand_excl_c: Counter[str] = Counter()
+    n_candidates = 0
+    changed_fn_sizes: list[int] = []
+    issue_with_changed_fn: set[str] = set()
     cf_per_issue: dict[str, int] = defaultdict(int)
-    for r in changed_fn:
-        cf_per_issue[issue_key(r["id"])] += 1
+
+    for issue in issue_ok:
+        issue_id = issue.get("id", "")
+        for c in issue.get("candidates", []):
+            n_candidates += 1
+            cmeta = c.get("candidate_meta") or {}
+            target_side_c[str(cmeta.get("target_side"))] += 1
+            workload_reachable_c[bool(cmeta.get("is_workload_reachable"))] += 1
+            encl_node_c[str(c.get("enclosure_node_type"))] += 1
+            if c.get("candidate_excluded"):
+                cand_excl_c[str(c.get("candidate_excluded"))] += 1
+            if cmeta.get("is_workload_reachable"):
+                issue_with_changed_fn.add(issue_id)
+                cf_per_issue[issue_id] += 1
+                bnc = c.get("before_node_count")
+                if isinstance(bnc, int):
+                    changed_fn_sizes.append(bnc)
+
+    # aspect: lib の issue で changed-fn を持たない issue (= workload 非到達 / fn unit 無し / param 不一致 等)
+    lib_issues = {i.get("id") for i in issue_ok if (i.get("issue_meta") or {}).get("aspect") == "lib"}
+    lib_no_cf = sorted(lib_issues - issue_with_changed_fn)
     multi_cf = {k: v for k, v in cf_per_issue.items() if v > 1}
 
-    print(f"records={n}  ok={len(ok)}  excluded={len(excluded)}")
-    print(f"  candidate_kind: {dict(kind_c)}")
-    print(f"  aspect:         {dict(aspect_c)}")
-    print(f"  enclosure_type: {dict(encl_c)}")
-    print(f"  excluded reasons: {dict(excl_c)}")
+    print(f"issues={n_issues}  ok={len(issue_ok)}  issue_excluded={len(issue_excluded)}")
+    print(f"  aspect:        {dict(aspect_c)}")
+    print(f"  layout:        {dict(layout_c)}")
+    print(f"  wrapper_kind:  {dict(wrapper_c)}")
+    if issue_excl_c:
+        print(f"  issue_excluded reasons: {dict(issue_excl_c)}")
     print()
-    print(f"changed-fn candidates: {len(changed_fn)}  (issues with >=1 changed-fn: {len(lib_issues_with_cf)})")
+    print(f"candidates total: {n_candidates}")
+    print(f"  target_side:           {dict(target_side_c)}")
+    print(f"  is_workload_reachable: {dict(workload_reachable_c)}")
+    print(f"  enclosure_node_type:   {dict(encl_node_c)}")
+    if cand_excl_c:
+        print(f"  candidate_excluded reasons: {dict(cand_excl_c)}")
+    print()
+    sizes = sorted(changed_fn_sizes)
+    print(
+        f"changed-fn (is_workload_reachable=True) candidates: {len(changed_fn_sizes)}  "
+        f"(issues with >=1: {len(issue_with_changed_fn)})",
+    )
     if sizes:
         print(
             f"  before_node_count: min={sizes[0]} median={int(statistics.median(sizes))} "
-            f"p90={sizes[int(len(sizes) * 0.9)] if len(sizes) > 1 else sizes[0]} max={sizes[-1]}  (n={len(sizes)})"
+            f"p90={sizes[int(len(sizes) * 0.9)] if len(sizes) > 1 else sizes[0]} max={sizes[-1]}  "
+            f"(n={len(sizes)})",
         )
     if multi_cf:
         print(f"  issues with multiple changed-fn: {multi_cf}")
     print()
     print(
-        f"aspect: lib issues = {len(lib_issues)}  / with changed-fn = {len(lib_issues_with_cf)}  / WITHOUT changed-fn = {len(lib_no_cf)}"
+        f"aspect: lib issues = {len(lib_issues)}  / with changed-fn = {len(issue_with_changed_fn & lib_issues)}  "
+        f"/ WITHOUT changed-fn = {len(lib_no_cf)}",
     )
     if lib_no_cf:
         print("  (no changed-fn = fn unit が無い or workload 非到達 or param 不一致 等):")
