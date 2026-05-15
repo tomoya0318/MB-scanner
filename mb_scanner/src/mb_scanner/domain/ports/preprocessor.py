@@ -30,5 +30,9 @@ class PreprocessorPort(Protocol):
         戻り値は **入力数 == 出力数** の対応列。各入力 ``items[i]`` に対応する結果が
         ``out[i]`` (= 入力順保持)。受理された各 issue の処理失敗 (parse-error など) は
         他 item の結果に波及してはならない (= 該当 IssueResult の ``issue_excluded`` を立てる)。
+
+        **id の制約**: ``items`` 内の ``id`` は一意でなければならない (None は複数可)。
+        Node 側が echo back する id で result を引き当てるため、duplicate user id があると
+        対応付けが破綻する。実装は duplicate を ``ValueError`` で reject すべき。
         """
         ...

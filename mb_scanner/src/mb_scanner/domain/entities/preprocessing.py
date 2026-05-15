@@ -27,7 +27,7 @@ class ExclusionReasonBase(StrEnum):
     """全 dataset で意味を持つ汎用の除外理由
 
     dataset 固有の理由は ``SelakovicExclusionReason`` 等の adapter 側 enum に置く。
-    ``excluded`` フィールドは Union 型 ``ExclusionReasonAny`` を受ける。
+    ``issue_excluded`` / ``candidate_excluded`` フィールドは Union 型 ``ExclusionReasonAny`` を受ける。
     """
 
     PARSE_ERROR = "parse-error"

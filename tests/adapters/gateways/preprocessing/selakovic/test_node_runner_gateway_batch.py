@@ -127,6 +127,43 @@ class TestPreprocessBatchMocked:
                 [PreprocessingInput(id=f"{INTERNAL_KEY_PREFIX}danger", issue_dir="/tmp/x")],
             )
 
+    def test_duplicate_user_id_raises(self, tmp_path: Path) -> None:
+        # ADR-0024 で 1 入力 → 1 IssueResult モデルなので、result_by_key で id ベースに
+        # 引き当てる。duplicate user id は対応付けを破綻させるため reject。
+        fake_cli = tmp_path / "cli.js"
+        fake_cli.write_text("// stub")
+        gw = _gateway(fake_cli)
+        with pytest.raises(ValueError, match="Duplicate input id"):
+            gw.preprocess_batch(
+                [
+                    PreprocessingInput(id="dup", issue_dir="/tmp/a"),
+                    PreprocessingInput(id="dup", issue_dir="/tmp/b"),
+                ],
+            )
+
+    def test_multiple_none_ids_allowed(self, tmp_path: Path) -> None:
+        # None id は内部 salt key で一意化されるので、複数 None でも OK
+        fake_cli = tmp_path / "cli.js"
+        fake_cli.write_text("// stub")
+
+        def fake_run(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            payload = kwargs.get("input")
+            assert isinstance(payload, str)
+            lines = payload.strip().split("\n")
+            stdouts = [_fake_issue_result(id_=json.loads(line)["id"]) for line in lines]
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="\n".join(stdouts), stderr="")
+
+        with patch.object(subprocess, "run", side_effect=fake_run):
+            gw = _gateway(fake_cli)
+            results = gw.preprocess_batch(
+                [
+                    PreprocessingInput(issue_dir="/tmp/a"),
+                    PreprocessingInput(issue_dir="/tmp/b"),
+                ],
+            )
+        assert len(results) == 2
+        assert all(r.id is None for r in results)
+
     def test_missing_result_for_some_items_fills_with_error(self, tmp_path: Path) -> None:
         # 入力 ["a", "b"] に対し Node が "a" だけ返したケース
         fake_cli = tmp_path / "cli.js"

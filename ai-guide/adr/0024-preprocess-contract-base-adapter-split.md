@@ -115,7 +115,7 @@ IssueMeta = Annotated[SelakovicIssueMeta, Field(discriminator="adapter")]
 
 #### oracle 選択 hint の廃止
 
-`EquivalenceInput` / `PruningInput` の `aspect` / `candidate_kind` / `enclosure_type` 3 フィールドは削除。oracle 選択は `equivalence-checker/selakovic/oracle-routing.ts` の `environment` (vm / jsdom) 1 軸で完結する設計を ADR-0015 の正式裁定として確定 (= 並記されていた「hint で部分集合を選ぶ」案は不採用と確定)。`environment` は `layout` から派生 (layout=server → vm、layout=client → jsdom) なので contract には残さず、selakovic adapter 内で lookup。
+`EquivalenceInput` / `PruningInput` の `aspect` / `candidate_kind` / `enclosure_type` 3 フィールドは削除。oracle 選択は `equivalence-checker/selakovic/oracle-routing.ts` の `environment` (vm / jsdom) 1 軸で完結する設計を ADR-0015 の正式裁定として確定 (= 並記されていた「hint で部分集合を選ぶ」案は不採用と確定)。`environment` は preprocess contract には残さず、selakovic adapter (`research/.../code/build_equiv_input.py:derive_environment`) が引き当てる: **現状は常に `jsdom`** (server candidate も `require`/Node globals を jsdom executor の shim で解決する前提、`oracle-routing.ts` line 6 / `assemble/server.ts` 参照)。VM executor が server contract をサポートする実装が入った時点で layout 別の派生に変更する。
 
 #### assemble 関数の組織 (実装側)
 
@@ -139,7 +139,7 @@ IssueMeta = Annotated[SelakovicIssueMeta, Field(discriminator="adapter")]
 
 - **brain-2 既存 `extracted.jsonl` (143 件) との互換**: 物理構造が flat → 階層化、フィールド名も変わる → 旧 jsonl から新スキーマへの migration script が必要。トリガー: 過去結果の再現性が必要になった時点で着手。`enclosure_node_type` は v1 から既に出ているので derived view で v1 集計値の大半は再現可能 (`tmp/0001_*/plan.md` §J-4 と同じ手口)。
 - **independent split のペア識別**: candidate level だけ見ると `target_side=lib` の candidate と `target_side=workload` の candidate がペアか単独かを判別不能。`(issue.aspect == "lib+workload", candidate_count == 2)` で issue level から識別する規約を集計側に置く必要。
-- **fallback の `target_side` 値**: 現状未確定 (`both` か `lib` か他か)。**受け入れるリスク**: 集計需要が出た時点で確定 (= 別 ADR or 本 ADR への末尾追記)。
+- **fallback の `target_side` 値**: 実装で `both` に確定 (`assemble/fallback.ts` で `TARGET_SIDE.BOTH` を hardcode)。fallback は lib/workload 両方の patch を含みうる top-level statement diff のため、どちらか片側に寄せる根拠がない。集計上 `target_side == "lib"` / `"workload"` のフィルタからは除外され、fallback 専用の集計が要るなら `aspect == "fallback"` で見る。
 - **`workload?: string` フィールド (ADR-0023 D-β 由来) の配置**: 本 ADR 起票時点では未決定。ADR-0023 D-β マージ後に `PreprocessingCandidate` の base に optional フィールドとして追加し、本 ADR 末尾に「§更新」で確定する想定。
 - **将来 oracle 切り替えが必要になった場合**: hint 廃止により、aspect/kind ベースで oracle 部分集合を選ぶ実装は contract レベルではできなくなる。代替: selakovic adapter 内で `(aspect, target_side, layout, wrapper_kind)` から oracle subset / 正規化プロファイルを引く lookup table を持つ。ADR-0015 の DOM 正規化プロファイル分岐トリガー発火時点でこの設計を具体化。
 
@@ -153,7 +153,7 @@ IssueMeta = Annotated[SelakovicIssueMeta, Field(discriminator="adapter")]
 - README: `mb-analyzer/src/equivalence-checker/README.md` の「`aspect` / `candidate_kind` / `enclosure_type` hint」記述を削除 or 「派生で持つ」に書き換え
 - 過去 ADR (0011 / 0014 / 0015 / 0022 / 0023): 末尾に「§更新 2026-05-15: 本 ADR (0024) で再設計」一行追記
 
-実装は **ADR-0023 D-β (`workload?` フィールド追加) のマージ後** に着手する (同じ contract ファイル群を編集するため、conflict 回避の観点)。本 ADR は実装に先行して accepted で commit。
+実装は **本 ADR ブランチを D-β 本体より先に main マージする前提** で進める (本ブランチで preprocess / equiv / pruning contract の構造変更を完結させ、D-β 本体側で rebase + `workload?` フィールドを追加)。同じ contract ファイル群を編集するため、逆順 (D-β 本体先) だと本 ADR 実装ブランチが大規模 rebase を被る。
 
 ## トリガー (再検討の条件)
 

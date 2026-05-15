@@ -105,6 +105,10 @@ class NodeRunnerPreprocessorGateway:
 
         invocation_salt = secrets.token_hex(8)
         indexed: list[tuple[str, str | None, PreprocessingInput]] = []
+        # batch_key (= subprocess に送る id) は input 内で一意でなければならない: 入力数 == 出力数の
+        # 対応 (ADR-0024) を保つため、Node 側が echo back する id で result を引き当てる必要がある。
+        # ユーザー指定 id が重複していると result_by_key で上書きされ、出力が同じ result で埋まる。
+        seen_user_ids: set[str] = set()
         for idx, item in enumerate(items):
             original_id = item.id
             if item.id is not None:
@@ -113,6 +117,12 @@ class NodeRunnerPreprocessorGateway:
                         f"Input id {item.id!r} collides with internal reserved prefix "
                         f"{INTERNAL_KEY_PREFIX!r}. Use a different id scheme.",
                     )
+                if item.id in seen_user_ids:
+                    raise ValueError(
+                        f"Duplicate input id {item.id!r}: ids must be unique within a batch "
+                        "to preserve input-order correspondence (ADR-0024).",
+                    )
+                seen_user_ids.add(item.id)
                 key = item.id
                 sent_item = item
             else:

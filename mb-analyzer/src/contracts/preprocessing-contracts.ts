@@ -6,11 +6,14 @@
  *
  * 構造の方針 (ADR-0024):
  *  - **base contract**: 全 dataset で意味を持つフィールドのみ
- *    (id, setup, slow, fast, before/after_node_count, excluded, excluded_detail, enclosure_node_type)
+ *    (id, issue_excluded, issue_excluded_detail, candidate_count, candidates[].setup/slow/fast,
+ *     candidates[].before/after_node_count, candidates[].enclosure_node_type, candidates[].candidate_excluded)
  *  - **adapter extension**: dataset 固有情報は `issue_meta` / `candidate_meta` (discriminated union)
  *  - **issue 階層化**: jsonl 1 行 = 1 issue、`candidates: list[PreprocessingCandidate]`
  *  - 旧 `candidate_kind` / `enclosure_type` (戦略ラベル含む) / `aspect` / `layout` (issue level) /
  *    `environment` は廃止 or adapter_meta へ移動
+ *  - `excluded` フィールドは旧フラット契約名。新契約では `issue_excluded` / `candidate_excluded` の
+ *    2 レベル (issue level と candidate level) に分離
  */
 
 // ============================================================================
@@ -26,7 +29,7 @@
  * - `missing-files`: 期待するファイル (v_*.html / <lib>_* など) が欠落
  *
  * dataset 固有の理由は `SelakovicExclusionReason` 等の adapter 側 enum に置く。
- * `excluded` フィールドは Union 型 `ExclusionReasonAny` を受ける。
+ * `issue_excluded` / `candidate_excluded` フィールドは Union 型 `ExclusionReasonAny` を受ける。
  */
 export const EXCLUSION_REASON_BASE = {
   PARSE_ERROR: "parse-error",
