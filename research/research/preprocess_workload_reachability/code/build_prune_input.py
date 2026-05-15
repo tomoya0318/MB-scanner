@@ -13,6 +13,7 @@ usage:
   python tmp/0022_.../build_prune_input.py                       # BIG_MAX_ITER=50  SMALL_MAX_ITER=5000
   python tmp/0022_.../build_prune_input.py 30 2000               # 上書き (BIG, SMALL)
 """
+
 from __future__ import annotations
 
 import json
@@ -25,8 +26,10 @@ EQUIV_INPUT = os.path.join(WORK, "equiv-input.jsonl")
 PRUNE_INPUT = os.path.join(WORK, "prune-input.jsonl")
 
 PRUNE_VERDICTS = {"equal"}
-MAX_CODE_LENGTH = 20_000_000  # PruningInput.MAX_CODE_LENGTH (= EquivalenceInput と同じ。setup に lib 全文が入るので大きめ)
-TIMEOUT_MS = 3_000            # per-iteration 等価検証 timeout
+MAX_CODE_LENGTH = (
+    20_000_000  # PruningInput.MAX_CODE_LENGTH (= EquivalenceInput と同じ。setup に lib 全文が入るので大きめ)
+)
+TIMEOUT_MS = 3_000  # per-iteration 等価検証 timeout
 # setup がこの文字数を超える候補 (= Ember 級 lib 全文 + 依存 lib) は 1 iter が重い + prune のメモリリークで
 # 数百 iter で OOM → 収束は諦めて小さい cap。それ未満 (= 小 lib の changed-fn / body) は大きめ cap。
 BIG_SETUP_THRESHOLD = 500_000

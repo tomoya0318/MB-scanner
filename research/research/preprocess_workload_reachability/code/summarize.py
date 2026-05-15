@@ -6,13 +6,14 @@
 
 usage: python tmp/0022_.../summarize.py [prune-results.jsonl]   (引数なしなら tmp/0022_.../prune-results.jsonl)
 """
+
 from __future__ import annotations
 
+from collections import Counter, defaultdict
 import json
 import os
 import statistics
 import sys
-from collections import Counter, defaultdict
 
 WORK = os.path.abspath(os.path.dirname(__file__))
 DEFAULT_PRUNE_RESULTS = os.path.join(WORK, "prune-results.jsonl")
@@ -37,7 +38,11 @@ def reduction(r: dict) -> float | None:
 def main() -> int:
     path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_PRUNE_RESULTS
     results = [json.loads(l) for l in open(path) if l.strip()]
-    prune_in = {json.loads(l)["id"]: json.loads(l) for l in open(PRUNE_INPUT) if l.strip()} if os.path.isfile(PRUNE_INPUT) else {}
+    prune_in = (
+        {json.loads(l)["id"]: json.loads(l) for l in open(PRUNE_INPUT) if l.strip()}
+        if os.path.isfile(PRUNE_INPUT)
+        else {}
+    )
 
     verdict_c: Counter[str] = Counter(str(r.get("verdict")) for r in results)
     pruned = [r for r in results if r.get("verdict") == "pruned"]
@@ -59,7 +64,9 @@ def main() -> int:
             f"    min={reds_sorted[0]:.3f}  p25={statistics.quantiles(reds, n=4)[0]:.3f}  "
             f"median={statistics.median(reds):.3f}  p75={statistics.quantiles(reds, n=4)[2]:.3f}  max={reds_sorted[-1]:.3f}"
         )
-    print(f"  iterations が cap (max_iterations) に張り付いた pruned 件数 = {cap_hit} / {len(pruned)}  (= 収束せず or メモリリークで打ち切り)")
+    print(
+        f"  iterations が cap (max_iterations) に張り付いた pruned 件数 = {cap_hit} / {len(pruned)}  (= 収束せず or メモリリークで打ち切り)"
+    )
 
     # enclosure_type / candidate_kind 別
     by_encl: dict[str, list[float]] = defaultdict(list)

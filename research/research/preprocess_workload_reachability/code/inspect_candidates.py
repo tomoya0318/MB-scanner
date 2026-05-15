@@ -8,12 +8,13 @@
 
 usage: python tmp/0022_preprocess-workload-reachability-redesign/inspect_candidates.py
 """
+
 from __future__ import annotations
 
+from collections import Counter, defaultdict
 import json
 import os
 import statistics
-from collections import Counter, defaultdict
 
 WORK = os.path.abspath(os.path.dirname(__file__))
 EXTRACTED = os.path.join(WORK, "extracted.jsonl")
@@ -58,12 +59,14 @@ def main() -> int:
     if sizes:
         print(
             f"  before_node_count: min={sizes[0]} median={int(statistics.median(sizes))} "
-            f"p90={sizes[int(len(sizes)*0.9)] if len(sizes)>1 else sizes[0]} max={sizes[-1]}  (n={len(sizes)})"
+            f"p90={sizes[int(len(sizes) * 0.9)] if len(sizes) > 1 else sizes[0]} max={sizes[-1]}  (n={len(sizes)})"
         )
     if multi_cf:
         print(f"  issues with multiple changed-fn: {multi_cf}")
     print()
-    print(f"aspect: lib issues = {len(lib_issues)}  / with changed-fn = {len(lib_issues_with_cf)}  / WITHOUT changed-fn = {len(lib_no_cf)}")
+    print(
+        f"aspect: lib issues = {len(lib_issues)}  / with changed-fn = {len(lib_issues_with_cf)}  / WITHOUT changed-fn = {len(lib_no_cf)}"
+    )
     if lib_no_cf:
         print("  (no changed-fn = fn unit が無い or workload 非到達 or param 不一致 等):")
         for k in lib_no_cf:

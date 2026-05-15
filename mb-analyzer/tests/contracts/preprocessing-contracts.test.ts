@@ -1,24 +1,32 @@
 /**
- * 対象: src/contracts/preprocessing-contracts.ts (Python ↔ TypeScript の JSON 契約)
+ * 対象: src/contracts/preprocessing-contracts.ts (Python ↔ TypeScript の JSON 契約、ADR-0024)
  * 観点: Python 側 Pydantic StrEnum と同じ文字列値・同じ union 幅で型が narrow されていること
  * 判定事項:
- *   - LAYOUT_KIND / EXCLUSION_REASON: Python 側 StrEnum と同一の文字列値 (runtime)
- *   - LayoutKind / ExclusionReason: union 型が Python と同じ列挙幅 (型レベル)
- *   - PreprocessingInput: issue_dir 必須、id は任意 (paired-change の serialize 規則)
- *   - PreprocessingResult: layout 必須、それ以外は任意 (excluded ありなしの両系統が成立)
+ *   - LAYOUT_KIND / EXCLUSION_REASON_BASE / SELAKOVIC_EXCLUSION_REASON / TARGET_SIDE / WRAPPER_KIND:
+ *     Python 側 StrEnum と同一の文字列値 (runtime)
+ *   - 各 type union が Python と同じ列挙幅 (型レベル)
+ *   - PreprocessingInput: issue_dir 必須、id は任意
+ *   - PreprocessingIssueResult / PreprocessingCandidate: 新階層構造の整合
  */
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   ASPECT,
-  CANDIDATE_KIND,
-  EXCLUSION_REASON,
+  EXCLUSION_REASON_BASE,
   LAYOUT_KIND,
+  SELAKOVIC_EXCLUSION_REASON,
+  TARGET_SIDE,
+  WRAPPER_KIND,
   type Aspect,
-  type CandidateKind,
-  type ExclusionReason,
-  type LayoutKind,
+  type ExclusionReasonAny,
+  type ExclusionReasonBase,
+  type PreprocessingCandidate,
   type PreprocessingInput,
-  type PreprocessingResult,
+  type PreprocessingIssueResult,
+  type SelakovicCandidateMeta,
+  type SelakovicExclusionReason,
+  type SelakovicIssueMeta,
+  type TargetSide,
+  type WrapperKind,
 } from "../../src/contracts/preprocessing-contracts";
 
 describe("LAYOUT_KIND", () => {
@@ -29,37 +37,43 @@ describe("LAYOUT_KIND", () => {
       UNKNOWN: "unknown",
     });
   });
+});
 
-  it("LayoutKind 型が 3 値の union として narrow される", () => {
-    expectTypeOf<LayoutKind>().toEqualTypeOf<"client" | "server" | "unknown">();
+describe("EXCLUSION_REASON_BASE", () => {
+  it("Python 側 ExclusionReasonBase StrEnum と同じ文字列値を持つ", () => {
+    expect(EXCLUSION_REASON_BASE).toStrictEqual({
+      PARSE_ERROR: "parse-error",
+      NO_CHANGED_NODES: "no-changed-nodes",
+      MULTI_FILE_CHANGE: "multi-file-change",
+      MISSING_FILES: "missing-files",
+    });
+  });
+
+  it("ExclusionReasonBase 型が 4 値の union", () => {
+    expectTypeOf<ExclusionReasonBase>().toEqualTypeOf<
+      "parse-error" | "no-changed-nodes" | "multi-file-change" | "missing-files"
+    >();
   });
 });
 
-describe("EXCLUSION_REASON", () => {
-  it("Python 側 ExclusionReason StrEnum と同じ文字列値を持つ", () => {
-    expect(EXCLUSION_REASON).toStrictEqual({
-      PARSE_ERROR: "parse-error",
-      NO_CHANGED_NODES: "no-changed-nodes",
+describe("SELAKOVIC_EXCLUSION_REASON", () => {
+  it("Python 側 SelakovicExclusionReason StrEnum と同じ文字列値を持つ", () => {
+    expect(SELAKOVIC_EXCLUSION_REASON).toStrictEqual({
       MODULE_WIDE_CHANGE: "module-wide-change",
-      MULTI_FILE_CHANGE: "multi-file-change",
       NO_ENCLOSURE_CANDIDATE: "no-enclosure-candidate",
       LAYOUT_UNKNOWN: "layout-unknown",
-      MISSING_FILES: "missing-files",
       CHANGE_NOT_EXERCISED: "change-not-exercised",
     });
   });
 
-  it("ExclusionReason 型が 8 値の union", () => {
-    expectTypeOf<ExclusionReason>().toEqualTypeOf<
-      | "parse-error"
-      | "no-changed-nodes"
-      | "module-wide-change"
-      | "multi-file-change"
-      | "no-enclosure-candidate"
-      | "layout-unknown"
-      | "missing-files"
-      | "change-not-exercised"
+  it("SelakovicExclusionReason 型が 4 値の union", () => {
+    expectTypeOf<SelakovicExclusionReason>().toEqualTypeOf<
+      "module-wide-change" | "no-enclosure-candidate" | "layout-unknown" | "change-not-exercised"
     >();
+  });
+
+  it("ExclusionReasonAny は base 4 値 + Selakovic 4 値 (合計 8 値)", () => {
+    expectTypeOf<ExclusionReasonAny>().toEqualTypeOf<ExclusionReasonBase | SelakovicExclusionReason>();
   });
 });
 
@@ -78,65 +92,155 @@ describe("ASPECT", () => {
   });
 });
 
-describe("CANDIDATE_KIND", () => {
-  it("Python 側 CandidateKind StrEnum と同じ文字列値を持つ", () => {
-    expect(CANDIDATE_KIND).toStrictEqual({
-      SINGLE: "single",
+describe("TARGET_SIDE", () => {
+  it("Python 側 TargetSide StrEnum と同じ文字列値を持つ", () => {
+    expect(TARGET_SIDE).toStrictEqual({
       LIB: "lib",
-      BODY: "body",
-      CHANGED_FN: "changed-fn",
+      WORKLOAD: "workload",
+      BOTH: "both",
     });
   });
 
-  it("CandidateKind 型が 4 値の union", () => {
-    expectTypeOf<CandidateKind>().toEqualTypeOf<"single" | "lib" | "body" | "changed-fn">();
+  it("TargetSide 型が 3 値の union", () => {
+    expectTypeOf<TargetSide>().toEqualTypeOf<"lib" | "workload" | "both">();
+  });
+});
+
+describe("WRAPPER_KIND", () => {
+  it("Python 側 WrapperKind StrEnum と同じ文字列値を持つ", () => {
+    expect(WRAPPER_KIND).toStrictEqual({
+      TOP_LEVEL: "top_level",
+      ANGULAR_CONTROLLER_WRAPPER: "angular_controller_wrapper",
+    });
+  });
+
+  it("WrapperKind 型が 2 値の union", () => {
+    expectTypeOf<WrapperKind>().toEqualTypeOf<"top_level" | "angular_controller_wrapper">();
   });
 });
 
 describe("PreprocessingInput", () => {
-  it("issue_dir 必須、id は任意 (Python 側 PreprocessingInput と整合)", () => {
+  it("issue_dir 必須、id は任意", () => {
     const minimal: PreprocessingInput = { issue_dir: "/tmp/issue-1" };
     const withId: PreprocessingInput = { id: "case-01", issue_dir: "/tmp/issue-1" };
     expect(minimal.id).toBeUndefined();
     expect(withId.id).toBe("case-01");
   });
+});
 
-  it("JSON 往復でフィールド名と値が保持される", () => {
-    const input: PreprocessingInput = { id: "case-01", issue_dir: "/abs/path" };
-    const parsed = JSON.parse(JSON.stringify(input)) as PreprocessingInput;
-    expect(parsed).toStrictEqual(input);
-    expect(Object.keys(parsed).sort()).toEqual(["id", "issue_dir"]);
+describe("SelakovicIssueMeta", () => {
+  it("layout / aspect / wrapper_kind を含む", () => {
+    const m: SelakovicIssueMeta = {
+      adapter: "selakovic",
+      layout: LAYOUT_KIND.CLIENT,
+      aspect: ASPECT.LIB,
+      wrapper_kind: WRAPPER_KIND.TOP_LEVEL,
+    };
+    expect(m.adapter).toBe("selakovic");
+    expect(m.aspect).toBe("lib");
   });
 });
 
-describe("PreprocessingResult", () => {
-  it("excluded なし (抽出成功) は slow / fast / setup / enclosure_type を含めて表現できる", () => {
-    const ok: PreprocessingResult = {
-      id: "case-01",
-      layout: LAYOUT_KIND.CLIENT,
+describe("SelakovicCandidateMeta", () => {
+  it("target_side / is_workload_reachable を含む", () => {
+    const m: SelakovicCandidateMeta = {
+      adapter: "selakovic",
+      target_side: TARGET_SIDE.LIB,
+      is_workload_reachable: true,
+    };
+    expect(m.target_side).toBe("lib");
+    expect(m.is_workload_reachable).toBe(true);
+  });
+});
+
+describe("PreprocessingCandidate", () => {
+  it("setup / slow / fast / candidate_meta を含む candidate を表現できる", () => {
+    const c: PreprocessingCandidate = {
+      setup: "const arr = [1, 2, 3];",
       slow: "arr[0]",
       fast: "arr[1]",
-      setup: "const arr = [1, 2, 3];",
-      enclosure_type: "FunctionDeclaration",
+      enclosure_node_type: "FunctionExpression",
       before_node_count: 12,
       after_node_count: 10,
+      candidate_meta: {
+        adapter: "selakovic",
+        target_side: TARGET_SIDE.WORKLOAD,
+        is_workload_reachable: false,
+      },
     };
-    expect(ok.excluded).toBeUndefined();
-    expect(ok.enclosure_type).toBe("FunctionDeclaration");
+    expect(c.setup).toBe("const arr = [1, 2, 3];");
+    expect(c.candidate_meta.target_side).toBe("workload");
   });
 
-  it("excluded あり (抽出失敗) は excluded / excluded_detail のみで成立する", () => {
-    const excluded: PreprocessingResult = {
-      layout: LAYOUT_KIND.UNKNOWN,
-      excluded: EXCLUSION_REASON.LAYOUT_UNKNOWN,
-      excluded_detail: "cannot determine layout",
+  it("candidate_excluded のみで成立する (setup / slow / fast 省略可)", () => {
+    const c: PreprocessingCandidate = {
+      candidate_excluded: SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED,
+      candidate_meta: {
+        adapter: "selakovic",
+        target_side: TARGET_SIDE.LIB,
+        is_workload_reachable: false,
+      },
     };
-    expect(excluded.slow).toBeUndefined();
-    expect(excluded.excluded).toBe("layout-unknown");
+    expect(c.candidate_excluded).toBe("change-not-exercised");
+    expect(c.slow).toBeUndefined();
+  });
+});
+
+describe("PreprocessingIssueResult", () => {
+  it("candidates 配列と issue_meta を含む 1 issue を表現できる", () => {
+    const r: PreprocessingIssueResult = {
+      id: "case-01",
+      candidates: [
+        {
+          setup: "var x=1;",
+          slow: "x",
+          fast: "x",
+          candidate_meta: {
+            adapter: "selakovic",
+            target_side: TARGET_SIDE.WORKLOAD,
+            is_workload_reachable: false,
+          },
+        },
+      ],
+      candidate_count: 1,
+      issue_meta: {
+        adapter: "selakovic",
+        layout: LAYOUT_KIND.CLIENT,
+        aspect: ASPECT.WORKLOAD,
+        wrapper_kind: WRAPPER_KIND.TOP_LEVEL,
+      },
+    };
+    expect(r.candidate_count).toBe(1);
+    expect(r.candidates[0]?.candidate_meta.target_side).toBe("workload");
   });
 
-  it("layout のみ必須 (id を含まない結果も成立)", () => {
-    const minimal: PreprocessingResult = { layout: LAYOUT_KIND.SERVER };
-    expect(minimal.id).toBeUndefined();
+  it("issue_excluded で issue 全体の処理失敗を表現できる (issue_meta は省略可)", () => {
+    const r: PreprocessingIssueResult = {
+      id: "case-01",
+      issue_excluded: SELAKOVIC_EXCLUSION_REASON.LAYOUT_UNKNOWN,
+      issue_excluded_detail: "no v_*.html",
+      candidates: [],
+      candidate_count: 0,
+    };
+    expect(r.issue_excluded).toBe("layout-unknown");
+    expect(r.candidates).toEqual([]);
+    expect(r.issue_meta).toBeUndefined();
+  });
+
+  it("JSON 往復でフィールドが保持される", () => {
+    const r: PreprocessingIssueResult = {
+      id: "case-01",
+      candidates: [],
+      candidate_count: 0,
+      issue_meta: {
+        adapter: "selakovic",
+        layout: LAYOUT_KIND.SERVER,
+        aspect: ASPECT.LIB,
+        wrapper_kind: WRAPPER_KIND.TOP_LEVEL,
+      },
+    };
+    const parsed = JSON.parse(JSON.stringify(r)) as PreprocessingIssueResult;
+    expect(parsed.id).toBe("case-01");
+    expect(parsed.issue_meta?.layout).toBe("server");
   });
 });

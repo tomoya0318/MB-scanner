@@ -1,4 +1,4 @@
-"""Preprocessing CLI コマンド
+"""Preprocessing CLI コマンド (ADR-0024)
 
 - ``mbs preprocess-selakovic``: 1 issue の前処理。stdin/stdout JSON。
 - ``mbs preprocess-selakovic-batch``: 入力モード 2 種:
@@ -7,9 +7,10 @@
 
 並列化は pruning と同じく Python 側 ThreadPoolExecutor で chunk を並列に投げる
 (Node 側 1 subprocess = 逐次)。
+
+ADR-0024 で 1 入力 → 1 IssueResult モデルに変更 (旧 1 入力 → N flat result から)。
 """
 
-from collections import Counter
 from collections.abc import Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
@@ -28,10 +29,8 @@ from mb_scanner.adapters.gateways.preprocessing import (
     scan_selakovic_dataset,
 )
 from mb_scanner.domain.entities.preprocessing import (
-    ExclusionReason,
-    LayoutKind,
     PreprocessingInput,
-    PreprocessingResult,
+    PreprocessingIssueResult,
 )
 from mb_scanner.domain.ports.preprocessor import PreprocessorPort
 from mb_scanner.infrastructure.config import settings
@@ -55,14 +54,9 @@ EXIT_BATCH_ERROR = 2
 # ---------------------------------------------------------------------------
 
 
-def _write_single_output(results: Sequence[PreprocessingResult], output_path: Path | None) -> None:
-    """単発 CLI の出力。
-
-    1 入力 → N 結果モデルなので常に JSONL で出力する (1 結果でも 1 行 JSONL、
-    N 結果なら N 行)。
-    """
-    lines = [r.model_dump_json() for r in results]
-    text = "\n".join(lines) + ("\n" if lines else "")
+def _write_single_output(result: PreprocessingIssueResult, output_path: Path | None) -> None:
+    """単発 CLI の出力 (1 issue = 1 行 JSONL)。"""
+    text = result.model_dump_json() + "\n"
     if output_path is None:
         sys.stdout.write(text)
         sys.stdout.flush()
@@ -71,11 +65,7 @@ def _write_single_output(results: Sequence[PreprocessingResult], output_path: Pa
 
 
 def _build_inputs_from_jsonl(input_path: Path) -> list[PreprocessingInput]:
-    """JSONL ファイルから ``PreprocessingInput`` リストを構築する。
-
-    各行は ``{"id"?: str, "issue_dir": str}`` の JSON object。``id`` 欠落時は
-    ``line-NNNN`` で自動補完する (Gateway でのマッピング用)。
-    """
+    """JSONL ファイルから ``PreprocessingInput`` リストを構築する。"""
     inputs: list[PreprocessingInput] = []
     text = input_path.read_text()
     for idx, raw_line in enumerate(text.splitlines()):
@@ -110,18 +100,11 @@ def _build_inputs_from_jsonl(input_path: Path) -> list[PreprocessingInput]:
 
 
 def _build_inputs_from_dataset(dataset_root: Path) -> list[PreprocessingInput]:
-    """Selakovic dataset 配下の全 issue ディレクトリから ``PreprocessingInput`` を構築する。
-
-    ``id`` には ``<category>/<lib>/<issue_id>`` 形式の自然な識別子を付与する
-    (line-NNNN より集計レポートで読みやすい)。
-    """
-    # scan_selakovic_dataset は resolve() 済みの絶対パスを返すので、relative_to が
-    # 失敗しないよう dataset_root も resolve しておく。
+    """Selakovic dataset 配下の全 issue ディレクトリから ``PreprocessingInput`` を構築する。"""
     resolved_root = dataset_root.resolve()
     issue_dirs = scan_selakovic_dataset(resolved_root)
     inputs: list[PreprocessingInput] = []
     for issue_dir in issue_dirs:
-        # <dataset_root>/clientIssues/AngularIssues/issues/issue_4359 → "clientIssues/AngularIssues/issue_4359"
         try:
             rel = issue_dir.relative_to(resolved_root)
             parts = rel.parts
@@ -140,7 +123,7 @@ def _chunked(items: Sequence[PreprocessingInput], batch_size: int) -> Iterator[l
         yield list(items[start : start + batch_size])
 
 
-def _write_batch_output(results: Sequence[PreprocessingResult], output_path: Path | None) -> None:
+def _write_batch_output(results: Sequence[PreprocessingIssueResult], output_path: Path | None) -> None:
     lines = [result.model_dump_json() for result in results]
     text = "\n".join(lines) + ("\n" if lines else "")
     if output_path is None:
@@ -150,34 +133,25 @@ def _write_batch_output(results: Sequence[PreprocessingResult], output_path: Pat
     output_path.write_text(text)
 
 
-def _summarize(results: Sequence[PreprocessingResult], *, input_count: int) -> str:
+def _summarize(results: Sequence[PreprocessingIssueResult], *, input_count: int) -> str:
     """抽出成功 / 除外内訳を 1 行に集約する。
 
-    1 入力 → N 結果モデルでは結果数 != 入力数になりうるため、両方を表示する。
-
-    Args:
-        results: フラット化された結果列
-        input_count: 入力 issue 数 (= ``len(items)``)
+    1 入力 → 1 IssueResult モデル (ADR-0024) なので results 数 == input 数。
+    candidate 総数は IssueResult.candidate_count の合計。
     """
     total_results = len(results)
-    extracted = sum(1 for r in results if r.excluded is None)
-    layouts: Counter[LayoutKind] = Counter(r.layout for r in results)
-    exclusions: Counter[ExclusionReason] = Counter(r.excluded for r in results if r.excluded is not None)
-
-    # `<input.id>#<idx>` 形式で複数結果を持つ入力を「複数 candidate を持つ」とカウント
-    multi_candidate_inputs = sum(1 for r in results if r.id is not None and "#" in r.id)
-    # 厳密には base id で集計するべきだが、簡易表示として候補行数を示す
+    extracted_issues = sum(1 for r in results if r.issue_excluded is None)
+    total_candidates = sum(r.candidate_count for r in results)
+    excluded_count = sum(1 for r in results if r.issue_excluded is not None)
 
     parts = [
         f"[summary] inputs={input_count}",
         f"results={total_results}",
-        f"extracted={extracted}",
+        f"extracted-issues={extracted_issues}",
+        f"total-candidates={total_candidates}",
     ]
-    if multi_candidate_inputs > 0:
-        parts.append(f"multi-candidate-rows={multi_candidate_inputs}")
-    parts.extend(f"{layout.value}={count}" for layout, count in sorted(layouts.items()))
-    if exclusions:
-        parts.append("excluded={" + ", ".join(f"{r.value}={c}" for r, c in sorted(exclusions.items())) + "}")
+    if excluded_count > 0:
+        parts.append(f"excluded-issues={excluded_count}")
     return " ".join(parts)
 
 
@@ -187,7 +161,7 @@ def _run_batch(
     *,
     workers: int,
     batch_size: int,
-) -> list[PreprocessingResult]:
+) -> list[PreprocessingIssueResult]:
     """ThreadPoolExecutor で inputs を分割並列実行して結果を入力順で返す。"""
     if len(inputs) == 0:
         return []
@@ -196,7 +170,7 @@ def _run_batch(
     batches = list(_chunked(inputs, batch_size))
     total_batches = len(batches)
 
-    batch_results: dict[int, list[PreprocessingResult]] = {}
+    batch_results: dict[int, list[PreprocessingIssueResult]] = {}
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
@@ -208,7 +182,7 @@ def _run_batch(
             sys.stderr.write(f"[progress] {done_count}/{total_batches} batches done\n")
             sys.stderr.flush()
 
-    out: list[PreprocessingResult] = []
+    out: list[PreprocessingIssueResult] = []
     for idx in range(total_batches):
         out.extend(batch_results[idx])
     return out
@@ -236,8 +210,7 @@ def preprocess_selakovic(
 ) -> None:
     """1 issue を Node ランナーで前処理し、結果を JSON で出力する。
 
-    終了コード: 抽出成功 = 0、抽出失敗 (excluded を含む) も 0 (構造的エラーは 2)。
-    抽出の良し悪しは出力 JSON の ``excluded`` フィールドで判別する。
+    終了コード: 抽出成功 = 0、抽出失敗 (issue_excluded を含む) も 0 (構造的エラーは 2)。
     """
     if not issue_dir.is_dir():
         typer.echo(f"Issue dir not found or not a directory: {issue_dir}", err=True)
@@ -249,8 +222,8 @@ def preprocess_selakovic(
         node_bin=settings.mb_analyzer_node_bin,
     )
     use_case = SelakovicPreprocessingUseCase(gateway)
-    results = use_case.preprocess(input_model)
-    _write_single_output(results, output_path)
+    result = use_case.preprocess(input_model)
+    _write_single_output(result, output_path)
     sys.exit(EXIT_OK)
 
 
@@ -269,8 +242,7 @@ def preprocess_selakovic_batch(
         typer.Option(
             "--dataset",
             "-d",
-            help="Selakovic dataset ルート (例: data/selakovic-2016-issues)。"
-            "指定すると配下の全 issue を自動列挙する",
+            help="Selakovic dataset ルート (例: data/selakovic-2016-issues)。指定すると配下の全 issue を自動列挙する",
         ),
     ] = None,
     output_path: Annotated[
@@ -293,15 +265,7 @@ def preprocess_selakovic_batch(
         ),
     ] = 0,
 ) -> None:
-    """複数 issue を並列前処理し、結果を JSONL で出力する。
-
-    入力モード:
-        - ``--input <jsonl>``: JSONL の各行を 1 issue として処理
-        - ``--dataset <root>``: Selakovic dataset 配下の全 issue を自動列挙
-
-    両方指定するとエラー、両方未指定もエラー。
-    nohup 実行を前提にした非対話 CLI で、進捗は stderr に簡潔に出力する。
-    """
+    """複数 issue を並列前処理し、結果を JSONL で出力する。"""
     if (input_path is None) == (dataset_root is None):
         typer.echo("Specify exactly one of --input or --dataset.", err=True)
         raise typer.Exit(EXIT_BATCH_ERROR)
@@ -316,7 +280,7 @@ def preprocess_selakovic_batch(
         if input_path is not None:
             inputs = _build_inputs_from_jsonl(input_path)
         else:
-            assert dataset_root is not None  # narrowed by branch above
+            assert dataset_root is not None
             inputs = _build_inputs_from_dataset(dataset_root)
     except typer.BadParameter as e:
         typer.echo(f"Invalid input: {e}", err=True)

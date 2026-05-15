@@ -9,12 +9,13 @@
 
 usage: python tmp/0022_preprocess-workload-reachability-redesign/build_inputs.py
 """
+
 from __future__ import annotations
 
+from collections import Counter
 import json
 import os
 import sys
-from collections import Counter
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 DATASET = os.path.join(ROOT, "data", "selakovic-2016-issues")
