@@ -97,8 +97,11 @@ export interface EquivalenceCheckResult {
   observations: OracleObservation[];
   /**
    * `verdict === "inconclusive"` のときの理由分類 (`"no-observable-channel"` / `"both-sides-threw"` /
-   * `"no-positive-evidence"`)、または executor crash / setup throw 由来の `"error"` 時の `"executor-error"`。
-   * `equal` / `not_equal` では `null`。ADR-0018 参照。
+   * `"no-positive-evidence"`)、または `verdict === "error"` 時の crash 分類:
+   *  - `"setup-failure"`: setup phase (`vm.runInContext(setup, ...)`) で throw。`SandboxSetupError` 由来。
+   *  - `"executor-error"`: workload phase 以降の executor crash / serialize 失敗 (= setup 以外の error)。
+   *
+   * `equal` / `not_equal` では `null`。ADR-0018 / ADR-0023 §D-β 参照。
    */
   verdict_reason?: string | null;
   error_message?: string | null;

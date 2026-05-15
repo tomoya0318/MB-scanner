@@ -184,6 +184,7 @@ jq -s 'map(select(.verdict == "error"))' "$1" > "${1%.jsonl}-errors.json"
 | 8 | angular の `buildAngularRunnable` を placeholder 対応に | placeholder v2 D-γ 派生で実施予定 |
 | 9 | server 系の changed-fn 対応 | 大 (5-7 日) |
 | 10 | 過去 ADR の `(setup, body)` 表記 sweep | 0.1 日 |
+| 11 | sandbox 予約識別子の命名統一 (`__recorder` → `__RECORDER__`) | 0.2 日 |
 
 ### #10 詳細
 
@@ -196,6 +197,27 @@ D-β 着手前の executor 周辺リファクタ PR (= `tmp/0001_executor-intent
 性質: 過去 ADR の改訂で、API リネームと別軸 (= drift 修復目的)。本 PR と分離した方が PR の意図 (= executor 周辺の意図表現リファクタ) がぶれず、レビューもしやすい。
 
 実装: 各 ADR の該当 1 行を `(setup, workload, timeout)` に書き換える + ADR 末尾に「2026-MM-DD: API 名 `body` → `workload` リネーム (ADR-0023) に追従して文中表記を更新」を Status コメントで残す。
+
+### #11 詳細
+
+D-β 着手前の executor 周辺リファクタ PR #14 のレビューで指摘された命名規則のずれ。現状 sandbox 専用 identifier は 2 系統あって規約が揃っていない:
+
+| 識別子 | 注入元 | 注入方法 | 命名 |
+|---|---|---|---|
+| `__recorder` | host TS (`jsdom.ts`) | `context.__recorder = makeRecorder()` (globalThis 注入) | 片側 `_` + lower |
+| `__OBS__` / `__OBS_R__` | preprocess が生成する code | `let __OBS__ = []` (closure 経由、globalThis に出ない) | 両端 `_` + UPPER |
+| `__HOLE__` | preprocess (`function-hole.ts`) | `globalThis.__HOLE__ = ...` | 両端 `_` + UPPER |
+
+preprocessing 側の規約 (両端 `_` + UPPER) に揃えるのが規律として綺麗。機構的には別物 (注入元と方法が違う) だが、「sandbox 内で観測される予約識別子」というカテゴリは同じ。
+
+対象:
+- `mb-analyzer/src/equivalence-checker/common/sandbox/capture/recording-proxy.ts:27` の `RECORDER_GLOBAL = "__recorder"` → `"__RECORDER__"`
+- `preprocessing/selakovic/assemble/recorder-hooks.ts` 等のハードコード参照を同時更新 (= recording-proxy.ts の docstring にある「依存方向の都合で import できないのでハードコード」している箇所)
+- ai-guide / README の文中表記 `__recorder` も追従 (`equivalence-checker/README.md` ほか)
+
+性質: 命名統一は本来 PR #14 (executor 周辺の意図表現リファクタ) のスコープに含めるべきだったが、レビュー時に気づいたため別 PR に切り出し。本 PR スコープ外として残置した理由は、本 PR の意図 (= `body`→`workload` リネーム + `prepareSandbox`/`evaluateWorkload` 分割 + `setup-failure` verdict) を絞るため。
+
+実装: `RECORDER_GLOBAL` の値を `"__RECORDER__"` に書き換え + ハードコード grep で全箇所更新 + テスト緑確認。
 
 ---
 
