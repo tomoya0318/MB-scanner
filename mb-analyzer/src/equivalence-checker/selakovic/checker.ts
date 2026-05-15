@@ -23,6 +23,7 @@ import {
   applyIterationCap,
   executeInJsdom,
   executeSandboxed,
+  SandboxSetupError,
   type ExecutionCapture,
   type JsdomExecuteOptions,
 } from "../common/sandbox";
@@ -43,7 +44,7 @@ const DEFAULT_TIMEOUT_MS = 5000;
  *
  * - `environment === "vm"` (デフォルト / pruning): 素 vm + 非決定性遮断。oracle は C1/C4/C5/C3 の 4 本。
  * - `environment === "jsdom"` (Selakovic の client/server candidate): jsdom window/document + require shim + server vm globals。
- *   body には iteration-cap をかける。記録 Proxy を `globalThis.__recorder` として注入する
+ *   workload には iteration-cap をかける。記録 Proxy を `globalThis.__recorder` として注入する
  *   (runnable が `preprocessing/selakovic/assemble/*` 由来で `globalThis.__recorder` を見て workload が叩く境界オブジェクトを
  *   wrap してから SUT を呼ぶ → `capture.interaction_trace` が埋まる)。oracle は上記 4 本 + C2 (DOM) + C6 (interaction-trace)。
  *   C2/C6 のチャネルが空なら oracle 自身が `not_applicable` を返す。`mount_html` も plumb する。
@@ -56,21 +57,21 @@ export async function checkEquivalence(input: EquivalenceInput): Promise<Equival
   const environment: ExecutionEnvironment = input.environment ?? EXECUTION_ENVIRONMENT.VM;
   const isJsdom = environment === EXECUTION_ENVIRONMENT.JSDOM;
 
-  const slowBody = isJsdom ? applyIterationCap(input.slow, ITERATION_CAP) : input.slow;
-  const fastBody = isJsdom ? applyIterationCap(input.fast, ITERATION_CAP) : input.fast;
+  const slowWorkload = isJsdom ? applyIterationCap(input.slow, ITERATION_CAP) : input.slow;
+  const fastWorkload = isJsdom ? applyIterationCap(input.fast, ITERATION_CAP) : input.fast;
 
-  const run = (body: string): Promise<ExecutionCapture> => {
+  const run = (workload: string): Promise<ExecutionCapture> => {
     if (isJsdom) {
-      const jsdomOpts: JsdomExecuteOptions = { setup, body, timeout_ms, recordInteractions: true };
+      const jsdomOpts: JsdomExecuteOptions = { setup, workload, timeout_ms, recordInteractions: true };
       if (input.module_base_dir !== undefined) jsdomOpts.module_base_dir = input.module_base_dir;
       if (input.mount_html !== undefined) jsdomOpts.mount_html = input.mount_html;
       return executeInJsdom(jsdomOpts);
     }
-    return executeSandboxed({ setup, body, timeout_ms });
+    return executeSandboxed({ setup, workload, timeout_ms });
   };
 
   try {
-    const [slow, fast] = await Promise.all([run(slowBody), run(fastBody)]);
+    const [slow, fast] = await Promise.all([run(slowWorkload), run(fastWorkload)]);
     const observations: OracleObservation[] = routeOracles(isJsdom ? "jsdom" : "vm").map((o) =>
       runOracle(o, slow, fast, isJsdom),
     );
@@ -82,16 +83,21 @@ export async function checkEquivalence(input: EquivalenceInput): Promise<Equival
       effective_timeout_ms: timeout_ms,
     };
   } catch (e) {
-    // setup 自体の実行エラーや予期しない executor 例外は全体 error に畳み込む。
-    // `vm.runInContext` で throw された Error は VM context (別 realm) で生成されるため
-    // outer realm の `instanceof Error` が false になる (Node.js の vm モジュール固有の挙動)。
-    // duck typing で `.message` / `.constructor.name` を拾うことで cross-realm Error も
-    // 本来のメッセージとして報告できる。
+    // executor からの throw は 2 種類に分けて verdict_reason を付ける (ADR-0023 §D-β):
+    // - setup 段階 (= `prepareSandbox` 内 `vm.runInContext(setup, ...)` の throw) は executor 側で
+    //   `SandboxSetupError` で wrap されて outer realm に届く → `setup-failure`
+    // - workload 段階以降の crash / serialize 失敗 / 想定外 throw は `executor-error`
+    // cross-realm: `vm.runInContext` で throw された Error は VM context (別 realm) で生成されるため
+    // outer realm の `instanceof Error` が false になる (Node.js の vm モジュール固有)。
+    // `SandboxSetupError` は host コードで `new` するので outer realm の instanceof は通る、
+    // `cause` 側の元 Error は依然 cross-realm なので message 取得は `extractErrorMessage` 経由で行う。
+    const isSetupFailure = e instanceof SandboxSetupError;
+    const causeForMessage = isSetupFailure ? e.cause : e;
     return {
       verdict: VERDICT.ERROR,
       observations: [],
-      verdict_reason: VERDICT_REASON.EXECUTOR_ERROR,
-      error_message: extractErrorMessage(e),
+      verdict_reason: isSetupFailure ? VERDICT_REASON.SETUP_FAILURE : VERDICT_REASON.EXECUTOR_ERROR,
+      error_message: extractErrorMessage(causeForMessage),
       effective_timeout_ms: timeout_ms,
     };
   }

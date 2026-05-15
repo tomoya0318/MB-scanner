@@ -7,16 +7,17 @@
  *   - timeout: 無限ループで timed_out=true + exception 捕捉
  *   - console: log/error 等が console_log に順序通りに蓄積
  *   - 引数変異 (O2): setup 由来の配列・オブジェクトの pre/post snapshot、プリミティブは除外
- *   - 新規 global (O4): body で代入された key だけが new_globals、setup 由来は除外
+ *   - 新規 global (O4): workload で代入された key だけが new_globals、setup 由来は除外
  *   - host 逃げ道: process / require / eval / Function は undefined として遮断
  *   - Promise: resolve は return_value、reject は exception、async IIFE も await 済み
- *   - 決定性: 非決定性遮断により Math.random / Date.now が同一 setup/body で再現
+ *   - 決定性: 非決定性遮断により Math.random / Date.now が同一 setup/workload で再現
  */
 import { describe, expect, it } from "vitest";
 import { executeSandboxed } from "../../../../../src/equivalence-checker/common/sandbox/executors/vm";
+import { SandboxSetupError } from "../../../../../src/equivalence-checker/common/sandbox/errors";
 
-function run(body: string, setup = "", timeout_ms = 2000) {
-  return executeSandboxed({ setup, body, timeout_ms });
+function run(workload: string, setup = "", timeout_ms = 2000) {
+  return executeSandboxed({ setup, workload, timeout_ms });
 }
 
 describe("executeSandboxed: 戻り値", () => {
@@ -28,12 +29,12 @@ describe("executeSandboxed: 戻り値", () => {
     expect(res.timed_out).toBe(false);
   });
 
-  it("setup で定義した変数を body から参照できる", async () => {
+  it("setup で定義した変数を workload から参照できる", async () => {
     const res = await run("x * 10", "const x = 4;");
     expect(res.return_value).toBe("40");
   });
 
-  it("body が文だけだと return_value は undefined で return_is_undefined が true", async () => {
+  it("workload が文だけだと return_value は undefined で return_is_undefined が true", async () => {
     const res = await run("let z = 1;");
     expect(res.return_is_undefined).toBe(true);
     expect(res.return_value).toBe("undefined");
@@ -104,7 +105,7 @@ describe("executeSandboxed: 引数変異 (O2)", () => {
 });
 
 describe("executeSandboxed: 新規 global (O4)", () => {
-  it("body で代入された新規 global key が new_globals に入る", async () => {
+  it("workload で代入された新規 global key が new_globals に入る", async () => {
     const res = await run("g = 1; g");
     expect(res.new_globals).toContain("g");
   });
@@ -142,10 +143,29 @@ describe("executeSandboxed: Promise 解決", () => {
 });
 
 describe("executeSandboxed: 決定性", () => {
-  it("同じ setup/body で Math.random / Date.now が毎回同じ値になる", async () => {
-    const body = `[Math.random(), Math.random(), Date.now()]`;
-    const a = await run(body);
-    const b = await run(body);
+  it("同じ setup/workload で Math.random / Date.now が毎回同じ値になる", async () => {
+    const workload = `[Math.random(), Math.random(), Date.now()]`;
+    const a = await run(workload);
+    const b = await run(workload);
     expect(a.return_value).toBe(b.return_value);
+  });
+});
+
+describe("executeSandboxed: setup throw → SandboxSetupError 分離", () => {
+  // ADR-0023 §D-β: setup 段階の throw は outer realm で `SandboxSetupError` として届く。
+  // checker.ts の outer catch がこの型を見て `verdict_reason: "setup-failure"` を付ける経路の前提。
+  it("setup で throw すると SandboxSetupError が outer に伝播し cause を保持する", async () => {
+    await expect(
+      executeSandboxed({ setup: `throw new Error("setup boom")`, workload: "1", timeout_ms: 2000 }),
+    ).rejects.toSatisfy((e) => {
+      if (!(e instanceof SandboxSetupError)) return false;
+      // cross-realm Error なので outer の instanceof Error は false になる ─ cause が「何か」入っていれば十分。
+      return e.cause !== undefined && e.cause !== null;
+    });
+  });
+
+  it("workload 段階の throw は SandboxSetupError にはならず capture.exception に詰まる", async () => {
+    const cap = await run(`throw new Error("workload boom")`);
+    expect(cap.exception?.message).toBe("workload boom");
   });
 });
