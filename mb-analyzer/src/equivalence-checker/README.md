@@ -17,7 +17,7 @@
 
 公開 API は `index.ts` (package barrel) の `checkEquivalence(input: EquivalenceInput): Promise<EquivalenceCheckResult>` + verdict 合成ヘルパ (`deriveOverallVerdict` / `deriveVerdictReason` / `VERDICT_REASON`) + contract 型のみ。内部構成 (`selakovic/` の oracle 配線 / `common/` の sandbox・comparison) は外に出さない。
 
-`EquivalenceInput` / `EquivalenceCheckResult` (および `Verdict` / `OracleVerdict` / `Oracle` / `ExecutionEnvironment` 列挙) は `mb-analyzer/src/contracts/equivalence-contracts.ts` で定義され、Python 側 (`mb_scanner/domain/entities/equivalence.py`) と JSON シリアライゼーション互換を保つ (列挙値の文字列・フィールド名 snake_case を両言語で厳密に揃える。変更は paired-change)。`aspect` / `candidate_kind` / `enclosure_type` hint は `preprocessing-contracts.ts` の対応列挙と値域を揃える (両 contract を独立した leaf に保つため型は loose な `string`)。CLI ラッパは `mb-analyzer/src/cli/check-equivalence.ts` (`check-equivalence` / `check-equivalence-batch` サブコマンド) で、stdin から JSON / JSONL を読んで純関数 `checkEquivalence()` を呼び、結果を stdout に出す薄い層 (CLI 固有の引数 / 終了コード / stderr 規約は [`cli/README.md`](../cli/README.md))。Python 側 `mb_scanner/adapters/cli/equivalence.py` (`mbs check-equivalence[-batch]`) と Gateway (`mb_scanner/adapters/gateways/equivalence/node_runner_gateway.py`) が subprocess 経由で起動し、batch は Python 側 `ThreadPoolExecutor` で並列化 (Node 側 1 subprocess = 逐次)。**入出力データの意味論はここ (本 README) と [code-map.md §等価性検証器](../../../ai-guide/code-map.md#等価性検証器) を一次ソースとし、CLI 側には CLI 固有の引数 / stderr 規約 / 終了コードのみ書く**方針。
+`EquivalenceInput` / `EquivalenceCheckResult` (および `Verdict` / `OracleVerdict` / `Oracle` / `ExecutionEnvironment` 列挙) は `mb-analyzer/src/contracts/equivalence-contracts.ts` で定義され、Python 側 (`mb_scanner/domain/entities/equivalence.py`) と JSON シリアライゼーション互換を保つ (列挙値の文字列・フィールド名 snake_case を両言語で厳密に揃える。変更は paired-change)。oracle 選択は `environment` 1 軸 (vm/jsdom) で完結し、preprocess 由来の hint は受け取らない (ADR-0024 §決定)。CLI ラッパは `mb-analyzer/src/cli/check-equivalence.ts` (`check-equivalence` / `check-equivalence-batch` サブコマンド) で、stdin から JSON / JSONL を読んで純関数 `checkEquivalence()` を呼び、結果を stdout に出す薄い層 (CLI 固有の引数 / 終了コード / stderr 規約は [`cli/README.md`](../cli/README.md))。Python 側 `mb_scanner/adapters/cli/equivalence.py` (`mbs check-equivalence[-batch]`) と Gateway (`mb_scanner/adapters/gateways/equivalence/node_runner_gateway.py`) が subprocess 経由で起動し、batch は Python 側 `ThreadPoolExecutor` で並列化 (Node 側 1 subprocess = 逐次)。**入出力データの意味論はここ (本 README) と [code-map.md §等価性検証器](../../../ai-guide/code-map.md#等価性検証器) を一次ソースとし、CLI 側には CLI 固有の引数 / stderr 規約 / 終了コードのみ書く**方針。
 
 ### `EquivalenceInput`
 
@@ -31,13 +31,10 @@ interface EquivalenceInput {
   environment?: "vm" | "jsdom"; // 省略時 "vm"。jsdom = browser ライブラリ / server test_case で DOM・require が要る (ADR-0012)
   module_base_dir?: string;     // jsdom 環境で相対 require('./x') を解決する基準ディレクトリ (= 通常 issue ディレクトリの絶対パス)
   mount_html?: string;          // jsdom 環境で mount する HTML (<body> の中身)。`#demo*` 要素不在の解消用
-  aspect?: string;              // preprocess 由来 hint (ASPECT と同値域) — oracle 選択 / 記録 Proxy の wrap 対象決定に使う
-  candidate_kind?: string;      // preprocess 由来 hint (CANDIDATE_KIND と同値域)
-  enclosure_type?: string;      // preprocess 由来 hint (PreprocessingResult.enclosure_type と同値域)
 }
 ```
 
-通常 `(id, setup, slow, fast, enclosure_type, aspect, candidate_kind, environment)` は preprocess の `PreprocessingResult` をそのままマップしたもの。`timeout_ms` / `module_base_dir` / `mount_html` は呼び出し側 (pruning エンジン / CLI) が補う。
+通常 `(id, setup, slow, fast, environment)` は preprocess の `PreprocessingResult` をそのままマップしたもの。`timeout_ms` / `module_base_dir` / `mount_html` は呼び出し側 (pruning エンジン / CLI) が補う。
 
 ### `EquivalenceCheckResult`
 
