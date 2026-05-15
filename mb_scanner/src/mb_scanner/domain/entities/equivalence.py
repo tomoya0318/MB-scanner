@@ -75,8 +75,6 @@ class EquivalenceInput(BaseModel):
     を解決する基準ディレクトリ (通常 issue ディレクトリの絶対パス)。
 
     ``mount_html`` は ``jsdom`` 環境で mount する HTML (``<body>`` の中身)。
-    ``aspect`` / ``candidate_kind`` / ``enclosure_type`` は preprocess 由来の hint で、後段の
-    oracle 選択・記録 Proxy で包む対象を決めるのに使う (値の集合は preprocessing 契約と揃える)。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -89,9 +87,6 @@ class EquivalenceInput(BaseModel):
     environment: ExecutionEnvironment | None = None
     module_base_dir: str | None = None
     mount_html: str | None = None
-    aspect: str | None = None
-    candidate_kind: str | None = None
-    enclosure_type: str | None = None
 
 
 class OracleObservation(BaseModel):

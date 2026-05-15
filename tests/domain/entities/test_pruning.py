@@ -105,9 +105,8 @@ class TestPruningInput:
 class TestPruningInputEquivalenceContext:
     """``PruningInput`` が等価検証コンテキストを pass-through で受け取れること。
 
-    対象フィールド: environment / module_base_dir / mount_html / aspect / candidate_kind /
-    enclosure_type。pruning 本体は解釈しないが、Node の prune-batch が wire format として
-    受け付ける必要がある。
+    対象フィールド: environment / module_base_dir / mount_html。pruning 本体は解釈しないが、
+    Node の prune-batch が wire format として受け付ける必要がある。
     """
 
     def test_defaults_are_none(self) -> None:
@@ -115,9 +114,6 @@ class TestPruningInputEquivalenceContext:
         assert inp.environment is None
         assert inp.module_base_dir is None
         assert inp.mount_html is None
-        assert inp.aspect is None
-        assert inp.candidate_kind is None
-        assert inp.enclosure_type is None
 
     def test_accepts_and_round_trips(self) -> None:
         payload = {
@@ -127,17 +123,11 @@ class TestPruningInputEquivalenceContext:
             "environment": "jsdom",
             "module_base_dir": "/abs/data/selakovic-2016-issues/serverIssues/ChalkIssues/issues/issue_28",
             "mount_html": '<div id="demo"></div>',
-            "aspect": "lib",
-            "candidate_kind": "single",
-            "enclosure_type": "server-test-case",
         }
         inp = PruningInput.model_validate(payload)
         assert inp.environment == "jsdom"
         assert inp.module_base_dir == payload["module_base_dir"]
         assert inp.mount_html == '<div id="demo"></div>'
-        assert inp.aspect == "lib"
-        assert inp.candidate_kind == "single"
-        assert inp.enclosure_type == "server-test-case"
         dumped = json.loads(inp.model_dump_json())
         assert PruningInput.model_validate(dumped) == inp
 

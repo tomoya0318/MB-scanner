@@ -73,14 +73,6 @@ export interface EquivalenceInput {
   module_base_dir?: string;
   /** `jsdom` 環境で mount する HTML (`<body>` の中身)。react-808 系の `#demo*` 要素不在の解消用。 */
   mount_html?: string;
-  /**
-   * 後段 oracle 選択 / 記録 Proxy で包む対象を決めるための preprocess 由来 hint。
-   * 値の集合は `preprocessing-contracts.ts` の `ASPECT` / `CANDIDATE_KIND` / `PreprocessingResult.enclosure_type`
-   * と揃える (両 contract を独立した leaf に保つため型は loose な `string`)。
-   */
-  aspect?: string;
-  candidate_kind?: string;
-  enclosure_type?: string;
 }
 
 export interface OracleObservation {

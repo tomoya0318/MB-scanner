@@ -78,7 +78,7 @@ describe("PruningInput", () => {
     expect(full.max_iterations).toBe(100);
   });
 
-  it("等価検証コンテキスト (environment / module_base_dir / mount_html / aspect / candidate_kind / enclosure_type) は任意で JSON 往復しても保持される", () => {
+  it("等価検証コンテキスト (environment / module_base_dir / mount_html) は任意で JSON 往復しても保持される", () => {
     const input: PruningInput = {
       slow: "x",
       fast: "x",
@@ -86,9 +86,6 @@ describe("PruningInput", () => {
       environment: "jsdom",
       module_base_dir: "/abs/data/selakovic-2016-issues/serverIssues/ChalkIssues/issues/issue_28",
       mount_html: "<div id=\"demo\"></div>",
-      aspect: "lib",
-      candidate_kind: "single",
-      enclosure_type: "server-test-case",
     };
     const parsed = JSON.parse(JSON.stringify(input)) as PruningInput;
     expect(parsed).toStrictEqual(input);
