@@ -101,3 +101,7 @@ preprocess の **Tier 2 の段 2 (作用点ルーティング — ADR-0011)**。
 ADR-0011 §段2 の作用点ラベルを `A` / `B` / `A+B` → **`lib` / `workload` / `lib+workload`** にリネームした (ADR-0011 の「2026-05-12 更新」参照。本 ADR 本文の `A+B`・`作用点 A` 等は読み替え)。本 ADR の分割規則 (independent なら lib / body の 2 candidate) は不変。
 
 §補足 末尾の「lib changed_function ∩ workload 到達 API が空なら lib candidate を出さない最適化を Phase 2a で検討」は、`tmp/0022_preprocess-workload-reachability-redesign/` でより一般的に実装した — `aspect: lib` (および `aspect: lib+workload` 独立判定の lib 側) について、workload (`f1`/`test()`) が (推移的に) exercise する変更関数だけを `<lib>_*.js` から 1 つずつ切り出して lambda-lift + 観測する形にした `candidate_kind: "changed-fn"` 候補を出し、exercise されない変更は `change-not-exercised` で除外する。embedded (`single`) candidate は併存 (equiv 安定性 fallback)。`candidate_kind` から 0021 の `lib-enclosure` は削除。
+
+### 2026-05-15 更新 (ADR-0024 で candidate_kind 廃止)
+
+`candidate_kind` (`single` / `lib` / `body`) は ADR-0024 で廃止する。本 ADR の independent split 後の役割は `target_side: lib | workload` (candidate level、`SelakovicCandidateMeta`)、co-evolution の 1 candidate は `target_side: both` で表現する形に再構成する。本 ADR の分割規則 (identifier 交差判定で independent / co-evolution を切り分ける) は不変。詳細は ADR-0024 §決定 を参照。
