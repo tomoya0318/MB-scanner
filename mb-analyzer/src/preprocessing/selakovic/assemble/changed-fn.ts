@@ -11,7 +11,7 @@ import {
   replaceFunctionBody,
   wrapBodyObserved,
   wrapObservedWorkload,
-} from "../../common/placeholder";
+} from "../../../codegen/placeholder";
 import { statementsToCode } from "../../common/setup-cleanup";
 import type { F1Decomposition } from "../decompose/f1";
 
@@ -99,7 +99,7 @@ if (import.meta.vitest) {
   const { findChangeUnits } = await import("../../common/change-units");
   const { extractF1 } = await import("../decompose/f1");
   const { parse } = await import("../../../ast/parser");
-  const { substituteBody } = await import("../../common/placeholder");
+  const { substituteBody } = await import("../../../codegen/placeholder");
   // 観点: workload が呼ぶ変更関数の fn unit から changed-fn candidate を組む (placeholder substitution model)。
   // setup に lib 全文 (変更関数の body を $BODY$ 1 個で穴あき)、slow/fast に変更前/後 body を観測ラッパで包んだ
   // statement 列の断片、workload に f1 body を IIFE で包んだ完了値返却形式。
