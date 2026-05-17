@@ -52,7 +52,7 @@ def main() -> int:
                 skipped_missing.append(rec_id)
                 continue
             # PruningInput の max_length に引っかかる candidate は除外 (= mbs prune-batch が 1 行でも invalid だとバッチごと abort するため)。
-            if any(len(src.get(k, "")) > MAX_CODE_LENGTH for k in ("setup", "slow", "fast")):
+            if any(len(src.get(k, "") or "") > MAX_CODE_LENGTH for k in ("setup", "slow", "fast", "workload")):
                 skipped_huge.append(rec_id)
                 continue
             out = dict(src)

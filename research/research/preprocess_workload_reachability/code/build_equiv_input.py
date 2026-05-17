@@ -28,7 +28,7 @@ EXTRACTED = os.path.join(WORK, "extracted.jsonl")
 EQUIV_INPUT = os.path.join(WORK, "equiv-input.jsonl")
 TIMEOUT_MS = 15_000
 
-EQUIV_FIELDS = ("setup", "slow", "fast")
+EQUIV_FIELDS = ("setup", "slow", "fast", "workload")
 
 
 def issue_dir_for(issue_id: str) -> str | None:
@@ -93,10 +93,15 @@ def main() -> int:
                 if not is_small_candidate(issue, c):
                     n_candidates_skipped += 1
                     continue
-                # equiv-input row 1 つを作る
+                # equiv-input row 1 つを作る。
+                # - setup: 旧経路でも空文字を明示 (executor の setup 引数は string 必須)
+                # - slow / fast: candidate に常にある
+                # - workload: ADR-0023 D-β placeholder substitution の changed-fn 由来 candidate のみ
+                #   non-None。それ以外 (旧経路) は None のまま JSON null に乗り、TS 側 checker が
+                #   `input.workload != null` で経路判定 (loose 比較で undefined / null 両対応)
                 out: dict = {"id": f"{issue_id}#{idx}" if issue_id else None}
                 for k in EQUIV_FIELDS:
-                    out[k] = c.get(k) or "" if k == "setup" else c.get(k)
+                    out[k] = (c.get(k) or "") if k == "setup" else c.get(k)
                 out["timeout_ms"] = TIMEOUT_MS
                 out["environment"] = derive_environment(issue)
                 if issue_dir is not None and os.path.isdir(issue_dir):
