@@ -54,11 +54,17 @@ export interface PreprocessingInput {
  * `enclosure_node_type` は抽出した最小 enclosure の AST ノード型名 (Babel ノード型、
  * "FunctionDeclaration" / "BlockStatement" 等)。threats to validity 集計で「どの粒度に
  * 収束したか」を見るため (ADR-0010)。
+ *
+ * `workload` は ADR-0023 D-β の placeholder substitution + 4 値契約フィールド。
+ * `setup` に `$BODY$` プレースホルダを 1 個含み、`slow` / `fast` を `setup` の `$BODY$`
+ * に差し込んで sandbox に渡す経路 (= changed-fn 経路) でのみ定義される。それ以外の
+ * 経路 (client embedded / fallback / server 等) では `undefined`。
  */
 export interface PreprocessingCandidate {
   setup?: string;
   slow?: string;
   fast?: string;
+  workload?: string;
   before_node_count?: number;
   after_node_count?: number;
   enclosure_node_type?: string;

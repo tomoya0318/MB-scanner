@@ -86,6 +86,10 @@ class PruningInput(BaseModel):
     environment: str | None = None
     module_base_dir: str | None = None
     mount_html: str | None = None
+    # ADR-0023 D-β の placeholder substitution + 4 値契約フィールド。pruning 本体は解釈せず、
+    # TS ``pruning/selakovic/`` が ``checkEquivalence`` の closure に閉じ込めて
+    # ``EquivalenceInput.workload`` にそのまま流す。changed-fn 経路の candidate のみ非 None。
+    workload: str | None = Field(default=None, max_length=MAX_CODE_LENGTH)
 
 
 class PruningResult(BaseModel):

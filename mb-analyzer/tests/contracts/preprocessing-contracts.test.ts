@@ -184,6 +184,34 @@ describe("PreprocessingCandidate", () => {
     expect(c.candidate_excluded).toBe("change-not-exercised");
     expect(c.slow).toBeUndefined();
   });
+
+  it("workload (ADR-0023 D-β placeholder substitution + 4 値契約) は任意で changed-fn 経路でのみ定義", () => {
+    const changedFn: PreprocessingCandidate = {
+      setup: "var lib = { f: function () { $BODY$ } };",
+      slow: "__OBS__.push(1); return 1;",
+      fast: "__OBS__.push(2); return 2;",
+      workload: "(function(){ __OBS__ = []; lib.f(); return JSON.stringify(__OBS__); })()",
+      candidate_meta: {
+        adapter: "selakovic",
+        target_side: TARGET_SIDE.LIB,
+        is_workload_reachable: true,
+      },
+    };
+    expect(changedFn.workload).toContain("__OBS__");
+    expect(changedFn.setup).toContain("$BODY$");
+    // 旧経路の candidate は workload 未定義
+    const embedded: PreprocessingCandidate = {
+      setup: "var x=1;",
+      slow: "x",
+      fast: "x",
+      candidate_meta: {
+        adapter: "selakovic",
+        target_side: TARGET_SIDE.WORKLOAD,
+        is_workload_reachable: false,
+      },
+    };
+    expect(embedded.workload).toBeUndefined();
+  });
 });
 
 describe("PreprocessingIssueResult", () => {

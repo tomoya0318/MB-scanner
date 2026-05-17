@@ -94,6 +94,18 @@ describe("PruningInput", () => {
     expect(minimal.environment).toBeUndefined();
     expect(minimal.module_base_dir).toBeUndefined();
   });
+
+  it("workload (ADR-0023 D-β、equivalence-checker への pass-through) は任意で JSON 往復しても保持される", () => {
+    const input: PruningInput = {
+      slow: "return 1;",
+      fast: "return 2;",
+      workload: "(function(){ __OBS__ = []; lib.f(); return JSON.stringify(__OBS__); })()",
+    };
+    const parsed = JSON.parse(JSON.stringify(input)) as PruningInput;
+    expect(parsed.workload).toBe(input.workload);
+    const minimal: PruningInput = { slow: "x", fast: "x" };
+    expect(minimal.workload).toBeUndefined();
+  });
 });
 
 describe("ExecutionEnvironmentHint", () => {

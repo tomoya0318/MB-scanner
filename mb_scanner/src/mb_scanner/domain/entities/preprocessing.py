@@ -151,6 +151,11 @@ class PreprocessingCandidate(BaseModel):
     ``enclosure_node_type`` は抽出した最小 enclosure の AST ノード型名 (Babel ノード型、
     "FunctionDeclaration" / "BlockStatement" 等)。threats to validity 集計で「どの粒度に
     収束したか」を見るため (ADR-0010)。
+
+    ``workload`` は ADR-0023 D-β の placeholder substitution + 4 値契約フィールド。
+    ``setup`` に ``$BODY$`` プレースホルダを 1 個含み、``slow`` / ``fast`` を ``setup`` の
+    ``$BODY$`` に差し込んで sandbox に渡す経路 (= changed-fn 経路) でのみ非 ``None``。
+    それ以外の経路 (client embedded / fallback / server 等) では ``None``。
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -158,6 +163,7 @@ class PreprocessingCandidate(BaseModel):
     setup: str | None = None
     slow: str | None = None
     fast: str | None = None
+    workload: str | None = None
     before_node_count: int | None = None
     after_node_count: int | None = None
     enclosure_node_type: str | None = None

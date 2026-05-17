@@ -75,6 +75,12 @@ class EquivalenceInput(BaseModel):
     を解決する基準ディレクトリ (通常 issue ディレクトリの絶対パス)。
 
     ``mount_html`` は ``jsdom`` 環境で mount する HTML (``<body>`` の中身)。
+
+    ``workload`` は ADR-0023 D-β の placeholder substitution + 4 値契約フィールド。非 ``None``
+    のとき (= changed-fn 経路) は checker が ``setup`` の ``$BODY$`` プレースホルダを
+    ``slow`` / ``fast`` で差し替え + 観測配列 ``__OBS__`` を宣言してから本フィールドを
+    executor の workload 引数として渡す。``None`` のとき (= 旧経路) は ``slow`` / ``fast`` が
+    そのまま executor の workload に流れる (executor 側は無改修)。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -87,6 +93,7 @@ class EquivalenceInput(BaseModel):
     environment: ExecutionEnvironment | None = None
     module_base_dir: str | None = None
     mount_html: str | None = None
+    workload: str | None = Field(default=None, max_length=MAX_CODE_LENGTH)
 
 
 class OracleObservation(BaseModel):

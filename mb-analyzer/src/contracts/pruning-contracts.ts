@@ -48,6 +48,12 @@ export interface PruningInput {
   environment?: ExecutionEnvironmentHint;
   module_base_dir?: string;
   mount_html?: string;
+  /**
+   * ADR-0023 D-β の placeholder substitution + 4 値契約フィールド。pruning 本体は解釈せず、
+   * `pruning/selakovic/` が `checkEquivalence` 呼び出しの closure に閉じ込めて
+   * `EquivalenceInput.workload` にそのまま流す。changed-fn 経路の candidate のみ非 undefined。
+   */
+  workload?: string;
 }
 
 export interface PruningResult {

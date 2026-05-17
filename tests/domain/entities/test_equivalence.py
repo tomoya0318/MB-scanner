@@ -126,6 +126,39 @@ class TestEquivalenceInput:
         assert "timeout_ms" in dumped
         assert dumped["timeout_ms"] == 5000
 
+    def test_workload_default_none(self) -> None:
+        """ADR-0023 D-β: workload は changed-fn 経路でのみ定義、旧経路は None のまま"""
+        inp = EquivalenceInput(slow="1", fast="1")
+        assert inp.workload is None
+
+    def test_workload_round_trip(self) -> None:
+        """changed-fn 経路の placeholder substitution + 4 値契約 (ADR-0023 D-β)"""
+        inp = EquivalenceInput(
+            setup="var lib = { f: function () { $BODY$ } };",
+            slow="__OBS__.push(1); return 1;",
+            fast="__OBS__.push(2); return 2;",
+            workload="(function(){ __OBS__ = []; lib.f(); return JSON.stringify(__OBS__); })()",
+        )
+        assert inp.workload is not None
+        dumped = json.loads(inp.model_dump_json())
+        # null 値も JSON に乗ること (TS 側で `workload != null` 判定するため、key 自体は必須)
+        assert "workload" in dumped
+        assert dumped["workload"] == inp.workload
+        parsed = EquivalenceInput.model_validate(dumped)
+        assert parsed.workload == inp.workload
+
+    def test_workload_null_in_json(self) -> None:
+        """Workload が None のとき JSON では null として出力される (TS 側の `!= null` 判定の前提)"""
+        inp = EquivalenceInput(slow="1", fast="1")
+        dumped = json.loads(inp.model_dump_json())
+        assert "workload" in dumped
+        assert dumped["workload"] is None
+
+    def test_workload_length_bound(self) -> None:
+        too_long = "x" * (MAX_CODE_LENGTH + 1)
+        with pytest.raises(ValidationError):
+            EquivalenceInput(slow="1", fast="1", workload=too_long)
+
 
 class TestOracleObservation:
     def test_round_trip(self) -> None:
