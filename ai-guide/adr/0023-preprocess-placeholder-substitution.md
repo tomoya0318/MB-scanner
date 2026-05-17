@@ -198,3 +198,7 @@ D-γ の後 or 並行で、angular controller wrapper の preprocess 経路に p
 - `research/src/research/preprocess_workload_reachability/notes/migration-plan.md`: 移行ロードマップ全体
 - `research/src/research/preprocess_workload_reachability/notes/v1-notes.md`: v1 の Phase 5 結果と v2 検討に至った経緯
 - `research/src/research/preprocess_workload_reachability/notes/refactoring-todo.md`: v2 完了後の整備タスク (CLI 改良 / mise tasks / research/ 整備)
+
+### 2026-05-15 更新 (ADR-0024 と並走、workload? フィールドの配置)
+
+ADR-0024 で preprocess contract を base / adapter 分離 + issue 階層化に再設計した。本 ADR の D-β 本実装で 3 契約に追加予定の `workload?: string` フィールドは、ADR-0024 の `PreprocessingCandidate` (base) の optional フィールドとして配置する想定。D-β マージ後に ADR-0024 末尾に「§更新」で確定する。本 ADR の placeholder substitution + 4 値契約の設計自体は不変。

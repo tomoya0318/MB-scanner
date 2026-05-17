@@ -2,10 +2,16 @@ import { countNodes } from "../../ast/inspect";
 import { parse } from "../../ast/parser";
 import {
   ASPECT,
-  CANDIDATE_KIND,
   LAYOUT_KIND,
-  type ExecutionEnvironmentHint,
-  type PreprocessingResult,
+  TARGET_SIDE,
+  WRAPPER_KIND,
+  type Aspect,
+  type ExclusionReasonAny,
+  type LayoutKind,
+  type PreprocessingCandidate,
+  type PreprocessingIssueResult,
+  type SelakovicIssueMeta,
+  type WrapperKind,
 } from "../../contracts/preprocessing-contracts";
 import { findChangeUnits, type FnChangeUnit } from "../common/change-units";
 import { buildCallGraph, isReachedByAnyWorkload } from "../common/reachability";
@@ -15,43 +21,33 @@ import {
   buildClientCombinedCandidate,
   buildClientLibCandidate,
 } from "./assemble/client";
-import { extractFromScripts, extractFromServerFiles } from "./assemble/fallback";
+import { extractFromScripts, extractFromServerFiles, type FallbackResult } from "./assemble/fallback";
 import { buildServerRunnable } from "./assemble/server";
-import { extractF1, type F1Decomposition } from "./decompose/f1";
+import { extractF1, type F1Decomposition, type WrapperKind as DecomposeWrapperKind } from "./decompose/f1";
 import { extractTest } from "./decompose/test-case";
 import { routeAspect, statementsChanged } from "./route/aspect";
 import { isIndependent } from "./route/case-split";
 import { diffLibPair } from "./route/lib-diff";
 
 /**
- * Selakovic 1 issue 分の前処理 — issue のファイル内容を `(setup, slow, fast)` candidate に変換する純関数
- * (ADR-0011 Tier 2)。`io → decompose → route → assemble` の 4 層を通し、`f1`/`test()` が規約外フォーマット
- * なら `assemble/fallback.ts` の素の top-level diff にフォールバックする。各層と作用点ルーティングの
- * 詳細は `preprocessing/README.md` §抽出パイプライン。
+ * Selakovic 1 issue 分の前処理 — issue のファイル内容を 1 つの `PreprocessingIssueResult` (内部に
+ * `candidates: list[PreprocessingCandidate]` を持つ階層構造) に変換する純関数 (ADR-0011 Tier 2、ADR-0024)。
+ * `io → decompose → route → assemble` の 4 層を通し、`f1`/`test()` が規約外フォーマットなら fallback。
  */
 
 export type SelakovicPreprocessInput =
   | {
       kind: "client";
-      /** v_before.html の inline `<script>` 内容 (`<script src>` は除く)。 */
       before_inline: string;
       after_inline: string;
-      /** `<lib>_before/after` の relative path / 正規化ファイル名 → ソース (lib pair なしなら `{}`)。 */
       lib_before_files: Record<string, string>;
       lib_after_files: Record<string, string>;
       lib_kind: "dir" | "file" | null;
-      /** v_before.html が `<script src="<lib>_before.js">` でこの lib を参照しているか (= workload が runtime に lib を叩く)。 */
       lib_referenced_by_workload: boolean;
-      /**
-       * `v_*.html` の `<script src>` が CDN から読む依存 lib (jquery/handlebars/underscore) のソース列を `<script>` 順に。
-       * CLI が `node_modules/` から解決して詰める (`io/script-deps.ts`)。jsdom は `<script src>` を auto-load しないので
-       * 各候補の `setup` の先頭に連結する (plan §C1)。未指定なら deps なし扱い (テストや lib 非依存 issue 用)。
-       */
       dep_lib_sources?: readonly string[];
     }
   | {
       kind: "server";
-      /** test_case_before.js / test_case_after.js の内容 (なければ null → fallback)。 */
       before_test_case: string | null;
       after_test_case: string | null;
       lib_before_files: Record<string, string>;
@@ -59,26 +55,35 @@ export type SelakovicPreprocessInput =
       lib_kind: "dir" | "file" | null;
     };
 
-const ENV_JSDOM: ExecutionEnvironmentHint = "jsdom";
-
-export function preprocess(input: SelakovicPreprocessInput): PreprocessingResult[] {
+export function preprocess(input: SelakovicPreprocessInput): PreprocessingIssueResult {
   if (input.kind === "client") return preprocessClient(input);
   return preprocessServer(input);
 }
 
-function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "client" }>): PreprocessingResult[] {
+function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "client" }>): PreprocessingIssueResult {
   const f1Before = extractF1(input.before_inline);
   const f1After = extractF1(input.after_inline);
   const beforeNodeCount = safeCount(input.before_inline);
   const afterNodeCount = safeCount(input.after_inline);
 
-  const fallback = (): PreprocessingResult[] =>
-    annotateFallback(extractFromScripts(input.before_inline, input.after_inline, LAYOUT_KIND.CLIENT));
+  const fallback = (): PreprocessingIssueResult => {
+    const fb = extractFromScripts(input.before_inline, input.after_inline);
+    return buildIssueResult(
+      LAYOUT_KIND.CLIENT,
+      ASPECT.FALLBACK,
+      mapWrapperKind(f1Before?.wrapperKind),
+      fb,
+      beforeNodeCount,
+      afterNodeCount,
+    );
+  };
 
   if (f1Before === null || f1After === null) return fallback();
   if (f1Before.wrapperKind !== f1After.wrapperKind) return fallback();
-  // angular wrapper の bootstrap 再構成情報が欠落 → フォールバック
-  if (f1Before.wrapperKind === "angular-controller-wrapper" && (f1Before.angular === undefined || f1After.angular === undefined)) {
+  if (
+    f1Before.wrapperKind === "angular-controller-wrapper" &&
+    (f1Before.angular === undefined || f1After.angular === undefined)
+  ) {
     return fallback();
   }
 
@@ -92,20 +97,19 @@ function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "clie
   const libSourceAfter = singleLibSource(input.lib_after_files);
   const libNeededInSetup = input.lib_kind !== null && input.lib_referenced_by_workload;
 
-  let candidates: PreprocessingResult[];
+  let candidates: PreprocessingCandidate[];
   if (aspect === ASPECT.LIB) {
-    // embedded (#0) + workload が (推移的に) exercise する変更関数ごとに changed-fn 候補 (#1+)。
-    candidates = [buildClientLibCandidate(f1Before, libSourceBefore, libSourceAfter, CANDIDATE_KIND.SINGLE)];
+    // embedded (#0、target_side=lib) + workload が exercise する変更関数ごとに changed-fn 候補 (#1+、target_side=lib)
+    candidates = [buildClientLibCandidate(f1Before, libSourceBefore, libSourceAfter, TARGET_SIDE.LIB)];
     appendChangedFnCandidates(candidates, libSourceBefore, libSourceAfter, f1Before);
   } else if (aspect === ASPECT.WORKLOAD) {
-    candidates = [buildClientBodyCandidate(f1Before, f1After, libSourceBefore, libNeededInSetup, CANDIDATE_KIND.SINGLE)];
+    candidates = [buildClientBodyCandidate(f1Before, f1After, libSourceBefore, libNeededInSetup, TARGET_SIDE.WORKLOAD)];
   } else {
-    // lib+workload: body の参照 identifier と lib の変化関数名 (diffLibPair の近似) が交差しなければ
-    // independent → lib candidate / body candidate に分割、交差すれば co-evolution の疑いで 1 candidate (ADR-0014)。
+    // lib+workload: independent → lib + workload (split)、co-evolution → 1 candidate (target_side=both)
     if (isIndependent(f1Before.f1Body.body, libChange.changedFunctionNames)) {
       candidates = [
-        buildClientLibCandidate(f1Before, libSourceBefore, libSourceAfter, CANDIDATE_KIND.LIB),
-        buildClientBodyCandidate(f1Before, f1After, libSourceBefore, libNeededInSetup, CANDIDATE_KIND.BODY),
+        buildClientLibCandidate(f1Before, libSourceBefore, libSourceAfter, TARGET_SIDE.LIB),
+        buildClientBodyCandidate(f1Before, f1After, libSourceBefore, libNeededInSetup, TARGET_SIDE.WORKLOAD),
       ];
       appendChangedFnCandidates(candidates, libSourceBefore, libSourceAfter, f1Before);
     } else {
@@ -113,29 +117,39 @@ function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "clie
     }
   }
 
-  // `<script src>` CDN 依存 lib (jquery/handlebars/underscore) を各候補の setup 先頭に連結する (plan §C1)。
-  // jsdom は <script src> を auto-load しないので、解決済みソースをここで足す。changed-fn / embedded / fallback 共通。
+  // CDN 依存 lib (jquery/handlebars/underscore) を各候補の setup 先頭に連結。
   const depPrefix = (input.dep_lib_sources ?? []).join("\n;\n");
-  // changed-fn は builder が入れた node count (= 変更関数本体のサイズ) を尊重し、inline 全文サイズで上書きしない。
-  return candidates.map((c) => {
+  const finalized = candidates.map((c) => {
     const base =
       depPrefix.length > 0 && typeof c.setup === "string"
         ? { ...c, setup: c.setup.length > 0 ? `${depPrefix}\n;\n${c.setup}` : depPrefix }
         : c;
-    return base.candidate_kind === CANDIDATE_KIND.CHANGED_FN
-      ? { ...base, aspect }
-      : { ...base, aspect, before_node_count: beforeNodeCount, after_node_count: afterNodeCount };
+    // changed-fn は builder が入れた node count (= 変更関数本体のサイズ) を尊重し、inline 全文サイズで上書きしない。
+    return base.candidate_meta.is_workload_reachable
+      ? base
+      : { ...base, before_node_count: beforeNodeCount, after_node_count: afterNodeCount };
   });
+
+  return {
+    candidates: finalized,
+    candidate_count: finalized.length,
+    issue_meta: {
+      adapter: "selakovic",
+      layout: LAYOUT_KIND.CLIENT,
+      aspect,
+      wrapper_kind: mapWrapperKind(f1Before.wrapperKind),
+    },
+  };
 }
 
 /**
  * `aspect: lib` (および `aspect: lib+workload` 独立判定の lib 側) について、`<lib>_*.js` の変更を unit に切り分け
  * (`findChangeUnits`)、workload (`f1`) が (推移的に) exercise する fn unit ごとに changed-fn candidate を `candidates`
  * の末尾に push する。workload が exercise しない変更 (version-bump ノイズ等) は DROP — embedded `#0` がカバーする。
- * angular controller wrapper の f1 は v1 では skip (embedded のみ。`buildAngularRunnable` の hole 対応は v2)。
+ * angular controller wrapper の f1 は v1 では skip (embedded のみ)。
  */
 function appendChangedFnCandidates(
-  candidates: PreprocessingResult[],
+  candidates: PreprocessingCandidate[],
   libSourceBefore: string,
   libSourceAfter: string,
   f1Before: F1Decomposition,
@@ -147,24 +161,25 @@ function appendChangedFnCandidates(
   try {
     cu = findChangeUnits(libSourceBefore, libSourceAfter);
   } catch {
-    return; // lib が parse できない → embedded のみ (embedded 側も実行時に落ちるが、それは equiv gate が判定する)
+    return;
   }
   if (cu.empty) return;
   const fnUnits = cu.units.filter((u): u is FnChangeUnit => u.kind === "fn" && u.afterFn !== null);
-  if (fnUnits.length === 0) return; // fn unit なし (stmt unit / version-bump だけ) → embedded のみ
+  if (fnUnits.length === 0) return;
 
-  // workload root = f1 の preWorkload + body (aspect: lib なので f1 は before で固定)。
   const graph = buildCallGraph(cu.beforeAst, [{ name: "f1", body: [...f1Before.preWorkloadStatements, ...f1Before.f1Body.body] }]);
   for (const u of fnUnits) {
-    if (!isReachedByAnyWorkload(graph, u.name)) continue; // 変更関数 u を呼ぶ workload が無い → DROP (change-not-exercised)
+    if (!isReachedByAnyWorkload(graph, u.name)) continue; // DROP (change-not-exercised) — 計装は別タスク
     const candidate = buildChangedFnCandidate(u, libSourceAfter, f1Before);
     if (candidate !== null) candidates.push(candidate);
   }
 }
 
-function preprocessServer(input: Extract<SelakovicPreprocessInput, { kind: "server" }>): PreprocessingResult[] {
-  const fallback = (): PreprocessingResult[] =>
-    annotateFallback(extractFromServerFiles(input.lib_before_files, input.lib_after_files));
+function preprocessServer(input: Extract<SelakovicPreprocessInput, { kind: "server" }>): PreprocessingIssueResult {
+  const fallback = (): PreprocessingIssueResult => {
+    const fb = extractFromServerFiles(input.lib_before_files, input.lib_after_files);
+    return buildIssueResult(LAYOUT_KIND.SERVER, ASPECT.FALLBACK, WRAPPER_KIND.TOP_LEVEL, fb);
+  };
 
   if (input.before_test_case === null || input.after_test_case === null) return fallback();
   const testBefore = extractTest(input.before_test_case);
@@ -178,27 +193,92 @@ function preprocessServer(input: Extract<SelakovicPreprocessInput, { kind: "serv
   if (aspect === ASPECT.FALLBACK) return fallback();
 
   // server は作用点に関わらず 1 candidate (ADR-0014 のケース IV-B は暫定 1 candidate 扱い)。
-  // slow/fast = test_case_{before,after} の runnable program — aspect A なら init() の require が
-  // `_before` ↔ `_after` で切り替わり、aspect B なら test() body が切り替わる。
+  // target_side は aspect から派生 (lib→lib, workload→workload, lib+workload→both)。
   const beforeNodeCount = safeCount(input.before_test_case);
   const afterNodeCount = safeCount(input.after_test_case);
-  return [
+  const targetSide = aspectToServerTargetSide(aspect);
+  const candidates: PreprocessingCandidate[] = [
     {
-      layout: LAYOUT_KIND.SERVER,
       setup: "",
       slow: buildServerRunnable(input.before_test_case),
       fast: buildServerRunnable(input.after_test_case),
-      enclosure_type: "server-test-case",
-      candidate_kind: CANDIDATE_KIND.SINGLE,
-      environment: ENV_JSDOM,
-      aspect,
       before_node_count: beforeNodeCount,
       after_node_count: afterNodeCount,
+      candidate_meta: { adapter: "selakovic", target_side: targetSide, is_workload_reachable: false },
     },
   ];
+  return {
+    candidates,
+    candidate_count: candidates.length,
+    issue_meta: {
+      adapter: "selakovic",
+      layout: LAYOUT_KIND.SERVER,
+      aspect,
+      wrapper_kind: WRAPPER_KIND.TOP_LEVEL,
+    },
+  };
 }
 
-/** lib file map から「単一の lib ソース」を取り出す (clientIssues の lib は単一ファイル形式)。 */
+/** server 経路で aspect から target_side を派生する (server は常に 1 candidate)。 */
+function aspectToServerTargetSide(aspect: Aspect): "lib" | "workload" | "both" {
+  if (aspect === ASPECT.LIB) return TARGET_SIDE.LIB;
+  if (aspect === ASPECT.WORKLOAD) return TARGET_SIDE.WORKLOAD;
+  return TARGET_SIDE.BOTH;
+}
+
+/** decompose 由来の WrapperKind ("top-level" / "angular-controller-wrapper") を contract enum にマップ。 */
+function mapWrapperKind(kind: DecomposeWrapperKind | undefined): WrapperKind {
+  return kind === "angular-controller-wrapper"
+    ? WRAPPER_KIND.ANGULAR_CONTROLLER_WRAPPER
+    : WRAPPER_KIND.TOP_LEVEL;
+}
+
+/** fallback の `FallbackResult` (candidates + issue_excluded) を `PreprocessingIssueResult` にラップ。 */
+function buildIssueResult(
+  layout: LayoutKind,
+  aspect: Aspect,
+  wrapperKind: WrapperKind,
+  fb: FallbackResult,
+  fallbackBeforeNodeCount?: number,
+  fallbackAfterNodeCount?: number,
+): PreprocessingIssueResult {
+  const issueMeta: SelakovicIssueMeta = {
+    adapter: "selakovic",
+    layout,
+    aspect,
+    wrapper_kind: wrapperKind,
+  };
+  if (fb.candidates.length === 0) {
+    // issue 全体が excluded (fallback の中で全 candidate が抽出失敗)
+    const result: PreprocessingIssueResult = {
+      candidates: [],
+      candidate_count: 0,
+      issue_meta: issueMeta,
+    };
+    if (fb.issue_excluded !== undefined) {
+      result.issue_excluded = fb.issue_excluded as ExclusionReasonAny;
+      if (fb.issue_excluded_detail !== undefined) result.issue_excluded_detail = fb.issue_excluded_detail;
+    }
+    return result;
+  }
+  // fallback 経路で候補が複数出ることもあるので、各 candidate の node count を inline 全文 (= fallback の場合は
+  // before/after script 全体) のサイズで上書きしておく (= 既存挙動維持)。
+  const candidates = fb.candidates.map((c) => {
+    const beforeCount = fallbackBeforeNodeCount ?? fb.before_node_count ?? c.before_node_count;
+    const afterCount = fallbackAfterNodeCount ?? fb.after_node_count ?? c.after_node_count;
+    const updated: PreprocessingCandidate = { ...c };
+    if (beforeCount !== undefined) updated.before_node_count = beforeCount;
+    if (afterCount !== undefined) updated.after_node_count = afterCount;
+    return updated;
+  });
+  return {
+    candidates,
+    candidate_count: candidates.length,
+    issue_meta: issueMeta,
+  };
+}
+
+/** lib file map から「単一の lib ソース」を取り出す。 */
 function singleLibSource(files: Record<string, string>): string {
   const values = Object.values(files);
   if (values.length === 0) return "";
@@ -212,14 +292,4 @@ function safeCount(source: string): number {
   } catch {
     return 0;
   }
-}
-
-/** fallback (Tier 1 素の diff) の結果に `aspect: "fallback"` 等の hint を付与する。 */
-function annotateFallback(results: PreprocessingResult[]): PreprocessingResult[] {
-  return results.map((r) => ({
-    ...r,
-    aspect: ASPECT.FALLBACK,
-    candidate_kind: CANDIDATE_KIND.SINGLE,
-    environment: ENV_JSDOM,
-  }));
 }

@@ -1,12 +1,8 @@
 /**
  * 対象: CLI エントリ - runPreprocessSelakovicBatch (batch モード: `mbs preprocess-selakovic-batch`)
- * 観点: JSONL stdin を逐次処理し、各入力に対し 1+ 件の結果を JSONL で出力する契約
- * 判定事項:
- *   - 複数行を入力順に処理し、各行の結果が連続して出力される
- *   - id 欠落時は出力でも id フィールドなし、id ありなら echo back する
- *   - id: null は undefined と同等 (Pydantic optional 互換)
- *   - JSON parse 失敗 / 非 object / id 非 string などは行単位の error result で他行に波及させない
- *   - 空入力は exit 0 + 空出力
+ * 観点: JSONL stdin を逐次処理し、各入力に対し 1 件の IssueResult を JSONL で出力する契約 (ADR-0024)
+ *
+ * ADR-0024 で 1 入力 → 1 IssueResult モデルに変更。入力数 == 出力数。
  */
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -16,19 +12,21 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPreprocessSelakovicBatch } from "../../src/cli/preprocess-selakovic";
 import { feedStdin, installSpy, restoreSpy, type WritableSpy } from "../fixtures/cli-io";
 
-interface BatchResult {
+interface IssueResult {
   id?: string;
-  layout: string;
-  excluded?: string;
-  excluded_detail?: string;
+  issue_excluded?: string;
+  issue_excluded_detail?: string;
+  candidates: unknown[];
+  candidate_count: number;
+  issue_meta?: { layout?: string };
 }
 
-function parseOutput(writes: string[]): BatchResult[] {
+function parseOutput(writes: string[]): IssueResult[] {
   return writes
     .join("")
     .split("\n")
     .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as BatchResult);
+    .map((line) => JSON.parse(line) as IssueResult);
 }
 
 function makeUnknownLayoutDir(): string {
@@ -65,7 +63,7 @@ describe("runPreprocessSelakovicBatch", () => {
     expect(stdoutSpy.writes).toHaveLength(0);
   });
 
-  it("3 行を入力順に処理し id をエコーバックする", async () => {
+  it("3 行を入力順に処理し id をエコーバックする (1 入力 1 IssueResult)", async () => {
     const dir1 = makeUnknownLayoutDir();
     const dir2 = makeUnknownLayoutDir();
     const dir3 = makeUnknownLayoutDir();
@@ -83,8 +81,8 @@ describe("runPreprocessSelakovicBatch", () => {
     const results = parseOutput(stdoutSpy.writes);
     expect(results.map((r) => r.id)).toEqual(["a", "b", "c"]);
     for (const r of results) {
-      expect(r.layout).toBe("unknown");
-      expect(r.excluded).toBe("layout-unknown");
+      expect(r.issue_meta?.layout).toBe("unknown");
+      expect(r.issue_excluded).toBe("layout-unknown");
     }
   });
 
@@ -128,8 +126,8 @@ describe("runPreprocessSelakovicBatch", () => {
     const results = parseOutput(stdoutSpy.writes);
     expect(results).toHaveLength(2);
     expect(results[0]?.id).toBeUndefined();
-    expect(results[0]?.excluded).toBe("layout-unknown");
-    expect(results[0]?.excluded_detail).toContain("Failed to parse line as JSON");
+    expect(results[0]?.issue_excluded).toBe("layout-unknown");
+    expect(results[0]?.issue_excluded_detail).toContain("Failed to parse line as JSON");
     expect(results[1]?.id).toBe("ok");
   });
 
@@ -144,7 +142,7 @@ describe("runPreprocessSelakovicBatch", () => {
     expect(code).toBe(0);
     const results = parseOutput(stdoutSpy.writes);
     expect(results).toHaveLength(2);
-    expect(results[0]?.excluded_detail).toContain("Expected a JSON object per line");
+    expect(results[0]?.issue_excluded_detail).toContain("Expected a JSON object per line");
     expect(results[1]?.id).toBe("ok");
   });
 
@@ -163,7 +161,7 @@ describe("runPreprocessSelakovicBatch", () => {
     const results = parseOutput(stdoutSpy.writes);
     expect(results).toHaveLength(2);
     expect(results[0]?.id).toBe("broken");
-    expect(results[0]?.excluded_detail).toContain("'issue_dir' field must be a string");
+    expect(results[0]?.issue_excluded_detail).toContain("'issue_dir' field must be a string");
     expect(results[1]?.id).toBe("ok");
   });
 
@@ -181,7 +179,7 @@ describe("runPreprocessSelakovicBatch", () => {
     expect(code).toBe(0);
     const results = parseOutput(stdoutSpy.writes);
     expect(results).toHaveLength(2);
-    expect(results[0]?.excluded_detail).toContain("'id' field must be a string");
+    expect(results[0]?.issue_excluded_detail).toContain("'id' field must be a string");
     expect(results[1]?.id).toBe("ok");
   });
 });

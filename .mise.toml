@@ -26,7 +26,14 @@ depends = ["venv"]
 run = """
 echo "Installing Python dependencies..."
 uv sync --dev
-uv pip install -e .
+"""
+
+[tasks.setup]
+description = "Python と mb-analyzer の依存をまとめて入れる (clone / worktree 直後用)"
+depends = ["python-deps"]
+run = """
+echo "Installing mb-analyzer dependencies..."
+pnpm --prefix mb-analyzer install --prefer-offline
 """
 
 # =============================================================================

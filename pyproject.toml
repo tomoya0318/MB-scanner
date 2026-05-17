@@ -33,6 +33,7 @@ exclude = [
     "__pycache__",
     ".pytest_cache",
     "*.egg-info",
+    "research",  # 研究用 spike スクリプト群は本流の規約から除外
 ]
 
 [tool.ruff.lint]

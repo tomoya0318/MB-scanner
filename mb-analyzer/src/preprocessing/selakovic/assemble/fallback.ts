@@ -4,11 +4,11 @@ import { countNodes } from "../../../ast/inspect";
 import { parse } from "../../../ast/parser";
 import { canonicalHash } from "../../../ast/subtree-hash";
 import {
-  EXCLUSION_REASON,
-  LAYOUT_KIND,
-  type ExclusionReason,
-  type LayoutKind,
-  type PreprocessingResult,
+  EXCLUSION_REASON_BASE,
+  SELAKOVIC_EXCLUSION_REASON,
+  TARGET_SIDE,
+  type ExclusionReasonAny,
+  type PreprocessingCandidate,
 } from "../../../contracts/preprocessing-contracts";
 import { findChangedNodes } from "../../common/ast-diff";
 import { findMinimalEnclosure } from "../../common/enclosure";
@@ -24,13 +24,24 @@ import { statementToCode, statementsToCode } from "../../common/setup-cleanup";
  *
  * **setup 構築規約**: 各 candidate の setup = 「自分以外の全 top-level statement の before 版を
  * index 順に結合」(ADR-0010、「他の最適化対象は最適化前で固定」)。
+ *
+ * adapter_meta:
+ *  - target_side = both (fallback は lib/workload 両方の patch を含みうる top-level diff、ADR-0024 §D-2)
+ *  - is_workload_reachable = false (changed-fn 抽出経路ではない)
  */
 
-export function extractFromScripts(
-  beforeScript: string,
-  afterScript: string,
-  layout: LayoutKind,
-): PreprocessingResult[] {
+/** 抽出失敗時の戻り値: `(candidates, issueExcluded)` のペア。 */
+export interface FallbackResult {
+  candidates: PreprocessingCandidate[];
+  /** issue 全体が処理失敗の場合は理由コード、成功 (= candidates が空でない) の場合は null。 */
+  issue_excluded?: ExclusionReasonAny;
+  issue_excluded_detail?: string;
+  /** 成功 / 失敗いずれの場合も before/after の AST ノード数を返す (集計用)。 */
+  before_node_count?: number;
+  after_node_count?: number;
+}
+
+export function extractFromScripts(beforeScript: string, afterScript: string): FallbackResult {
   let beforeAst: File;
   let afterAst: File;
   try {
@@ -38,7 +49,7 @@ export function extractFromScripts(
     afterAst = parse(afterScript);
   } catch (e) {
     const message = e instanceof Error ? e.message : "parse failed";
-    return [excluded(layout, EXCLUSION_REASON.PARSE_ERROR, message)];
+    return { candidates: [], issue_excluded: EXCLUSION_REASON_BASE.PARSE_ERROR, issue_excluded_detail: message };
   }
 
   const beforeNodeCount = countNodes(beforeAst);
@@ -87,48 +98,49 @@ export function extractFromScripts(
 
   if (candidates.length === 0) {
     if (unmatchedBeforeIdx.length === 0 && unmatchedAfterIdx.length === 0) {
-      return [
-        {
-          layout,
-          excluded: EXCLUSION_REASON.NO_CHANGED_NODES,
-          excluded_detail: "all top-level statements matched (formatting/comment only changes)",
-          before_node_count: beforeNodeCount,
-          after_node_count: afterNodeCount,
-        },
-      ];
-    }
-    return [
-      {
-        layout,
-        excluded: EXCLUSION_REASON.MODULE_WIDE_CHANGE,
-        excluded_detail: `${unmatchedBeforeIdx.length} before / ${unmatchedAfterIdx.length} after unmatched statements without enclosure (no Function/Method, Block, nor top-level statement candidate matched)`,
+      return {
+        candidates: [],
+        issue_excluded: EXCLUSION_REASON_BASE.NO_CHANGED_NODES,
+        issue_excluded_detail: "all top-level statements matched (formatting/comment only changes)",
         before_node_count: beforeNodeCount,
         after_node_count: afterNodeCount,
-      },
-    ];
-  }
-
-  return candidates.map((c) => {
-    const setupStatements = beforeBody.filter((_, idx) => idx !== c.beforeIndex);
+      };
+    }
     return {
-      layout,
-      setup: statementsToCode(setupStatements),
-      slow: statementToCode(c.beforeStmt),
-      fast: statementToCode(c.afterStmt),
-      enclosure_type: c.enclosureType,
+      candidates: [],
+      issue_excluded: SELAKOVIC_EXCLUSION_REASON.MODULE_WIDE_CHANGE,
+      issue_excluded_detail: `${unmatchedBeforeIdx.length} before / ${unmatchedAfterIdx.length} after unmatched statements without enclosure (no Function/Method, Block, nor top-level statement candidate matched)`,
       before_node_count: beforeNodeCount,
       after_node_count: afterNodeCount,
     };
+  }
+
+  const out: PreprocessingCandidate[] = candidates.map((c) => {
+    const setupStatements = beforeBody.filter((_, idx) => idx !== c.beforeIndex);
+    return {
+      setup: statementsToCode(setupStatements),
+      slow: statementToCode(c.beforeStmt),
+      fast: statementToCode(c.afterStmt),
+      enclosure_node_type: c.enclosureType,
+      before_node_count: beforeNodeCount,
+      after_node_count: afterNodeCount,
+      candidate_meta: { adapter: "selakovic", target_side: TARGET_SIDE.BOTH, is_workload_reachable: false },
+    };
   });
+  return { candidates: out, before_node_count: beforeNodeCount, after_node_count: afterNodeCount };
 }
 
 export function extractFromServerFiles(
   beforeFiles: Record<string, string>,
   afterFiles: Record<string, string>,
-): PreprocessingResult[] {
+): FallbackResult {
   const commonKeys = Object.keys(beforeFiles).filter((k) => k in afterFiles);
   if (commonKeys.length === 0) {
-    return [excluded(LAYOUT_KIND.SERVER, EXCLUSION_REASON.MISSING_FILES, "no common .js files between before/after")];
+    return {
+      candidates: [],
+      issue_excluded: EXCLUSION_REASON_BASE.MISSING_FILES,
+      issue_excluded_detail: "no common .js files between before/after",
+    };
   }
 
   const filesWithChanges: string[] = [];
@@ -141,36 +153,46 @@ export function extractFromServerFiles(
   }
 
   if (filesWithChanges.length === 0) {
-    return [excluded(LAYOUT_KIND.SERVER, EXCLUSION_REASON.NO_CHANGED_NODES, "all common files are byte-identical")];
+    return {
+      candidates: [],
+      issue_excluded: EXCLUSION_REASON_BASE.NO_CHANGED_NODES,
+      issue_excluded_detail: "all common files are byte-identical",
+    };
   }
 
-  const semanticChanges: Array<{ key: string; results: PreprocessingResult[] }> = [];
+  const semanticChanges: Array<{ key: string; result: FallbackResult }> = [];
   for (const key of filesWithChanges) {
     const before = beforeFiles[key];
     const after = afterFiles[key];
     if (before === undefined || after === undefined) continue;
-    const results = extractFromScripts(before, after, LAYOUT_KIND.SERVER);
-    if (results.length === 1 && results[0]?.excluded === EXCLUSION_REASON.NO_CHANGED_NODES) continue;
-    semanticChanges.push({ key, results });
+    const result = extractFromScripts(before, after);
+    if (result.candidates.length === 0 && result.issue_excluded === EXCLUSION_REASON_BASE.NO_CHANGED_NODES) continue;
+    semanticChanges.push({ key, result });
   }
 
   if (semanticChanges.length === 0) {
-    return [excluded(LAYOUT_KIND.SERVER, EXCLUSION_REASON.NO_CHANGED_NODES, "no semantic changes (formatting/comment only)")];
+    return {
+      candidates: [],
+      issue_excluded: EXCLUSION_REASON_BASE.NO_CHANGED_NODES,
+      issue_excluded_detail: "no semantic changes (formatting/comment only)",
+    };
   }
   if (semanticChanges.length > 1) {
-    return [
-      excluded(
-        LAYOUT_KIND.SERVER,
-        EXCLUSION_REASON.MULTI_FILE_CHANGE,
-        `changes span ${semanticChanges.length} files: ${semanticChanges.map((c) => c.key).join(", ")}`,
-      ),
-    ];
+    return {
+      candidates: [],
+      issue_excluded: EXCLUSION_REASON_BASE.MULTI_FILE_CHANGE,
+      issue_excluded_detail: `changes span ${semanticChanges.length} files: ${semanticChanges.map((c) => c.key).join(", ")}`,
+    };
   }
   const onlyChange = semanticChanges[0];
   if (onlyChange === undefined) {
-    return [excluded(LAYOUT_KIND.SERVER, EXCLUSION_REASON.MISSING_FILES, "internal: empty semanticChanges")];
+    return {
+      candidates: [],
+      issue_excluded: EXCLUSION_REASON_BASE.MISSING_FILES,
+      issue_excluded_detail: "internal: empty semanticChanges",
+    };
   }
-  return onlyChange.results;
+  return onlyChange.result;
 }
 
 interface CandidateRecord {
@@ -197,8 +219,4 @@ function wrapAsFile(stmt: Statement): File {
     comments: [],
     errors: [],
   } as unknown as File;
-}
-
-function excluded(layout: LayoutKind, reason: ExclusionReason, detail: string): PreprocessingResult {
-  return { layout, excluded: reason, excluded_detail: detail };
 }

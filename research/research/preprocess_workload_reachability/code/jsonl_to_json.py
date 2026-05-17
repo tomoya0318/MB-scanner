@@ -12,6 +12,7 @@ usage (brain-2 docker の ~/workspace から):
   rsync -av brain-2:/mnt/data1/tomoya-n/MB-Scanner/tmp/0022_preprocess-workload-reachability-redesign/ \
             tmp/0022_preprocess-workload-reachability-redesign/
 """
+
 from __future__ import annotations
 
 import json
@@ -81,7 +82,7 @@ def main() -> int:
         print(f"  {name} -> {name[:-1]}  ({n} records)")
         if name in ERROR_SUBSETS:
             n_err = extract_errors(path)
-            print(f"    + {name[:-len('.jsonl')]}-errors.json  ({n_err} error records)")
+            print(f"    + {name[: -len('.jsonl')]}-errors.json  ({n_err} error records)")
     print(f"\n  total records converted = {total}")
     return 0
 
