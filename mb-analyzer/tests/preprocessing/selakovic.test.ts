@@ -1,28 +1,16 @@
 /**
- * 対象: ADR-0011 Tier 2 の公開 API `preprocess()` — `(setup, slow, fast)` 組み立ての契約。
+ * 対象: ADR-0011 Tier 2 の公開 API `preprocess()` — 1 issue → 1 IssueResult (内部に candidates: list) の契約 (ADR-0024)。
  * 観点: 計測ハーネスを剥がして `f1`/`test()` body を slow/fast の母集団に取り、lib と body の
  *       実コード差で lib / workload / lib+workload / fallback に振り分け、A+B は ADR-0014 で independent なら 2 candidate、
  *       co-evolution の疑いなら 1 candidate にする。wrapper kind (top-level / Angular controller) と
  *       ADR-0013 (反復回数は書き換えない) も合わせて確認する。
- * 判定事項 (= ADR-0011 §段2 ルーティング × wrapper kind × ADR-0013):
- *   - client / 作用点 lib (lib 変化・body 不変)            → 1 candidate (single, aspect lib), lib varies / body fixed@before, enclosure = lib-file
- *   - client / 作用点 workload (lib 不変・body 変化)            → 1 candidate (single, aspect workload), body は IIFE 包み, setup に計測ハーネス残らない, enclosure = f1-body
- *   - client / 作用点 lib+workload independent                  → 2 candidate (candidate_kind = lib / body)
- *   - client / 作用点 lib+workload co-evolution の疑い            → 1 candidate (single, aspect lib+workload), enclosure = lib-file+f1-body
- *   - client / Angular controller-wrapper の f1         → angular bootstrap runnable (module/controller 再構成 + f1() 1 回実行), enclosure = angular-controller-wrapper
- *   - client / `f1` body 内のループ反復回数 (ADR-0011 §段1) → 書き換えない (`for (i < 50000)` がそのまま slow/fast に乗る。縮小は ADR-0017 の sandbox 側 transform)
- *   - client / `f1` 不在 (規約外フォーマット)            → fallback (Tier 1 素の top-level diff, aspect = fallback)
- *   - server / 作用点 workload (`test()` body 変化)             → 1 candidate, test_case 全文を runnable program 化, environment = jsdom
- *   - server / 作用点 lib (lib 変化・`test()` 不変)         → 1 candidate (aspect lib), init() の require が _before↔_after で切替
- *   - server / `test_case_*.js` 不在                    → fallback (lib top-level diff, aspect = fallback)
  *
- * モジュール単位の役割分解・ルーティング (extractF1 / extractTest / diffLibPair / routeAspect /
- * isIndependent / runnable builder 等) は各ファイルの in-source testing (`if (import.meta.vitest)` ブロック) 参照
- * — ADR-0007 (export していない = モジュール内共有ヘルパは in-source)。
+ * ADR-0024 で旧 `candidate_kind` / `enclosure_type` (戦略ラベル) / `aspect` (issue level) /
+ * `environment` を adapter_meta / target_side / is_workload_reachable / enclosure_node_type に再構成。
  */
 import { describe, expect, it } from "vitest";
 
-import { ASPECT, CANDIDATE_KIND } from "../../src/contracts/preprocessing-contracts";
+import { ASPECT, LAYOUT_KIND, TARGET_SIDE, WRAPPER_KIND } from "../../src/contracts/preprocessing-contracts";
 import { preprocess } from "../../src/preprocessing/selakovic";
 
 describe("preprocess — client / top-level f1", () => {
@@ -37,8 +25,8 @@ describe("preprocess — client / top-level f1", () => {
     var a = execute(f1, 10);
   `;
 
-  it("作用点 workload: lib なし・body 変化 → aspect workload, 1 candidate, body は IIFE 包み, setup に計測ハーネス残らない", () => {
-    const results = preprocess({
+  it("作用点 workload: lib なし・body 変化 → aspect=workload, 1 candidate (target_side=workload), body は IIFE 包み, setup に計測ハーネス残らない", () => {
+    const result = preprocess({
       kind: "client",
       before_inline: inlineBefore,
       after_inline: inlineAfter,
@@ -47,23 +35,25 @@ describe("preprocess — client / top-level f1", () => {
       lib_kind: null,
       lib_referenced_by_workload: false,
     });
-    expect(results).toHaveLength(1);
-    const r = results[0]!;
-    expect(r.aspect).toBe(ASPECT.WORKLOAD);
-    expect(r.candidate_kind).toBe(CANDIDATE_KIND.SINGLE);
-    expect(r.enclosure_type).toBe("f1-body");
-    expect(r.slow).toContain("(function () {");
-    expect(r.slow).toContain("% 2 === 0");
-    expect(r.fast).toContain("& 1 === 0");
-    expect(r.setup).toContain("var keys = [1, 2, 3]");
-    expect(r.setup).not.toContain("execute"); // 計測ハーネスは setup に残らない
+    expect(result.candidate_count).toBe(1);
+    expect(result.issue_meta?.aspect).toBe(ASPECT.WORKLOAD);
+    expect(result.issue_meta?.layout).toBe(LAYOUT_KIND.CLIENT);
+    expect(result.issue_meta?.wrapper_kind).toBe(WRAPPER_KIND.TOP_LEVEL);
+    const c = result.candidates[0]!;
+    expect(c.candidate_meta.target_side).toBe(TARGET_SIDE.WORKLOAD);
+    expect(c.candidate_meta.is_workload_reachable).toBe(false);
+    expect(c.slow).toContain("(function () {");
+    expect(c.slow).toContain("% 2 === 0");
+    expect(c.fast).toContain("& 1 === 0");
+    expect(c.setup).toContain("var keys = [1, 2, 3]");
+    expect(c.setup).not.toContain("execute"); // 計測ハーネスは setup に残らない
   });
 
-  it("作用点 lib: lib 変化・body 不変 + f1 が変更 lib 関数を呼ばない → embedded #0 のみ (changed-fn は Phase 2 reachability で DROP)", () => {
-    const results = preprocess({
+  it("作用点 lib: lib 変化・body 不変 + f1 が変更 lib 関数を呼ばない → embedded のみ (changed-fn は reachability で DROP)", () => {
+    const result = preprocess({
       kind: "client",
-      before_inline: inlineBefore, // f1 body = keys[i] % 2 === 0 — lib (helpers.even) を一度も呼んでいない
-      after_inline: inlineBefore, // inline (f1 body + preWorkload) は不変、lib だけが変わる
+      before_inline: inlineBefore,
+      after_inline: inlineBefore,
       lib_before_files: {
         "lib.js": "var helpers = {};\nhelpers.even = function (index) { return index % 2 == 0; };\nhelpers.label = 'v1';",
       },
@@ -73,11 +63,11 @@ describe("preprocess — client / top-level f1", () => {
       lib_kind: "file",
       lib_referenced_by_workload: true,
     });
-    expect(results).toHaveLength(1); // changed-fn は出ない: f1 が helpers.even を (推移的にも) 呼ばないので reachability で DROP
-    const embedded = results[0]!;
-    expect(embedded.aspect).toBe(ASPECT.LIB);
-    expect(embedded.candidate_kind).toBe(CANDIDATE_KIND.SINGLE);
-    expect(embedded.enclosure_type).toBe("lib-file");
+    expect(result.candidate_count).toBe(1);
+    const embedded = result.candidates[0]!;
+    expect(result.issue_meta?.aspect).toBe(ASPECT.LIB);
+    expect(embedded.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
+    expect(embedded.candidate_meta.is_workload_reachable).toBe(false);
     expect(embedded.setup).toBe(""); // lib が runnable 本体に入るので setup は空
     expect(embedded.slow).toContain("var helpers = {}"); // lib 全文が slow に埋まる
     expect(embedded.slow).toContain("index % 2 == 0"); // lib_before
@@ -93,42 +83,38 @@ describe("preprocess — client / top-level f1", () => {
       var f1 = function () { for (var i = 0; i < 3; i++) lib.norm(i); };
       var a = execute(f1, 10);
     `;
-    const results = preprocess({
+    const result = preprocess({
       kind: "client",
       before_inline: inlineCallsLib,
-      after_inline: inlineCallsLib, // inline は不変、lib だけが変わる (aspect lib)
+      after_inline: inlineCallsLib,
       lib_before_files: { "lib.js": libBefore },
       lib_after_files: { "lib.js": libAfter },
       lib_kind: "file",
       lib_referenced_by_workload: true,
     });
-    // #0 = embedded (lib 全文 slow/fast)、#1 = changed-fn (lib.norm を取り出した小候補)。lib.unused は変わってないので候補にならない。
-    expect(results).toHaveLength(2);
-    expect(results.map((r) => r.candidate_kind)).toEqual([CANDIDATE_KIND.SINGLE, CANDIDATE_KIND.CHANGED_FN]);
-    expect(results.every((r) => r.aspect === ASPECT.LIB)).toBe(true);
+    // #0 = embedded (target_side=lib, is_workload_reachable=false), #1 = changed-fn (target_side=lib, is_workload_reachable=true)
+    expect(result.candidate_count).toBe(2);
+    expect(result.issue_meta?.aspect).toBe(ASPECT.LIB);
+    expect(result.candidates.every((c) => c.candidate_meta.target_side === TARGET_SIDE.LIB)).toBe(true);
+    expect(result.candidates.map((c) => c.candidate_meta.is_workload_reachable)).toEqual([false, true]);
 
-    const embedded = results[0]!;
-    expect(embedded.enclosure_type).toBe("lib-file");
+    const embedded = result.candidates[0]!;
     expect(embedded.before_node_count).toBeGreaterThan(0);
 
-    const cf = results[1]!;
-    expect(cf.candidate_kind).toBe(CANDIDATE_KIND.CHANGED_FN);
-    expect(cf.enclosure_type).toBe("FunctionExpression"); // lib.norm = function(){...}
+    const cf = result.candidates[1]!;
+    expect(cf.enclosure_node_type).toBe("FunctionExpression"); // lib.norm = function(){...}
     // setup = lib 全文 (norm だけ穴あき + ガード + after 本体インライン fallback) + preWorkload (空)
     expect(cf.setup).toContain("var slice = [].slice;");
     expect(cf.setup).toContain("var lib = {};");
     expect(cf.setup).toContain("globalThis.__HOLE__.call(this, slice, x)"); // 内部依存 slice が lambda-lift で引数化
     expect(cf.setup).toContain("& 1 === 0"); // after 本体はインライン fallback として残る
-    // slow = __HOLE__ に変更前の本体 (% 2 === 0) + 観測ラッパ + workload (lib.norm を呼ぶ)
     expect(cf.slow).toContain("function (slice, x)");
     expect(cf.slow).toContain("% 2 === 0");
     expect(cf.slow).toContain("globalThis.__OBS");
     expect(cf.slow).toContain("lib.norm(i);");
     expect(cf.slow).not.toContain("var lib = {};"); // lib は setup 側、slow には入らない
-    // fast = __HOLE__ に変更後の本体
     expect(cf.fast).toContain("& 1 === 0");
     expect(cf.fast).toContain("lib.norm(i);");
-    // node count は変更関数本体のサイズ — embedded (= inline 全文) より小さい
     expect(cf.before_node_count).toBeGreaterThan(0);
     expect(cf.before_node_count).toBeLessThan(embedded.before_node_count!);
   });
@@ -140,7 +126,7 @@ describe("preprocess — client / top-level f1", () => {
       var f1 = function () { lib.norm(1); };
       var a = execute(f1, 10);
     `;
-    const results = preprocess({
+    const result = preprocess({
       kind: "client",
       before_inline: inlineCallsLib,
       after_inline: inlineCallsLib,
@@ -150,23 +136,22 @@ describe("preprocess — client / top-level f1", () => {
       lib_referenced_by_workload: true,
       dep_lib_sources: ["/* jquery 2.1.3 stub */\nvar jQuery = {};", "/* handlebars 1.1.0 stub */\nvar Handlebars = {};"],
     });
-    expect(results.length).toBeGreaterThanOrEqual(2); // embedded #0 + changed-fn #1
-    for (const r of results) {
-      // 全候補の setup 先頭に dep が <script> 順で入る
-      expect(r.setup).toContain("/* jquery 2.1.3 stub */");
-      expect(r.setup).toContain("/* handlebars 1.1.0 stub */");
-      expect(r.setup!.indexOf("jquery 2.1.3 stub")).toBeLessThan(r.setup!.indexOf("handlebars 1.1.0 stub"));
+    expect(result.candidate_count).toBeGreaterThanOrEqual(2);
+    for (const c of result.candidates) {
+      expect(c.setup).toContain("/* jquery 2.1.3 stub */");
+      expect(c.setup).toContain("/* handlebars 1.1.0 stub */");
+      expect(c.setup!.indexOf("jquery 2.1.3 stub")).toBeLessThan(c.setup!.indexOf("handlebars 1.1.0 stub"));
     }
     // embedded の setup は dep だけ (lib は slow/fast 側) / changed-fn の setup は dep + 穴あき lib + preWorkload
-    const embedded = results.find((r) => r.candidate_kind === CANDIDATE_KIND.SINGLE)!;
+    const embedded = result.candidates.find((c) => !c.candidate_meta.is_workload_reachable)!;
     expect(embedded.setup).toMatch(/^\/\* jquery 2\.1\.3 stub \*\//);
-    const cf = results.find((r) => r.candidate_kind === CANDIDATE_KIND.CHANGED_FN)!;
+    const cf = result.candidates.find((c) => c.candidate_meta.is_workload_reachable)!;
     expect(cf.setup).toMatch(/^\/\* jquery 2\.1\.3 stub \*\//);
-    expect(cf.setup).toContain("globalThis.__HOLE__.call"); // dep の後に穴あき lib も来る
+    expect(cf.setup).toContain("globalThis.__HOLE__.call");
   });
 
   it("作用点 lib: 変更が複数 top-level 関数にまたがっても embedded (#0) が出る", () => {
-    const results = preprocess({
+    const result = preprocess({
       kind: "client",
       before_inline: inlineBefore,
       after_inline: inlineBefore,
@@ -175,13 +160,14 @@ describe("preprocess — client / top-level f1", () => {
       lib_kind: "file",
       lib_referenced_by_workload: true,
     });
-    expect(results).toHaveLength(1);
-    expect(results[0]!.candidate_kind).toBe(CANDIDATE_KIND.SINGLE);
-    expect(results[0]!.enclosure_type).toBe("lib-file");
+    expect(result.candidate_count).toBe(1);
+    const c = result.candidates[0]!;
+    expect(c.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
+    expect(c.candidate_meta.is_workload_reachable).toBe(false);
   });
 
-  it("作用点 lib+workload co-evolution: body の参照 identifier が lib 変更関数名と交差 → 1 candidate (single, A+B)", () => {
-    const results = preprocess({
+  it("作用点 lib+workload co-evolution: body の参照 identifier が lib 変更関数名と交差 → 1 candidate (target_side=both)", () => {
+    const result = preprocess({
       kind: "client",
       before_inline: `
         var data = [1, 2, 3];
@@ -198,19 +184,18 @@ describe("preprocess — client / top-level f1", () => {
       lib_kind: "file",
       lib_referenced_by_workload: true,
     });
-    expect(results).toHaveLength(1);
-    const r = results[0]!;
-    expect(r.aspect).toBe(ASPECT.BOTH);
-    expect(r.candidate_kind).toBe(CANDIDATE_KIND.SINGLE);
-    expect(r.enclosure_type).toBe("lib-file+f1-body");
-    expect(r.slow).toContain("ngRepeatAction(data, 0)"); // body も
-    expect(r.fast).toContain("ngRepeatAction(data, 1)");
-    expect(r.slow).toContain("arr[k] % 2 == 0"); // lib も同時に変わる
-    expect(r.fast).toContain("arr[k] & 1 == 0");
+    expect(result.candidate_count).toBe(1);
+    const c = result.candidates[0]!;
+    expect(result.issue_meta?.aspect).toBe(ASPECT.BOTH);
+    expect(c.candidate_meta.target_side).toBe(TARGET_SIDE.BOTH);
+    expect(c.slow).toContain("ngRepeatAction(data, 0)");
+    expect(c.fast).toContain("ngRepeatAction(data, 1)");
+    expect(c.slow).toContain("arr[k] % 2 == 0");
+    expect(c.fast).toContain("arr[k] & 1 == 0");
   });
 
   it("ループ反復回数は書き換えない (ADR-0011 §段1): for (i < 50000) がそのまま slow/fast に乗る", () => {
-    const results = preprocess({
+    const result = preprocess({
       kind: "client",
       before_inline: `
         var arr = [];
@@ -227,19 +212,19 @@ describe("preprocess — client / top-level f1", () => {
       lib_kind: null,
       lib_referenced_by_workload: false,
     });
-    expect(results).toHaveLength(1);
-    const r = results[0]!;
-    expect(r.aspect).toBe(ASPECT.WORKLOAD);
-    expect(r.slow).toMatch(/i\s*<\s*50000/); // 反復上限は原文どおり — 縮小は等価検証 sandbox の iteration-cap transform (ADR-0017) に委ねる
-    expect(r.fast).toMatch(/i\s*<\s*50000/);
-    expect(r.slow).toContain("arr.push");
-    expect(r.fast).toContain("arr.unshift");
-    expect(r.setup).toContain("var arr = []"); // preWorkload statement は setup へ
-    expect(r.setup).not.toContain("execute");
+    expect(result.candidate_count).toBe(1);
+    const c = result.candidates[0]!;
+    expect(result.issue_meta?.aspect).toBe(ASPECT.WORKLOAD);
+    expect(c.slow).toMatch(/i\s*<\s*50000/);
+    expect(c.fast).toMatch(/i\s*<\s*50000/);
+    expect(c.slow).toContain("arr.push");
+    expect(c.fast).toContain("arr.unshift");
+    expect(c.setup).toContain("var arr = []");
+    expect(c.setup).not.toContain("execute");
   });
 
-  it("f1 が無い inline は fallback (Tier 1 の素の top-level diff)", () => {
-    const results = preprocess({
+  it("f1 が無い inline は fallback (Tier 1 の素の top-level diff、target_side=both)", () => {
+    const result = preprocess({
       kind: "client",
       before_inline: "function g() { return arr[0]; }",
       after_inline: "function g() { return arr[1]; }",
@@ -248,12 +233,14 @@ describe("preprocess — client / top-level f1", () => {
       lib_kind: null,
       lib_referenced_by_workload: false,
     });
-    expect(results[0]?.aspect).toBe(ASPECT.FALLBACK);
+    expect(result.issue_meta?.aspect).toBe(ASPECT.FALLBACK);
+    if (result.candidates.length > 0) {
+      expect(result.candidates[0]!.candidate_meta.target_side).toBe(TARGET_SIDE.BOTH);
+    }
   });
 
-  it("作用点 lib+workload independent: body の参照 identifier が lib 変更関数名と交差しない → lib / body の 2 candidate (ADR-0014 split)", () => {
-    // 注: Phase 2b-ii で lib 側にも changed-fn 候補が追加される予定。
-    const results = preprocess({
+  it("作用点 lib+workload independent: body の参照 identifier が lib 変更関数名と交差しない → lib / workload の 2 candidate (ADR-0014 split)", () => {
+    const result = preprocess({
       kind: "client",
       before_inline: inlineBefore,
       after_inline: inlineAfter,
@@ -262,9 +249,12 @@ describe("preprocess — client / top-level f1", () => {
       lib_kind: "file",
       lib_referenced_by_workload: false,
     });
-    expect(results).toHaveLength(2);
-    expect(results.map((r) => r.aspect)).toEqual([ASPECT.BOTH, ASPECT.BOTH]);
-    expect(results.map((r) => r.candidate_kind)).toEqual([CANDIDATE_KIND.LIB, CANDIDATE_KIND.BODY]);
+    expect(result.candidate_count).toBe(2);
+    expect(result.issue_meta?.aspect).toBe(ASPECT.BOTH);
+    expect(result.candidates.map((c) => c.candidate_meta.target_side)).toEqual([
+      TARGET_SIDE.LIB,
+      TARGET_SIDE.WORKLOAD,
+    ]);
   });
 });
 
@@ -279,8 +269,8 @@ describe("preprocess — client / Angular controller-wrapper", () => {
     });
   `;
 
-  it("f1 が app.controller(...) 内 → module/controller を再構成し f1() を 1 回実行する自己完結 runnable", () => {
-    const results = preprocess({
+  it("f1 が app.controller(...) 内 → wrapper_kind=angular_controller_wrapper, module/controller を再構成", () => {
+    const result = preprocess({
       kind: "client",
       before_inline: wrap("% 2 ==="),
       after_inline: wrap("& 1 ==="),
@@ -289,28 +279,27 @@ describe("preprocess — client / Angular controller-wrapper", () => {
       lib_kind: null,
       lib_referenced_by_workload: false,
     });
-    expect(results).toHaveLength(1);
-    const r = results[0]!;
-    expect(r.aspect).toBe(ASPECT.WORKLOAD);
-    expect(r.candidate_kind).toBe(CANDIDATE_KIND.SINGLE);
-    expect(r.enclosure_type).toBe("angular-controller-wrapper");
-    expect(r.environment).toBe("jsdom");
-    expect(r.setup).toBe("");
-    expect(r.slow).toContain('angular.module("benchApp", [])');
-    expect(r.slow).toContain('.controller("BenchCtrl", function ($scope) {');
-    expect(r.slow).toContain("globalThis.__selakovic_f1 = f1");
-    expect(r.slow).toContain("% 2");
-    expect(r.fast).toContain("& 1");
-    expect(r.slow).not.toContain("execute"); // 計測ハーネスは bootstrap に混ざらない
-    expect(r.slow).not.toContain("jStat");
+    expect(result.candidate_count).toBe(1);
+    const c = result.candidates[0]!;
+    expect(result.issue_meta?.aspect).toBe(ASPECT.WORKLOAD);
+    expect(result.issue_meta?.wrapper_kind).toBe(WRAPPER_KIND.ANGULAR_CONTROLLER_WRAPPER);
+    expect(c.candidate_meta.target_side).toBe(TARGET_SIDE.WORKLOAD);
+    expect(c.setup).toBe("");
+    expect(c.slow).toContain('angular.module("benchApp", [])');
+    expect(c.slow).toContain('.controller("BenchCtrl", function ($scope) {');
+    expect(c.slow).toContain("globalThis.__selakovic_f1 = f1");
+    expect(c.slow).toContain("% 2");
+    expect(c.fast).toContain("& 1");
+    expect(c.slow).not.toContain("execute");
+    expect(c.slow).not.toContain("jStat");
   });
 });
 
 describe("preprocess — server (test_case)", () => {
-  it("作用点 workload: test() body 変化 → aspect workload, runnable program を slow/fast に, jsdom hint", () => {
+  it("作用点 workload: test() body 変化 → aspect=workload, target_side=workload, runnable program を slow/fast に", () => {
     const before = `(function () { function init() { return 1; } function test(i) { return i % 2; } exports.init = init; exports.test = test; })();`;
     const after = `(function () { function init() { return 1; } function test(i) { return i & 1; } exports.init = init; exports.test = test; })();`;
-    const results = preprocess({
+    const result = preprocess({
       kind: "server",
       before_test_case: before,
       after_test_case: after,
@@ -318,21 +307,20 @@ describe("preprocess — server (test_case)", () => {
       lib_after_files: {},
       lib_kind: null,
     });
-    expect(results).toHaveLength(1);
-    const r = results[0]!;
-    expect(r.layout).toBe("server");
-    expect(r.aspect).toBe(ASPECT.WORKLOAD);
-    expect(r.environment).toBe("jsdom");
-    expect(r.enclosure_type).toBe("server-test-case");
-    expect(r.slow).toContain("i % 2");
-    expect(r.fast).toContain("i & 1");
-    expect(r.slow).toContain("exports.test"); // test_case 全文が runnable に含まれる
+    expect(result.candidate_count).toBe(1);
+    const c = result.candidates[0]!;
+    expect(result.issue_meta?.layout).toBe(LAYOUT_KIND.SERVER);
+    expect(result.issue_meta?.aspect).toBe(ASPECT.WORKLOAD);
+    expect(c.candidate_meta.target_side).toBe(TARGET_SIDE.WORKLOAD);
+    expect(c.slow).toContain("i % 2");
+    expect(c.fast).toContain("i & 1");
+    expect(c.slow).toContain("exports.test");
   });
 
-  it("作用点 lib: lib 変化・test() body 不変 → aspect lib, init() の require が _before↔_after で切替", () => {
+  it("作用点 lib: lib 変化・test() body 不変 → aspect=lib, target_side=lib, init() の require が _before↔_after で切替", () => {
     const before = `(function () { function init() { return require('./mylib_before'); } function test(lib) { return lib.compute(3); } exports.init = init; exports.test = test; })();`;
     const after = `(function () { function init() { return require('./mylib_after'); } function test(lib) { return lib.compute(3); } exports.init = init; exports.test = test; })();`;
-    const results = preprocess({
+    const result = preprocess({
       kind: "server",
       before_test_case: before,
       after_test_case: after,
@@ -340,20 +328,19 @@ describe("preprocess — server (test_case)", () => {
       lib_after_files: { "mylib.js": "module.exports = { compute: function (x) {\n  return x << 1;\n} };" },
       lib_kind: "file",
     });
-    expect(results).toHaveLength(1);
-    const r = results[0]!;
-    expect(r.layout).toBe("server");
-    expect(r.aspect).toBe(ASPECT.LIB);
-    expect(r.candidate_kind).toBe(CANDIDATE_KIND.SINGLE);
-    expect(r.enclosure_type).toBe("server-test-case");
-    expect(r.slow).toContain("require('./mylib_before')");
-    expect(r.fast).toContain("require('./mylib_after')");
-    expect(r.slow).toContain("lib.compute(3)"); // test() body は両側同じ
-    expect(r.fast).toContain("lib.compute(3)");
+    expect(result.candidate_count).toBe(1);
+    const c = result.candidates[0]!;
+    expect(result.issue_meta?.layout).toBe(LAYOUT_KIND.SERVER);
+    expect(result.issue_meta?.aspect).toBe(ASPECT.LIB);
+    expect(c.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
+    expect(c.slow).toContain("require('./mylib_before')");
+    expect(c.fast).toContain("require('./mylib_after')");
+    expect(c.slow).toContain("lib.compute(3)");
+    expect(c.fast).toContain("lib.compute(3)");
   });
 
   it("test_case が無いと fallback (lib top-level diff)", () => {
-    const results = preprocess({
+    const result = preprocess({
       kind: "server",
       before_test_case: null,
       after_test_case: null,
@@ -361,6 +348,6 @@ describe("preprocess — server (test_case)", () => {
       lib_after_files: { "x.js": "module.exports = function () { return 2; };" },
       lib_kind: "file",
     });
-    expect(results[0]?.aspect).toBe(ASPECT.FALLBACK);
+    expect(result.issue_meta?.aspect).toBe(ASPECT.FALLBACK);
   });
 });

@@ -1,9 +1,7 @@
 import {
-  CANDIDATE_KIND,
-  LAYOUT_KIND,
-  type CandidateKind,
-  type ExecutionEnvironmentHint,
-  type PreprocessingResult,
+  TARGET_SIDE,
+  type PreprocessingCandidate,
+  type TargetSide,
 } from "../../../contracts/preprocessing-contracts";
 import { statementsToCode } from "../../common/setup-cleanup";
 import type { F1Decomposition } from "../decompose/f1";
@@ -15,40 +13,34 @@ import { wrapClientLibGlobalsStatement } from "./recorder-hooks";
  * (top-level f1 / Angular controller-wrapper) で組み立てる (ADR-0011 §段2 / ADR-0014)。
  * `f1` body 内のループ反復回数は書き換えない (ADR-0017)。
  *
- * `aspect: lib` (lib 内 patch) の pruning 向け小 candidate (`changed-fn`) は `buildChangedFnCandidate`
- * (Phase 2b-ii で追加予定) が担当する — ここの `buildClientLibCandidate` は embedded 版のみ。
+ * `aspect: lib` (lib 内 patch) の pruning 向け小 candidate (`changed-fn`) は `buildChangedFnCandidate` が担当する。
+ *
+ * 戻り値は ADR-0024 の base + adapter_meta 構造 (`enclosure_node_type` は client 系経路では null = 戦略
+ * ラベル "lib-file" 等は assemble_path 相当を adapter_meta から派生で識別)。
  */
-
-const ENV_JSDOM: ExecutionEnvironmentHint = "jsdom";
 
 /** 作用点 lib の embedded lib candidate: lib varies / workload body fixed@before (lib 全文を slow/fast に丸ごと埋める)。 */
 export function buildClientLibCandidate(
   f1Before: F1Decomposition,
   libSourceBefore: string,
   libSourceAfter: string,
-  kind: CandidateKind,
-): PreprocessingResult {
+  targetSide: TargetSide,
+): PreprocessingCandidate {
   const preWorkload = statementsToCode([...f1Before.preWorkloadStatements]);
   if (f1Before.wrapperKind === "angular-controller-wrapper" && f1Before.angular !== undefined) {
     const a = f1Before.angular;
     return {
-      layout: LAYOUT_KIND.CLIENT,
       setup: "",
       slow: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1Before) }),
       fast: buildAngularRunnable({ libSource: libSourceAfter, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1Before) }),
-      enclosure_type: "angular-controller-wrapper",
-      candidate_kind: kind,
-      environment: ENV_JSDOM,
+      candidate_meta: { adapter: "selakovic", target_side: targetSide, is_workload_reachable: false },
     };
   }
   return {
-    layout: LAYOUT_KIND.CLIENT,
     setup: "",
     slow: flatRunnable(libSourceBefore, preWorkload, f1BodyWrapped(f1Before), clientRecorderHook(libSourceBefore)),
     fast: flatRunnable(libSourceAfter, preWorkload, f1BodyWrapped(f1Before), clientRecorderHook(libSourceAfter)),
-    enclosure_type: "lib-file",
-    candidate_kind: kind,
-    environment: ENV_JSDOM,
+    candidate_meta: { adapter: "selakovic", target_side: targetSide, is_workload_reachable: false },
   };
 }
 
@@ -58,65 +50,51 @@ export function buildClientBodyCandidate(
   f1After: F1Decomposition,
   libSourceBefore: string,
   libNeededInSetup: boolean,
-  kind: CandidateKind,
-): PreprocessingResult {
+  targetSide: TargetSide,
+): PreprocessingCandidate {
   const preWorkload = statementsToCode([...f1Before.preWorkloadStatements]);
   if (f1Before.wrapperKind === "angular-controller-wrapper" && f1Before.angular !== undefined) {
     const a = f1Before.angular;
     return {
-      layout: LAYOUT_KIND.CLIENT,
       setup: "",
       slow: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1Before) }),
       fast: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1After) }),
-      enclosure_type: "angular-controller-wrapper",
-      candidate_kind: kind,
-      environment: ENV_JSDOM,
+      candidate_meta: { adapter: "selakovic", target_side: targetSide, is_workload_reachable: false },
     };
   }
   const setupParts: string[] = [];
   if (libNeededInSetup && libSourceBefore.length > 0) setupParts.push(libSourceBefore);
   if (preWorkload.length > 0) setupParts.push(preWorkload);
   return {
-    layout: LAYOUT_KIND.CLIENT,
     setup: setupParts.join("\n;\n"),
     slow: f1BodyWrapped(f1Before),
     fast: f1BodyWrapped(f1After),
-    enclosure_type: "f1-body",
-    candidate_kind: kind,
-    // clientIssues の inline `<script>` は browser context で動く前提 (= `document`/`window` を参照しうる)
-    // ので、純粋計算に見える f1 body でも jsdom で実行する。
-    environment: ENV_JSDOM,
+    candidate_meta: { adapter: "selakovic", target_side: targetSide, is_workload_reachable: false },
   };
 }
 
-/** lib+workload co-evolution の疑い: lib も workload body も同時に変える 1 candidate。 */
+/** lib+workload co-evolution の疑い: lib も workload body も同時に変える 1 candidate (target_side=both)。 */
 export function buildClientCombinedCandidate(
   f1Before: F1Decomposition,
   f1After: F1Decomposition,
   libSourceBefore: string,
   libSourceAfter: string,
-): PreprocessingResult {
+): PreprocessingCandidate {
   const preWorkload = statementsToCode([...f1Before.preWorkloadStatements]);
   if (f1Before.wrapperKind === "angular-controller-wrapper" && f1Before.angular !== undefined) {
     const a = f1Before.angular;
     return {
-      layout: LAYOUT_KIND.CLIENT,
       setup: "",
       slow: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1Before) }),
       fast: buildAngularRunnable({ libSource: libSourceAfter, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1After) }),
-      enclosure_type: "angular-controller-wrapper",
-      candidate_kind: CANDIDATE_KIND.SINGLE,
-      environment: ENV_JSDOM,
+      candidate_meta: { adapter: "selakovic", target_side: TARGET_SIDE.BOTH, is_workload_reachable: false },
     };
   }
   return {
-    layout: LAYOUT_KIND.CLIENT,
     setup: "",
     slow: flatRunnable(libSourceBefore, preWorkload, f1BodyWrapped(f1Before), clientRecorderHook(libSourceBefore)),
     fast: flatRunnable(libSourceAfter, preWorkload, f1BodyWrapped(f1After), clientRecorderHook(libSourceAfter)),
-    enclosure_type: "lib-file+f1-body",
-    candidate_kind: CANDIDATE_KIND.SINGLE,
-    environment: ENV_JSDOM,
+    candidate_meta: { adapter: "selakovic", target_side: TARGET_SIDE.BOTH, is_workload_reachable: false },
   };
 }
 

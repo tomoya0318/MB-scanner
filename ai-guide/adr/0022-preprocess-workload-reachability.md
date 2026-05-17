@@ -88,3 +88,7 @@ v2 で **置き換え対象**:
 - `research/src/research/preprocess_workload_reachability/notes/spike-v1.log` / `spike-v2.log`: brain-2 サーバでの実走ログ
 - `research/src/research/preprocess_workload_reachability/notes/migration-plan.md`: v1 → v2 の移行ロードマップ
 - `research/src/research/preprocess_workload_reachability/notes/refactoring-todo.md`: v2 完了後の整備タスク (CLI 改良 / mise tasks / research/ 整備)
+
+### 2026-05-15 更新 (ADR-0024 で changed-fn を boolean 化)
+
+`candidate_kind: changed-fn` は ADR-0024 で廃止し、changed_fn 抽出由来かどうかは `is_workload_reachable: bool` (candidate level、`SelakovicCandidateMeta`) で表現する形に再構成する。本 ADR の workload-reachability ロジック (`change-units.ts` / `reachability.ts`) と「workload が exercise する変更関数だけを候補に絞る」設計自体は不変。`change-not-exercised` enum 値は `SelakovicExclusionReason` (adapter 拡張) に移動。詳細は ADR-0024 §決定 を参照。

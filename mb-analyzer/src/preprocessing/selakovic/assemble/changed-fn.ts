@@ -1,10 +1,8 @@
 import type { Node, Statement } from "@babel/types";
 
 import {
-  CANDIDATE_KIND,
-  LAYOUT_KIND,
-  type ExecutionEnvironmentHint,
-  type PreprocessingResult,
+  TARGET_SIDE,
+  type PreprocessingCandidate,
 } from "../../../contracts/preprocessing-contracts";
 import type { FnChangeUnit } from "../../common/change-units";
 import {
@@ -19,8 +17,6 @@ import {
 import { statementsToCode } from "../../common/setup-cleanup";
 import type { F1Decomposition } from "../decompose/f1";
 
-const ENV_JSDOM: ExecutionEnvironmentHint = "jsdom";
-
 /**
  * `aspect: lib` の changed-fn candidate を組む (plan §D1 / spike v2)。`unit` は workload が (推移的に) exercise
  * すると判定済の fn unit (= `pipeline.ts` が `isReachedByAnyWorkload` で KEEP したもの)。`libAfterSrc` は
@@ -28,22 +24,25 @@ const ENV_JSDOM: ExecutionEnvironmentHint = "jsdom";
  *
  * 構造:
  *  - `setup` = lib (after、変更関数の body だけ穴あき + ガード + after 本体インライン fallback) + preWorkload
- *    （`<script src>` の CDN 依存 lib は `pipeline.ts` が全候補の `setup` 先頭に一括連結する — plan §C1）
- *  - `slow` = `globalThis.__HOLE__ = function(<liftDeps>, <fnParams>){…変更前の本体…+ 戻り値を __OBS に記録}` ＋ 観測する形の workload
- *  - `fast` = 同じく `__HOLE__` に変更後の本体 ＋ 観測する形の workload
+ *  - `slow` = `globalThis.__HOLE__ = function(<liftDeps>, <fnParams>){…変更前の本体…+ 戻り値を __OBS に記録}` + workload
+ *  - `fast` = 同じく `__HOLE__` に変更後の本体 + 観測する形の workload
  *  - pruning が削る対象は `slow` (= 変更関数本体 + workload) の AST、`setup` (= lib 全文 + dep) は不変
+ *
+ * adapter_meta:
+ *  - target_side = lib (変更関数は lib 側、ADR-0024)
+ *  - is_workload_reachable = true (workload 到達性で抽出された変更関数)
  *
  * 次のケースは `null` を返す (= この unit からは candidate を作らない、embedded `#0` がカバー):
  *  - `unit.afterFn === null` (rename / 削除)
  *  - `afterFn` / `beforeFn` の本体が BlockStatement でない (arrow `=> expr` 等)
- *  - before / after の param 名リストが一致しない (lambda-lift の引数転送がずれる — spike の簡略化)
- *  - workload (`f1`) が top-level wrapper でない (= Angular controller wrapper。v1 では embedded のみ。`buildAngularRunnable` の hole 対応は v2)
+ *  - before / after の param 名リストが一致しない
+ *  - workload (`f1`) が top-level wrapper でない (Angular controller wrapper は v1 では skip)
  */
 export function buildChangedFnCandidate(
   unit: FnChangeUnit,
   libAfterSrc: string,
   f1Decomposition: F1Decomposition,
-): PreprocessingResult | null {
+): PreprocessingCandidate | null {
   if (f1Decomposition.wrapperKind !== "top-level") return null;
   const afterFn = unit.afterFn;
   if (afterFn === null) return null;
@@ -61,17 +60,14 @@ export function buildChangedFnCandidate(
   const workload = wrapWorkloadObserved(statementsToCode([...f1Decomposition.f1Body.body]));
 
   return {
-    layout: LAYOUT_KIND.CLIENT,
     setup: [holedLib, preWorkload].filter((s) => s.length > 0).join("\n;\n"),
     slow: `globalThis.__HOLE__ = ${buildHoleFunction(holeParams, statementsToCode(beforeBody.body as readonly Statement[]))};\n;\n${workload}`,
     fast: `globalThis.__HOLE__ = ${buildHoleFunction(holeParams, statementsToCode(afterBody.body as readonly Statement[]))};\n;\n${workload}`,
-    enclosure_type: afterFn.type,
-    candidate_kind: CANDIDATE_KIND.CHANGED_FN,
-    environment: ENV_JSDOM,
+    enclosure_node_type: afterFn.type,
     // node count は「pruning が削る対象 = 変更関数の本体」のサイズ (inline 全文サイズ ≠ embedded の値)。
-    // pipeline.ts の candidates.map による node count 一括上書きの対象外 — changed-fn は builder 値を尊重。
     before_node_count: countSubtreeNodes(beforeBody as unknown as Node),
     after_node_count: countSubtreeNodes(afterBody as unknown as Node),
+    candidate_meta: { adapter: "selakovic", target_side: TARGET_SIDE.LIB, is_workload_reachable: true },
   };
 }
 
@@ -103,26 +99,27 @@ if (import.meta.vitest) {
       const c = buildChangedFnCandidate(unit, libAfter, f1d);
       expect(c).not.toBeNull();
       const r = c!;
-      expect(r.candidate_kind).toBe(CANDIDATE_KIND.CHANGED_FN);
-      expect(r.enclosure_type).toBe("FunctionExpression"); // lib.norm = function(){...}
-      // setup: lib 全文 (norm だけ穴あき) + preWorkload (ここでは preWorkload は空) — slice/lib の宣言は残り、norm の本体は __HOLE__ 呼び出しに
+      expect(r.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
+      expect(r.candidate_meta.is_workload_reachable).toBe(true);
+      expect(r.enclosure_node_type).toBe("FunctionExpression"); // lib.norm = function(){...}
+      // setup: lib 全文 (norm だけ穴あき) + preWorkload
       expect(r.setup).toContain("var slice = [].slice;");
       expect(r.setup).toContain("var lib = {};");
-      expect(r.setup).toContain("globalThis.__HOLE__.call(this, slice, x)"); // 内部依存 slice が lift され引数化
-      expect(r.setup).toContain("& 1 === 0"); // after 本体はインライン fallback として setup に残る
-      // slow: __HOLE__ = 変更前の本体 (% 2 === 0) + 観測ラッパ + workload (lib.norm(...))
+      expect(r.setup).toContain("globalThis.__HOLE__.call(this, slice, x)");
+      expect(r.setup).toContain("& 1 === 0");
+      // slow: __HOLE__ = 変更前の本体 (% 2 === 0) + 観測ラッパ + workload
       expect(r.slow).toContain("function (slice, x)");
       expect(r.slow).toContain("% 2 === 0");
       expect(r.slow).toContain("globalThis.__OBS");
       expect(r.slow).toContain("lib.norm(7);");
-      expect(r.slow).not.toContain("var lib = {};"); // lib は setup 側、slow には入らない
+      expect(r.slow).not.toContain("var lib = {};");
       // fast: __HOLE__ = 変更後の本体 (& 1 === 0)
       expect(r.fast).toContain("& 1 === 0");
       expect(r.fast).toContain("lib.norm(7);");
-      // node count は変更関数本体のサイズ (小さい、inline 全文ではない)
+      // node count は変更関数本体のサイズ (小さい)
       expect(r.before_node_count).toBeGreaterThan(0);
       expect(r.before_node_count).toBeLessThan(100);
-      // parse できる (壊れた構文を吐いてない)
+      // parse できる
       expect(() => parse(r.setup!)).not.toThrow();
       expect(() => parse(r.slow!)).not.toThrow();
       expect(() => parse(r.fast!)).not.toThrow();
@@ -136,7 +133,7 @@ if (import.meta.vitest) {
       expect(buildChangedFnCandidate(unit, after, f1d)).toBeNull();
     });
 
-    it("変更関数本体の leading / trailing コメントは slow/fast から落ちる (元 lib のコメントが candidate を膨らませない)", () => {
+    it("変更関数本体の leading / trailing コメントは slow/fast から落ちる", () => {
       const libBeforeWithComments = `
 var lib = {};
 lib.norm = function (x) {
@@ -156,15 +153,10 @@ lib.norm = function (x) {
       const unit = fnUnitFor(libBeforeWithComments, libAfterWithComments);
       const c = buildChangedFnCandidate(unit, libAfterWithComments, f1d)!;
       expect(c).not.toBeNull();
-      // slow = __HOLE__(before body) + workload。before 側の // / /* */ コメントは消える。
       expect(c.slow).not.toContain("before: ascii-rule");
       expect(c.slow).not.toContain("trailing line");
       expect(c.slow).not.toContain("/*");
-      // fast = __HOLE__(after body) + workload。after 側のコメントも消える。
       expect(c.fast).not.toContain("after: bit-shift");
-      // setup の「after 本体インライン部分」は holeLibSource が元ソースを span-slice しているため
-      // コメントが残るのが現状仕様 (lib 全文の他部分と同じく lib bootstrap の挙動を変えないため)。
-      // candidate サイズへの影響は slow/fast を経由した pruning 対象範囲のみなので問題なし。
       expect(c.setup).toContain("after: bit-shift");
     });
 
@@ -174,7 +166,6 @@ lib.norm = function (x) {
         app.controller("BenchCtrl", function ($scope) { lib.norm(1); });
       `;
       const f1d = extractF1(angularInline);
-      // angular wrapper が抽出できないケースもあるが、できた場合 wrapperKind !== "top-level" なら null
       if (f1d && f1d.wrapperKind !== "top-level") {
         const unit = fnUnitFor(libBefore, libAfter);
         expect(buildChangedFnCandidate(unit, libAfter, f1d)).toBeNull();

@@ -38,7 +38,15 @@ class TestDeriveOverallVerdict:
             # error は not_equal の次
             ([obs(_EQ), obs(_ERR, Oracle.ARGUMENT_MUTATION), obs(_NA, Oracle.EXCEPTION)], Verdict.ERROR),
             # 全 not_applicable は inconclusive (was error)
-            ([obs(_NA), obs(_NA, Oracle.ARGUMENT_MUTATION), obs(_NA, Oracle.EXCEPTION), obs(_NA, Oracle.EXTERNAL_OBSERVATION)], Verdict.INCONCLUSIVE),
+            (
+                [
+                    obs(_NA),
+                    obs(_NA, Oracle.ARGUMENT_MUTATION),
+                    obs(_NA, Oracle.EXCEPTION),
+                    obs(_NA, Oracle.EXTERNAL_OBSERVATION),
+                ],
+                Verdict.INCONCLUSIVE,
+            ),
             # 空 observation は inconclusive (was error)
             ([], Verdict.INCONCLUSIVE),
             # return_value=equal (positive evidence) → equal
@@ -48,15 +56,44 @@ class TestDeriveOverallVerdict:
             # argument_mutation=equal (positive evidence) → equal
             ([obs(_EQ, Oracle.ARGUMENT_MUTATION), obs(_EQ, Oracle.EXCEPTION)], Verdict.EQUAL),
             # exception=equal だけ (両側同じくクラッシュ) → inconclusive
-            ([obs(_NA), obs(_NA, Oracle.ARGUMENT_MUTATION), obs(_EQ, Oracle.EXCEPTION), obs(_NA, Oracle.EXTERNAL_OBSERVATION)], Verdict.INCONCLUSIVE),
+            (
+                [
+                    obs(_NA),
+                    obs(_NA, Oracle.ARGUMENT_MUTATION),
+                    obs(_EQ, Oracle.EXCEPTION),
+                    obs(_NA, Oracle.EXTERNAL_OBSERVATION),
+                ],
+                Verdict.INCONCLUSIVE,
+            ),
             # dom_mutation=equal は positive evidence (C-2 で dom_changed を見て N/A 判定する前提) → equal
             ([obs(_NA), obs(_NA, Oracle.INTERACTION_TRACE), obs(_EQ, Oracle.DOM_MUTATION)], Verdict.EQUAL),
             # external_observation=equal だけ (positive evidence 無し) → inconclusive
-            ([obs(_NA), obs(_NA, Oracle.INTERACTION_TRACE), obs(_EQ, Oracle.EXTERNAL_OBSERVATION)], Verdict.INCONCLUSIVE),
+            (
+                [obs(_NA), obs(_NA, Oracle.INTERACTION_TRACE), obs(_EQ, Oracle.EXTERNAL_OBSERVATION)],
+                Verdict.INCONCLUSIVE,
+            ),
             # exception=equal + dom_mutation=equal だけ → inconclusive (bootstrap で DOM 触ってから両側同じく落ちた = 弱い equal、ADR-0018 + C-2 保守化)
-            ([obs(_NA), obs(_NA, Oracle.ARGUMENT_MUTATION), obs(_EQ, Oracle.EXCEPTION), obs(_NA, Oracle.INTERACTION_TRACE), obs(_EQ, Oracle.DOM_MUTATION)], Verdict.INCONCLUSIVE),
+            (
+                [
+                    obs(_NA),
+                    obs(_NA, Oracle.ARGUMENT_MUTATION),
+                    obs(_EQ, Oracle.EXCEPTION),
+                    obs(_NA, Oracle.INTERACTION_TRACE),
+                    obs(_EQ, Oracle.DOM_MUTATION),
+                ],
+                Verdict.INCONCLUSIVE,
+            ),
             # exception=equal + dom_mutation=equal + interaction_trace=equal → equal (workload が trace を残しているので exercise されている)
-            ([obs(_NA), obs(_NA, Oracle.ARGUMENT_MUTATION), obs(_EQ, Oracle.EXCEPTION), obs(_EQ, Oracle.INTERACTION_TRACE), obs(_EQ, Oracle.DOM_MUTATION)], Verdict.EQUAL),
+            (
+                [
+                    obs(_NA),
+                    obs(_NA, Oracle.ARGUMENT_MUTATION),
+                    obs(_EQ, Oracle.EXCEPTION),
+                    obs(_EQ, Oracle.INTERACTION_TRACE),
+                    obs(_EQ, Oracle.DOM_MUTATION),
+                ],
+                Verdict.EQUAL,
+            ),
         ],
     )
     def test_precedence(self, observations: list[OracleObservation], expected: Verdict) -> None:
@@ -95,9 +132,7 @@ class TestDeriveVerdictReason:
     def test_both_sides_threw_ignores_dom_noise(self) -> None:
         # exception=equal なら dom_mutation=equal が併存しても both-sides-threw (jsdom では dom が常に non-N/A)
         assert (
-            derive_verdict_reason(
-                [obs(_EQ, Oracle.EXCEPTION), obs(_EQ, Oracle.DOM_MUTATION)], Verdict.INCONCLUSIVE
-            )
+            derive_verdict_reason([obs(_EQ, Oracle.EXCEPTION), obs(_EQ, Oracle.DOM_MUTATION)], Verdict.INCONCLUSIVE)
             == "both-sides-threw"
         )
 

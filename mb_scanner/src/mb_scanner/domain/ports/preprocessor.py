@@ -3,28 +3,36 @@
 from collections.abc import Sequence
 from typing import Protocol
 
-from mb_scanner.domain.entities.preprocessing import PreprocessingInput, PreprocessingResult
+from mb_scanner.domain.entities.preprocessing import (
+    PreprocessingInput,
+    PreprocessingIssueResult,
+)
 
 
 class PreprocessorPort(Protocol):
-    """Selakovic 前処理エンジンの契約
+    """Selakovic 前処理エンジンの契約 (ADR-0024)
 
-    **1 入力 → N 結果モデル**:
-    同一 PR に独立した最適化が複数同居する場合に対応するため、``preprocess`` は
-    ``list[PreprocessingResult]`` を返す。1 candidate なら 1 件、N candidates なら N 件。
+    **1 入力 → 1 IssueResult モデル**:
+    1 issue から複数 candidate が出る場合は ``PreprocessingIssueResult.candidates: list``
+    で内包する (旧モデルの flat 列ではない)。
 
-    複数結果の id は ``<input.id>#<index>`` 形式で識別される (1 結果なら suffix なし)。
+    id は issue 単位で 1 対 1 (旧 ``<input.id>#<index>`` 形式の suffix 付与は廃止)。
     """
 
-    def preprocess(self, input_: PreprocessingInput) -> list[PreprocessingResult]: ...
+    def preprocess(self, input_: PreprocessingInput) -> PreprocessingIssueResult: ...
 
-    def preprocess_batch(self, items: Sequence[PreprocessingInput]) -> list[PreprocessingResult]:
+    def preprocess_batch(
+        self,
+        items: Sequence[PreprocessingInput],
+    ) -> list[PreprocessingIssueResult]:
         """複数 issue を 1 回の subprocess 起動でまとめて前処理する。
 
-        戻り値は **入力順にフラット化された結果列**: 各入力から 1 つ以上の結果が出るので
-        ``len(out) >= len(items)`` になりうる。各結果の id は元の入力 id (もしくは
-        ``<input.id>#<index>`` suffix) が付いており、呼び出し側はそれで原入力との対応を
-        取る。受理された各 issue の処理失敗 (parse-error など) は他 item の結果に
-        波及してはならない。
+        戻り値は **入力数 == 出力数** の対応列。各入力 ``items[i]`` に対応する結果が
+        ``out[i]`` (= 入力順保持)。受理された各 issue の処理失敗 (parse-error など) は
+        他 item の結果に波及してはならない (= 該当 IssueResult の ``issue_excluded`` を立てる)。
+
+        **id の制約**: ``items`` 内の ``id`` は一意でなければならない (None は複数可)。
+        Node 側が echo back する id で result を引き当てるため、duplicate user id があると
+        対応付けが破綻する。実装は duplicate を ``ValueError`` で reject すべき。
         """
         ...

@@ -1,8 +1,7 @@
-"""Node ランナー preprocessing Gateway (Selakovic) の batch API テスト (subprocess mocked)
+"""Node ランナー preprocessing Gateway (Selakovic) の batch API テスト (ADR-0024)
 
-batch では 1 入力に対して N (>=1) の結果が返る可能性があるため、id prefix-match で
-入力↔結果を対応付ける。``<original_id>`` か ``<original_id>#<idx>`` の形式に一致する
-全行を集めて、suffix を保持したまま元 id にリネームする。
+ADR-0024 で 1 入力 → 1 IssueResult モデルに変更 (旧 1 入力 → N flat result の prefix-match
+集約は廃止)。入力数 == 出力数で id を直接対応させる。
 """
 
 import json
@@ -17,9 +16,8 @@ from mb_scanner.adapters.gateways.preprocessing.selakovic.node_runner_gateway im
     NodeRunnerPreprocessorGateway,
 )
 from mb_scanner.domain.entities.preprocessing import (
-    ExclusionReason,
-    LayoutKind,
     PreprocessingInput,
+    SelakovicExclusionReason,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
@@ -30,11 +28,28 @@ def _gateway(cli_path: Path | None = None) -> NodeRunnerPreprocessorGateway:
     return NodeRunnerPreprocessorGateway(cli_path or CLI_PATH)
 
 
-def _fake_extracted_result(id_: str | None = None) -> str:
+def _fake_issue_result(id_: str | None = None) -> str:
+    """新 contract (ADR-0024) の 1 行 = 1 IssueResult fixture。"""
     payload: dict[str, object] = {
-        "layout": "client",
-        "slow": "arr[0]",
-        "fast": "arr[1]",
+        "candidates": [
+            {
+                "setup": None,
+                "slow": "arr[0]",
+                "fast": "arr[1]",
+                "candidate_meta": {
+                    "adapter": "selakovic",
+                    "target_side": "workload",
+                    "is_workload_reachable": False,
+                },
+            },
+        ],
+        "candidate_count": 1,
+        "issue_meta": {
+            "adapter": "selakovic",
+            "layout": "client",
+            "aspect": "workload",
+            "wrapper_kind": "top_level",
+        },
     }
     if id_ is not None:
         payload["id"] = id_
@@ -56,17 +71,17 @@ class TestPreprocessBatchMocked:
         ]
         results = gw.preprocess_batch(items)
         assert len(results) == 2
-        assert all(r.excluded is ExclusionReason.LAYOUT_UNKNOWN for r in results)
+        assert all(r.issue_excluded is SelakovicExclusionReason.LAYOUT_UNKNOWN for r in results)
         assert [r.id for r in results] == ["a", "b"]
 
-    def test_happy_path_with_id_echo_single_result_per_item(self, tmp_path: Path) -> None:
+    def test_happy_path_with_id_echo_one_result_per_item(self, tmp_path: Path) -> None:
         fake_cli = tmp_path / "cli.js"
         fake_cli.write_text("// stub")
         stdout = "\n".join(
             [
-                _fake_extracted_result(id_="a"),
-                _fake_extracted_result(id_="b"),
-                _fake_extracted_result(id_="c"),
+                _fake_issue_result(id_="a"),
+                _fake_issue_result(id_="b"),
+                _fake_issue_result(id_="c"),
             ],
         )
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
@@ -82,45 +97,7 @@ class TestPreprocessBatchMocked:
 
         assert [r.id for r in results] == ["a", "b", "c"]
 
-    def test_n_candidates_per_item_via_prefix_match(self, tmp_path: Path) -> None:
-        # id="a" の入力に対して "a#0" / "a#1" の 2 結果が返る
-        fake_cli = tmp_path / "cli.js"
-        fake_cli.write_text("// stub")
-        stdout = "\n".join(
-            [
-                _fake_extracted_result(id_="a#0"),
-                _fake_extracted_result(id_="a#1"),
-                _fake_extracted_result(id_="b"),
-            ],
-        )
-        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
-        with patch.object(subprocess, "run", return_value=completed):
-            gw = _gateway(fake_cli)
-            results = gw.preprocess_batch(
-                [
-                    PreprocessingInput(id="a", issue_dir="/tmp/a"),
-                    PreprocessingInput(id="b", issue_dir="/tmp/b"),
-                ],
-            )
-
-        assert [r.id for r in results] == ["a#0", "a#1", "b"]
-
-    def test_id_renamed_when_input_id_differs_from_match_prefix(self, tmp_path: Path) -> None:
-        # 入力 id="orig", Node 出力 id="orig#0" → 出力 id は "orig#0" のままだが、
-        # batch_key を rename するロジック (内部 salt key 経由) も同じ仕組みで動く
-        fake_cli = tmp_path / "cli.js"
-        fake_cli.write_text("// stub")
-        stdout = _fake_extracted_result(id_="orig#0")
-        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
-        with patch.object(subprocess, "run", return_value=completed):
-            gw = _gateway(fake_cli)
-            results = gw.preprocess_batch([PreprocessingInput(id="orig", issue_dir="/tmp/x")])
-
-        assert [r.id for r in results] == ["orig#0"]
-
     def test_input_without_id_uses_internal_salt_key_and_returns_none(self, tmp_path: Path) -> None:
-        # id 無し入力には内部 salt key を発行し、Node 出力に同じ key で返ってきたものを
-        # 元の None に置換する
         fake_cli = tmp_path / "cli.js"
         fake_cli.write_text("// stub")
         captured: dict[str, str] = {}
@@ -129,19 +106,16 @@ class TestPreprocessBatchMocked:
             payload = kwargs.get("input")
             assert isinstance(payload, str)
             captured["payload"] = payload
-            # 入力で送られた key を解析して、その key で結果を返す
             sent_id = json.loads(payload.strip().split("\n")[0])["id"]
-            stdout = _fake_extracted_result(id_=sent_id)
+            stdout = _fake_issue_result(id_=sent_id)
             return subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
 
         with patch.object(subprocess, "run", side_effect=fake_run):
             gw = _gateway(fake_cli)
             results = gw.preprocess_batch([PreprocessingInput(issue_dir="/tmp/x")])
 
-        # 内部 key が send 時に使われている
         sent_id = json.loads(captured["payload"].strip().split("\n")[0])["id"]
         assert sent_id.startswith(INTERNAL_KEY_PREFIX)
-        # 出力では None に戻っている
         assert [r.id for r in results] == [None]
 
     def test_user_id_collision_with_internal_prefix_raises(self, tmp_path: Path) -> None:
@@ -153,11 +127,48 @@ class TestPreprocessBatchMocked:
                 [PreprocessingInput(id=f"{INTERNAL_KEY_PREFIX}danger", issue_dir="/tmp/x")],
             )
 
+    def test_duplicate_user_id_raises(self, tmp_path: Path) -> None:
+        # ADR-0024 で 1 入力 → 1 IssueResult モデルなので、result_by_key で id ベースに
+        # 引き当てる。duplicate user id は対応付けを破綻させるため reject。
+        fake_cli = tmp_path / "cli.js"
+        fake_cli.write_text("// stub")
+        gw = _gateway(fake_cli)
+        with pytest.raises(ValueError, match="Duplicate input id"):
+            gw.preprocess_batch(
+                [
+                    PreprocessingInput(id="dup", issue_dir="/tmp/a"),
+                    PreprocessingInput(id="dup", issue_dir="/tmp/b"),
+                ],
+            )
+
+    def test_multiple_none_ids_allowed(self, tmp_path: Path) -> None:
+        # None id は内部 salt key で一意化されるので、複数 None でも OK
+        fake_cli = tmp_path / "cli.js"
+        fake_cli.write_text("// stub")
+
+        def fake_run(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            payload = kwargs.get("input")
+            assert isinstance(payload, str)
+            lines = payload.strip().split("\n")
+            stdouts = [_fake_issue_result(id_=json.loads(line)["id"]) for line in lines]
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="\n".join(stdouts), stderr="")
+
+        with patch.object(subprocess, "run", side_effect=fake_run):
+            gw = _gateway(fake_cli)
+            results = gw.preprocess_batch(
+                [
+                    PreprocessingInput(issue_dir="/tmp/a"),
+                    PreprocessingInput(issue_dir="/tmp/b"),
+                ],
+            )
+        assert len(results) == 2
+        assert all(r.id is None for r in results)
+
     def test_missing_result_for_some_items_fills_with_error(self, tmp_path: Path) -> None:
         # 入力 ["a", "b"] に対し Node が "a" だけ返したケース
         fake_cli = tmp_path / "cli.js"
         fake_cli.write_text("// stub")
-        stdout = _fake_extracted_result(id_="a")
+        stdout = _fake_issue_result(id_="a")
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
         with patch.object(subprocess, "run", return_value=completed):
             gw = _gateway(fake_cli)
@@ -169,10 +180,9 @@ class TestPreprocessBatchMocked:
             )
         assert len(results) == 2
         assert results[0].id == "a"
-        assert results[0].excluded is None
+        assert results[0].issue_excluded is None
         assert results[1].id == "b"
-        assert results[1].excluded is ExclusionReason.LAYOUT_UNKNOWN
-        assert results[1].layout is LayoutKind.UNKNOWN
+        assert results[1].issue_excluded is SelakovicExclusionReason.LAYOUT_UNKNOWN
 
     def test_subprocess_timeout_fills_all_with_error(self, tmp_path: Path) -> None:
         fake_cli = tmp_path / "cli.js"
@@ -190,8 +200,10 @@ class TestPreprocessBatchMocked:
                 ],
             )
         assert [r.id for r in results] == ["a", "b"]
-        assert all(r.excluded is ExclusionReason.LAYOUT_UNKNOWN for r in results)
-        assert all(r.excluded_detail is not None and "timeout" in r.excluded_detail.lower() for r in results)
+        assert all(r.issue_excluded is SelakovicExclusionReason.LAYOUT_UNKNOWN for r in results)
+        assert all(
+            r.issue_excluded_detail is not None and "timeout" in r.issue_excluded_detail.lower() for r in results
+        )
 
     def test_nonzero_exit_fills_all_with_error(self, tmp_path: Path) -> None:
         fake_cli = tmp_path / "cli.js"
@@ -206,11 +218,10 @@ class TestPreprocessBatchMocked:
                 ],
             )
         assert [r.id for r in results] == ["a", "b"]
-        assert all(r.excluded is ExclusionReason.LAYOUT_UNKNOWN for r in results)
-        assert all(r.excluded_detail is not None and "boom" in r.excluded_detail for r in results)
+        assert all(r.issue_excluded is SelakovicExclusionReason.LAYOUT_UNKNOWN for r in results)
+        assert all(r.issue_excluded_detail is not None and "boom" in r.issue_excluded_detail for r in results)
 
     def test_payload_omits_id_when_input_has_only_issue_dir(self, tmp_path: Path) -> None:
-        # 内部 salt key が必ず割り当てられるので、Node 側に渡る JSONL の id は string になる
         fake_cli = tmp_path / "cli.js"
         fake_cli.write_text("// stub")
         captured_payload: dict[str, str] = {}
@@ -223,7 +234,7 @@ class TestPreprocessBatchMocked:
             return subprocess.CompletedProcess(
                 args=[],
                 returncode=0,
-                stdout=_fake_extracted_result(id_=sent_id),
+                stdout=_fake_issue_result(id_=sent_id),
                 stderr="",
             )
 

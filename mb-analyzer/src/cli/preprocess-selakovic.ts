@@ -2,10 +2,12 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
 import {
-  EXCLUSION_REASON,
+  ASPECT,
   LAYOUT_KIND,
+  SELAKOVIC_EXCLUSION_REASON,
+  WRAPPER_KIND,
   type PreprocessingInput,
-  type PreprocessingResult,
+  type PreprocessingIssueResult,
 } from "../contracts/preprocessing-contracts";
 import {
   detectLayout,
@@ -23,14 +25,12 @@ const EXIT_BATCH_OK = 0;
 const EXIT_BATCH_IO_FAILURE = 2;
 
 /**
- * 1 入力 → N 結果モデル:
- * - `preprocess()` は `PreprocessingResult[]` を返す (1 candidate なら 1 件、N candidate なら N 件)
- * - CLI は出力を **常に JSONL** (1 結果 = 1 行) に統一する
- * - 複数結果の id は `<original_id>#<index>` を付与して識別 (1 結果なら suffix なし)
+ * 1 入力 → 1 IssueResult モデル (ADR-0024):
+ * - `preprocess()` は `PreprocessingIssueResult` (内部に candidates: list) を返す
+ * - CLI は出力を **常に JSONL** (1 issue = 1 行) で統一する
+ * - id は input.id をそのまま設定 (旧 `<original_id>#<index>` の suffix 付与は廃止)
  *
- * ファイル I/O (レイアウト判定 / inline `<script>` 抽出 / `<lib>_*.js` 読み出し / test_case 読み出し)
- * は CLI に閉じ込め、`preprocess()` は文字列内容のみを受け取る純関数に保つ (ADR-0011 Tier 2 は dataset
- * 規約を使うが I/O 層は分離する)。
+ * ファイル I/O は CLI に閉じ込め、`preprocess()` は文字列内容のみを受け取る純関数に保つ。
  */
 
 async function readStdin(): Promise<string> {
@@ -64,7 +64,6 @@ function parseInput(raw: string): PreprocessingInput | string {
 const SCRIPT_TAG_PATTERN = /<script\b([^>]*)>[\s\S]*?<\/script>/gi;
 const SRC_ATTR_PATTERN = /\bsrc\s*=\s*["']([^"']+)["']/i;
 
-/** v_before.html が `<script src="<lib>_before.js">` でローカルの lib を参照しているか。 */
 function htmlReferencesLib(html: string): boolean {
   let match: RegExpExecArray | null;
   SCRIPT_TAG_PATTERN.lastIndex = 0;
@@ -80,40 +79,43 @@ function htmlReferencesLib(html: string): boolean {
 }
 
 /**
- * 1 issue (ディレクトリ) 分の前処理を実行し、結果配列を返す — レイアウト判定 + ファイル I/O を
- * 担い、読んだ内容を純関数 `preprocess()` に渡す CLI 層のラッパ。
- *
- * レイアウト判定 + ファイル I/O の前段で除外する場合は 1 件の error result を返す。
- * `preprocess()` で複数 candidate が出た場合はそのまま配列を返す。
- *
- * ADR-0011 改修により、client 経路でも `<lib>_*.js` を dir scan で読み込んで diff 対象に
- * 含めるため、旧来の「client → server-single-file fallback」(clientServer 救済) は不要になった
- * (作用点 A の clientIssues は段2 ルーティングで自然に処理される)。
+ * 1 issue 分の前処理を実行し、`PreprocessingIssueResult` を返す。
+ * レイアウト判定 + ファイル I/O の前段で除外する場合は issue_excluded を立てた IssueResult。
  */
-function preprocessIssue(input: PreprocessingInput): PreprocessingResult[] {
+function preprocessIssue(input: PreprocessingInput): PreprocessingIssueResult {
   const layout = detectLayout(input.issue_dir);
 
   if (layout.kind === LAYOUT_KIND.UNKNOWN) {
-    return [
-      {
+    return {
+      candidates: [],
+      candidate_count: 0,
+      issue_excluded: SELAKOVIC_EXCLUSION_REASON.LAYOUT_UNKNOWN,
+      issue_excluded_detail: `cannot determine layout for ${input.issue_dir} (no v_*.html or <lib>_* dirs/files)`,
+      issue_meta: {
+        adapter: "selakovic",
         layout: LAYOUT_KIND.UNKNOWN,
-        excluded: EXCLUSION_REASON.LAYOUT_UNKNOWN,
-        excluded_detail: `cannot determine layout for ${input.issue_dir} (no v_*.html or <lib>_* dirs/files)`,
+        aspect: ASPECT.FALLBACK,
+        wrapper_kind: WRAPPER_KIND.TOP_LEVEL,
       },
-    ];
+    };
   }
 
   let preprocessInput: SelakovicPreprocessInput;
   try {
     preprocessInput = buildPreprocessInput(input.issue_dir, layout);
   } catch (e) {
-    return [
-      {
+    return {
+      candidates: [],
+      candidate_count: 0,
+      issue_excluded: "missing-files",
+      issue_excluded_detail: `file I/O failed: ${e instanceof Error ? e.message : "unknown"}`,
+      issue_meta: {
+        adapter: "selakovic",
         layout: layout.kind,
-        excluded: EXCLUSION_REASON.MISSING_FILES,
-        excluded_detail: `file I/O failed: ${e instanceof Error ? e.message : "unknown"}`,
+        aspect: ASPECT.FALLBACK,
+        wrapper_kind: WRAPPER_KIND.TOP_LEVEL,
       },
-    ];
+    };
   }
 
   return preprocess(preprocessInput);
@@ -131,8 +133,6 @@ function buildPreprocessInput(issueDir: string, layout: DetectedLayout): Selakov
     }
     const beforeHtml = readFileSync(layout.clientFiles.beforeHtml, "utf-8");
     const afterHtml = readFileSync(layout.clientFiles.afterHtml, "utf-8");
-    // `<script src>` の CDN 依存 lib (jquery/handlebars/underscore) を dataset fork の node_modules/ から解決。
-    // 解決できなかったものは stderr に出す (= install-vendor-deps.sh 未実行 or 宣言漏れ — 集計の手がかり)。
     const patchedLibFilenames = [...Object.keys(libBeforeFiles), ...Object.keys(libAfterFiles)];
     const deps = resolveScriptDepSources(issueDir, beforeHtml, patchedLibFilenames);
     if (deps.missing.length > 0) {
@@ -163,26 +163,14 @@ function buildPreprocessInput(issueDir: string, layout: DetectedLayout): Selakov
   };
 }
 
-/**
- * 結果配列に id を付与する。
- *
- * - 1 件のみ: original_id をそのまま設定 (suffix なし)
- * - 2 件以上: `<original_id>#<index>` 形式で識別
- *
- * original_id が undefined の場合は id 設定をスキップ。
- */
-function attachIds(results: PreprocessingResult[], originalId: string | undefined): PreprocessingResult[] {
-  if (originalId === undefined) return results;
-  if (results.length <= 1) {
-    return results.map((r) => ({ ...r, id: originalId }));
-  }
-  return results.map((r, idx) => ({ ...r, id: `${originalId}#${idx}` }));
+/** 結果に id を付与 (1 入力 1 結果なので suffix なし)。 */
+function attachId(result: PreprocessingIssueResult, originalId: string | undefined): PreprocessingIssueResult {
+  if (originalId === undefined) return result;
+  return { ...result, id: originalId };
 }
 
-function emitResults(results: PreprocessingResult[]): void {
-  for (const result of results) {
-    process.stdout.write(`${JSON.stringify(result)}\n`);
-  }
+function emitResult(result: PreprocessingIssueResult): void {
+  process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
 export async function runPreprocessSelakovic(): Promise<number> {
@@ -193,8 +181,8 @@ export async function runPreprocessSelakovic(): Promise<number> {
     return EXIT_ERROR;
   }
 
-  const results = attachIds(preprocessIssue(parsed), parsed.id);
-  emitResults(results);
+  const result = attachId(preprocessIssue(parsed), parsed.id);
+  emitResult(result);
   return EXIT_OK;
 }
 
@@ -244,17 +232,24 @@ export async function runPreprocessSelakovicBatch(): Promise<number> {
   for (const line of lines) {
     const parsed = parseBatchLine(line);
     if ("error" in parsed) {
-      const errorResult: PreprocessingResult = {
-        layout: LAYOUT_KIND.UNKNOWN,
-        excluded: EXCLUSION_REASON.LAYOUT_UNKNOWN,
-        excluded_detail: parsed.error,
+      const errorResult: PreprocessingIssueResult = {
+        candidates: [],
+        candidate_count: 0,
+        issue_excluded: SELAKOVIC_EXCLUSION_REASON.LAYOUT_UNKNOWN,
+        issue_excluded_detail: parsed.error,
+        issue_meta: {
+          adapter: "selakovic",
+          layout: LAYOUT_KIND.UNKNOWN,
+          aspect: ASPECT.FALLBACK,
+          wrapper_kind: WRAPPER_KIND.TOP_LEVEL,
+        },
       };
       if (parsed.id !== undefined) errorResult.id = parsed.id;
       process.stdout.write(`${JSON.stringify(errorResult)}\n`);
       continue;
     }
-    const results = attachIds(preprocessIssue(parsed), parsed.id);
-    emitResults(results);
+    const result = attachId(preprocessIssue(parsed), parsed.id);
+    emitResult(result);
   }
 
   return EXIT_BATCH_OK;

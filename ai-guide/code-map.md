@@ -485,21 +485,78 @@ TS 側 (mb-analyzer/src/)                    Python 側 (mb_scanner/)
 
 段 3 採用時は slow/fast に top-level statement 全体が入るため、後段 pruning でその statement 全体の最小化が走る。**論文非依存性**: 候補型の追加は ECMAScript 文法レベルの一般概念のみで、Selakovic Table 4 / precondition には依存しない。threats to validity に「関数全体置換のような大規模 refactor は top-level statement 単位で抽出する」と明記する。
 
-### 1 入力 → N 結果モデル
+### 1 入力 → 1 IssueResult モデル (ADR-0024、base / adapter 分離 + issue 階層化)
 
-Selakovic データセットには **同一 PR に複数の独立した最適化が同居するケース**がある (例: socket.io 573 では `encodePacket` の switch case 順序入れ替え + `decodePacket` の if/else→switch 書き換えが同一 commit に含まれる)。
+Selakovic データセットには **同一 PR に複数の独立した最適化が同居するケース**がある (例: socket.io 573 では `encodePacket` の switch case 順序入れ替え + `decodePacket` の if/else→switch 書き換えが同一 commit に含まれる)。これに対応するため、`preprocess()` の戻り値を **1 つの `PreprocessingIssueResult`** (内部に `candidates: list[PreprocessingCandidate]` を持つ階層構造) にする。
 
-これに対応するため、`preprocess()` の戻り値を **`list[PreprocessingResult]`** に拡張:
+#### 物理レイアウト
 
-| candidates 数 | 出力 | id 規則 |
-|---|---|---|
-| 0 (整形差分のみ) | 1 件 (excluded=NO_CHANGED_NODES) | `<input.id>` (suffix なし) |
-| 0 (unmatched あり、enclosure 不成立) | 1 件 (excluded=MODULE_WIDE_CHANGE) | `<input.id>` |
-| 1 | 1 件 (抽出成功) | `<input.id>` (suffix なし) |
-| N (≥ 2) | N 件 (各 candidate 独立) | `<input.id>#0`, `<input.id>#1`, ... |
-| 構造的失敗 (parse-error 等) | 1 件 (excluded) | `<input.id>` |
+```
+PreprocessingIssueResult (= jsonl の 1 行)
+├─ id, issue_excluded, issue_excluded_detail, candidate_count    ← base (dataset 非依存)
+├─ candidates: list[PreprocessingCandidate]                       ← N candidate を内包
+│    ├─ setup, slow, fast, before/after_node_count                ← base
+│    ├─ enclosure_node_type, candidate_excluded                   ← base
+│    └─ candidate_meta: SelakovicCandidateMeta                    ← adapter (Selakovic 固有)
+│         ├─ adapter: "selakovic" (discriminator)
+│         ├─ target_side: lib / workload / both
+│         └─ is_workload_reachable: bool
+└─ issue_meta: SelakovicIssueMeta                                 ← adapter (Selakovic 固有)
+     ├─ adapter: "selakovic" (discriminator)
+     ├─ layout: client / server / unknown
+     ├─ aspect: lib / workload / lib+workload / fallback
+     └─ wrapper_kind: top_level / angular_controller_wrapper
+```
 
-Python 側 Gateway は **prefix-match で id 突き合わせ**を行う (`<batch_key>` または `<batch_key>#X` 形式の全行を集める)。
+新 dataset 追加時は base contract を触らず adapter sub-class (`OtherIssueMeta` / `OtherCandidateMeta`) を足し、`IssueMeta` / `CandidateMeta` の Discriminated Union を広げる。
+
+#### candidates 数の意味
+
+| candidates 数 | 出力 |
+|---|---|
+| 0 (issue 全体が処理失敗) | `issue_excluded` を立てて 1 IssueResult を返す (= 旧 excluded と等価) |
+| 1 | 通常の単独 candidate (embedded / co-evolution / workload-only / fallback 等) |
+| 2 | ADR-0014 の independent split (target_side=lib + target_side=workload) |
+| N (≥ 2) | aspect=lib + changed-fn 複数 (各 fn unit ごとに candidate)、または fallback で複数 candidate |
+
+id は **issue 単位で 1 対 1** (旧 `<input.id>#<index>` の suffix 付与は廃止)。Python Gateway も prefix-match による集約ロジック削除、入力数 == 出力数で対応。
+
+#### 主要フィールドの生成箇所と意味
+
+| フィールド | 値 | 生成箇所 | 用途 |
+|---|---|---|---|
+| `issue_meta.layout` | client / server / unknown | `io/layout.ts:detectLayout` | レイアウト判定。equiv 入力時の `environment` (vm/jsdom) はここから派生 |
+| `issue_meta.aspect` | lib / workload / lib+workload / fallback | `route/aspect.ts:routeAspect` | 真 patch がどこにあるか (= issue level、ADR-0011 §段2) |
+| `issue_meta.wrapper_kind` | top_level / angular_controller_wrapper | `decompose/f1.ts:extractF1` | f1 の wrap 構造 (Angular DI bootstrap 要否の判定) |
+| `candidate_meta.target_side` | lib / workload / both | 各 assemble 関数で hardcode | この candidate がどっち側を表現するか (candidate level) |
+| `candidate_meta.is_workload_reachable` | bool | `assemble/changed-fn.ts` で True、その他で False | 旧 changed_fn 抽出由来かどうかの識別 |
+| `enclosure_node_type` | Babel ノード型 (`FunctionExpression` 等) or null | `assemble/changed-fn.ts:69` (afterFn.type) / `assemble/fallback.ts` (findMinimalEnclosure) | ADR-0010 の本来意図 — 「どの粒度に収束したか」の threats to validity 集計 hint |
+
+#### 旧 → 新 mapping (廃止フィールド)
+
+旧 `candidate_kind` / `enclosure_type` (戦略ラベル含む) / `environment` は廃止:
+- 旧 `candidate_kind` (single/lib/body/changed-fn) → `(issue_meta.aspect, candidate_meta.target_side, candidate_meta.is_workload_reachable)` の組合せで再構成
+- 旧 `enclosure_type` の戦略ラベル (`lib-file` / `f1-body` / `lib-file+f1-body` / `server-test-case` / `angular-controller-wrapper`) → `(aspect, target_side, layout, wrapper_kind)` から派生可能 (= 廃止)
+- 旧 `enclosure_type` の Babel ノード型 → `enclosure_node_type` に分離 (changed_fn / fallback でのみ意味)
+- 旧 `environment` → 廃止。equiv 入力時に Selakovic adapter (`research/.../code/build_equiv_input.py:derive_environment`) が現状は **常に `jsdom`** で埋める (server candidate も `require`/Node globals を jsdom executor の shim で解決する前提、ADR-0015 / `oracle-routing.ts` 参照)。VM executor が server contract をサポートする実装が入ったら layout 別の派生に戻す
+
+#### 集計フィルタの書き方 (research script)
+
+旧 `SMALL_KINDS = {"changed-fn", "body"}` を新フィールド条件に置換:
+
+```python
+def is_small_candidate(issue, candidate):
+    cmeta = candidate["candidate_meta"]
+    if cmeta["is_workload_reachable"]:    # 旧 changed-fn 相当
+        return True
+    imeta = issue["issue_meta"]
+    return imeta["aspect"] == "lib+workload" and cmeta["target_side"] == "workload"  # 旧 body 相当
+```
+
+具体例:
+- co-evolution issue だけ: `issue_meta.aspect == "lib+workload" and candidate_count == 1 and candidates[0].candidate_meta.target_side == "both"`
+- Angular benchmark だけ: `issue_meta.wrapper_kind == "angular_controller_wrapper"`
+- changed-fn が 1 件も出なかった (= workload reachability で全 drop された) issue: `issue_meta.aspect == "lib" and not any(c.candidate_meta.is_workload_reachable for c in candidates)`
 
 ### setup 構築規約
 
@@ -581,21 +638,22 @@ Selakovic データセットは 3 カテゴリ (clientIssues / serverIssues / cl
 
 **旧来の「client → server-single-file fallback」(clientServer 救済) は ADR-0011 改修で不要になった**: 段1 ① が client 経路でも `<libname>_*.js` を dir scan で必ず読むので、clientServerIssues (inline script は計測ハーネスで真 patch は lib 側) は段2 で `bodyHasRealChange=false / libHasRealChange=true` → 作用点 A としてルートされる。同様に作用点 A の clientIssues (Phase 0-A `harness_only` ≈ dataset の 6 割) も初めて真 patch を抽出できる (Phase 0-A では client 経路が `<script src>` を捨てて `mark: 0|1` artefact だけ candidate 化していた — `tmp/dataset-conventions.md` §4)。
 
-### 除外理由の意味論
+### 除外理由の意味論 (ADR-0024 で base / Selakovic に分離)
 
-`ExclusionReason` enum (`mb-analyzer/src/contracts/preprocessing-contracts.ts` ↔ `mb_scanner/domain/entities/preprocessing.py`) で 7 種を定義:
+ADR-0024 で除外理由 enum を **base 4 値 + Selakovic 4 値の Union** (`ExclusionReasonAny = ExclusionReasonBase | SelakovicExclusionReason`) に分離。`issue_excluded` (issue level) と `candidate_excluded` (candidate level) の両方が同 Union 型を受ける。新 dataset 追加時は `XxxExclusionReason` を Union に追加。
 
-| reason | 意味 | 救済可能性 |
-|---|---|---|
-| `parse-error` | Babel parser が SyntaxError を throw | データ固有の特殊 syntax を扱う plugin 追加で部分救済可 |
-| `no-changed-nodes` | 全 top-level statement が AST hash で matched (整形差分のみ) | 救済不要 (意味論変更なし) |
-| `module-wide-change` | unmatched 残るが 3 段すべての enclosure 候補型 (関数/Block/top-level statement) に到達できない | 設計上ほぼ起きない (top-level statement で必ず救える) |
-| `multi-file-change` | server 系で意味論変更が複数 .js ファイルにまたがる | 出力スキーマ拡張 (1 issue → 複数ファイル) で対応可、ただし保守的に除外 |
-| `no-enclosure-candidate` | enclosure 抽出の内部不変違反 (通常起こらない) | bug fix 対象 |
-| `layout-unknown` | `v_*.html` も `<libname>_*/` も `<libname>_*.js` も無いディレクトリ | データ固有、個別対応が必要 |
-| `missing-files` | 期待ファイル欠落 / I/O 失敗 | データ固有、個別対応が必要 |
+| reason | 種別 | 意味 | 救済可能性 |
+|---|---|---|---|
+| `parse-error` | base (`ExclusionReasonBase`) | Babel parser が SyntaxError を throw | データ固有の特殊 syntax を扱う plugin 追加で部分救済可 |
+| `no-changed-nodes` | base | 全 top-level statement が AST hash で matched (整形差分のみ) | 救済不要 (意味論変更なし) |
+| `multi-file-change` | base | server 系で意味論変更が複数 .js ファイルにまたがる | 出力スキーマ拡張で対応可 |
+| `missing-files` | base | 期待ファイル欠落 / I/O 失敗 | データ固有、個別対応が必要 |
+| `module-wide-change` | Selakovic (`SelakovicExclusionReason`) | unmatched 残るが 3 段すべての enclosure 候補型 (関数/Block/top-level statement) に到達できない | 設計上ほぼ起きない (top-level statement で必ず救える) |
+| `no-enclosure-candidate` | Selakovic | enclosure 抽出の内部不変違反 (通常起こらない) | bug fix 対象 |
+| `layout-unknown` | Selakovic | `v_*.html` も `<libname>_*/` も `<libname>_*.js` も無いディレクトリ | データ固有、個別対応が必要 |
+| `change-not-exercised` | Selakovic | lib の変更を (推移的にも) exercise する workload (`f1` / `test()`) が無い (= reachability で全 drop) | 別 ADR で計装する予定 (現状は未使用 enum slot) |
 
-実測 (Phase 2a の Selakovic 97 issue → 108 candidate): 抽出済 107 / excluded 1 (`parse-error` = inline `<script>` が JSX を含む 1 件)。`ExclusionReason` enum 自体は ADR-0011 改修後も不変だが、Tier 2 で `f1`/`test()` が規約外フォーマットの場合は exclude せず fallback (Tier 1 素の diff) に回るようになったので、上表の理由は実質 fallback 経路でのみ発生する。これら抽出済 candidate を等価検証まで流した最新の verdict 内訳は本文書の [§Selakovic データセットでの実測](#selakovic-データセットでの実測) (= ADR-0016 dep lockfile + ADR-0018 verdict 保守化後の `equal` 71 / `not_equal` 6 / `inconclusive` 29) を参照。threats to validity への記述方針: 各除外・各 not_equal を **「データセット / 等価検証器の限界として明示」** し、論文非依存性を主張する論理 (= 主軸 pruning は論文非依存) を保つ。
+実測 (Phase 2a の Selakovic 97 issue → 108 candidate): 抽出済 107 / excluded 1 (`parse-error` = inline `<script>` が JSX を含む 1 件)。Tier 2 で `f1`/`test()` が規約外フォーマットの場合は exclude せず fallback (Tier 1 素の diff) に回るようになったので、上表の理由は実質 fallback 経路でのみ発生する。これら抽出済 candidate を等価検証まで流した最新の verdict 内訳は本文書の [§Selakovic データセットでの実測](#selakovic-データセットでの実測) (= ADR-0016 dep lockfile + ADR-0018 verdict 保守化後の `equal` 71 / `not_equal` 6 / `inconclusive` 29) を参照。threats to validity への記述方針: 各除外・各 not_equal を **「データセット / 等価検証器の限界として明示」** し、論文非依存性を主張する論理 (= 主軸 pruning は論文非依存) を保つ。
 
 ### 既知の運用上の落とし穴 (Node CLI の stdout flush)
 
