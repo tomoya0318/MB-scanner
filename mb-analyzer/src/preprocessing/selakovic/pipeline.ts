@@ -6,7 +6,6 @@ import {
   TARGET_SIDE,
   WRAPPER_KIND,
   type Aspect,
-  type ExclusionReasonAny,
   type LayoutKind,
   type PreprocessingCandidate,
   type PreprocessingIssueResult,
@@ -256,7 +255,7 @@ function buildIssueResult(
       issue_meta: issueMeta,
     };
     if (fb.issue_excluded !== undefined) {
-      result.issue_excluded = fb.issue_excluded as ExclusionReasonAny;
+      result.issue_excluded = fb.issue_excluded;
       if (fb.issue_excluded_detail !== undefined) result.issue_excluded_detail = fb.issue_excluded_detail;
     }
     return result;
