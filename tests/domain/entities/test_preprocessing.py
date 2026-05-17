@@ -122,6 +122,40 @@ class TestPreprocessingCandidate:
         assert c.candidate_excluded == SelakovicExclusionReason.CHANGE_NOT_EXERCISED
         assert c.slow is None
 
+    def test_workload_default_none(self) -> None:
+        """ADR-0023 D-β: workload は changed-fn 経路でのみ非 None、旧経路は None"""
+        c = PreprocessingCandidate.model_validate(
+            {
+                "setup": "var x=1;",
+                "slow": "x",
+                "fast": "x",
+                "candidate_meta": {
+                    "adapter": "selakovic",
+                    "target_side": "lib",
+                    "is_workload_reachable": False,
+                },
+            },
+        )
+        assert c.workload is None
+
+    def test_workload_round_trip(self) -> None:
+        """Placeholder substitution + 4 値契約 (changed-fn 経路) の workload を round-trip"""
+        payload = {
+            "setup": "var lib = { f: function () { $BODY$ } };",
+            "slow": "__OBS__.push(1); return 1;",
+            "fast": "__OBS__.push(2); return 2;",
+            "workload": "(function(){ __OBS__ = []; lib.f(); return JSON.stringify(__OBS__); })()",
+            "candidate_meta": {
+                "adapter": "selakovic",
+                "target_side": "lib",
+                "is_workload_reachable": True,
+            },
+        }
+        c = PreprocessingCandidate.model_validate(payload)
+        assert c.workload == payload["workload"]
+        dumped = c.model_dump()
+        assert dumped["workload"] == payload["workload"]
+
 
 class TestPreprocessingIssueResult:
     def test_extracted_issue_with_one_candidate(self) -> None:

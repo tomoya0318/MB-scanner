@@ -1,5 +1,6 @@
 import type { Node, Statement } from "@babel/types";
 
+import { countNodes, functionBlockBody, paramNames } from "../../../ast/inspect";
 import {
   SELAKOVIC_EXCLUSION_REASON,
   TARGET_SIDE,
@@ -8,10 +9,7 @@ import {
 import type { FnChangeUnit } from "../../common/change-units";
 import {
   buildHoleFunction,
-  countSubtreeNodes,
-  functionBlockBody,
   holeLibSource,
-  paramNames,
   pickLiftedDeps,
   wrapWorkloadObserved,
 } from "../../common/function-hole";
@@ -66,8 +64,8 @@ export function buildChangedFnCandidate(
     fast: `globalThis.__HOLE__ = ${buildHoleFunction(holeParams, statementsToCode(afterBody.body as readonly Statement[]))};\n;\n${workload}`,
     enclosure_node_type: afterFn.type,
     // node count は「pruning が削る対象 = 変更関数の本体」のサイズ (inline 全文サイズ ≠ embedded の値)。
-    before_node_count: countSubtreeNodes(beforeBody as unknown as Node),
-    after_node_count: countSubtreeNodes(afterBody as unknown as Node),
+    before_node_count: countNodes(beforeBody as unknown as Node),
+    after_node_count: countNodes(afterBody as unknown as Node),
     candidate_meta: { adapter: "selakovic", target_side: TARGET_SIDE.LIB, is_workload_reachable: true },
   };
 }

@@ -74,7 +74,7 @@ describe("ORACLE", () => {
 });
 
 describe("EquivalenceInput", () => {
-  it("slow / fast 必須、それ以外 (id / setup / timeout_ms / environment / module_base_dir / mount_html) は任意", () => {
+  it("slow / fast 必須、それ以外 (id / setup / timeout_ms / environment / module_base_dir / mount_html / workload) は任意", () => {
     const minimal: EquivalenceInput = { slow: "1", fast: "1" };
     const full: EquivalenceInput = {
       id: "case-001",
@@ -87,10 +87,23 @@ describe("EquivalenceInput", () => {
       mount_html: "<div id='demo'></div>",
     };
     expect(minimal.slow).toBe("1");
+    expect(minimal.workload).toBeUndefined();
     expect(full.id).toBe("case-001");
     expect(full.timeout_ms).toBe(5000);
     expect(full.mount_html).toContain("demo");
     expect(full.environment).toBe("jsdom");
+  });
+
+  it("workload (ADR-0023 D-β placeholder substitution + 4 値契約) を含めて JSON 往復で保持される", () => {
+    const inp: EquivalenceInput = {
+      setup: "var lib = { f: function () { $BODY$ } };",
+      slow: "__OBS__.push(1); return 1;",
+      fast: "__OBS__.push(2); return 2;",
+      workload: "(function(){ __OBS__ = []; lib.f(); return JSON.stringify(__OBS__); })()",
+    };
+    const parsed = JSON.parse(JSON.stringify(inp)) as EquivalenceInput;
+    expect(parsed.workload).toBe(inp.workload);
+    expect(parsed.setup).toContain("$BODY$");
   });
 });
 

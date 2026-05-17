@@ -131,6 +131,27 @@ class TestPruningInputEquivalenceContext:
         dumped = json.loads(inp.model_dump_json())
         assert PruningInput.model_validate(dumped) == inp
 
+    def test_workload_default_none_and_round_trip(self) -> None:
+        """ADR-0023 D-β: workload は changed-fn 経路の pass-through、旧経路は None"""
+        inp = PruningInput(slow="x", fast="x")
+        assert inp.workload is None
+
+        payload = {
+            "slow": "return 1;",
+            "fast": "return 2;",
+            "workload": "(function(){ __OBS__ = []; lib.f(); return JSON.stringify(__OBS__); })()",
+        }
+        inp2 = PruningInput.model_validate(payload)
+        assert inp2.workload == payload["workload"]
+        dumped = json.loads(inp2.model_dump_json())
+        assert dumped["workload"] == payload["workload"]
+        assert PruningInput.model_validate(dumped) == inp2
+
+    def test_workload_length_bound(self) -> None:
+        too_long = "x" * (MAX_CODE_LENGTH + 1)
+        with pytest.raises(ValidationError):
+            PruningInput(slow="x", fast="x", workload=too_long)
+
 
 class TestPlaceholder:
     def test_round_trip(self) -> None:
