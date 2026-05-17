@@ -1,10 +1,15 @@
 import type { Node } from "@babel/types";
 
+import { paramNames } from "../../ast/inspect";
 import { walkNodes } from "../../ast/walk";
 import { FN_TYPES } from "./change-units";
 
 /**
- * 変更関数を pruning 向けの「穴あき lib + `__HOLE__` 関数式 + 観測する形の workload」に組み立てる部品。
+ * 変更関数を pruning 向けの「穴あき lib + `__HOLE__` 関数式 + 観測する形の workload」に組み立てる部品 (v1)。
+ *
+ * **状態**: v1 残骸 (ADR-0023 D-β で placeholder substitution + 4 値契約 v2 に置き換え予定)。
+ * 汎用 AST helper (`countSubtreeNodes` / `paramNames` / `functionBlockBody`) は `src/ast/inspect.ts` に移管済。
+ * 本ファイル全体は Phase 3 で changed-fn.ts を v2 に書き直したタイミングで削除する。
  *
  * 設計 (plan §D1 / spike v2 で実証):
  *  - **lambda-lift**: 変更関数が使う *lib 内部の補助関数・変数* (= 自由変数のうち、変更関数を囲ういずれかの
@@ -29,29 +34,6 @@ const BUILTINS: ReadonlySet<string> = new Set([
 
 function nodeType(n: Node | undefined): string | undefined {
   return (n as unknown as { type?: string } | undefined)?.type;
-}
-
-/** subtree のノード数。`before_node_count` 等に使う。 */
-export function countSubtreeNodes(node: Node): number {
-  let count = 0;
-  walkNodes(node, () => {
-    count += 1;
-  });
-  return count;
-}
-
-/** 関数 / メソッドの param 名のリスト (Identifier 以外のパターンは `$x` プレースホルダ)。 */
-export function paramNames(fnNode: Node): string[] {
-  return ((fnNode as unknown as { params?: Array<{ type: string; name?: string }> }).params ?? []).map((p) =>
-    p.type === "Identifier" && p.name ? p.name : "$x",
-  );
-}
-
-/** `fnNode` の本体 (BlockStatement) を返す。arrow `=> expr` 等で BlockStatement でなければ `null`。 */
-export function functionBlockBody(fnNode: Node): { type: string; start: number; end: number; body: Node[] } | null {
-  const b = (fnNode as unknown as { body?: { type?: string; start?: number; end?: number; body?: Node[] } }).body;
-  if (!b || b.type !== "BlockStatement" || typeof b.start !== "number" || typeof b.end !== "number") return null;
-  return b as { type: string; start: number; end: number; body: Node[] };
 }
 
 /**
@@ -174,6 +156,7 @@ export function wrapWorkloadObserved(workloadBodyCode: string): string {
 if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
   const { parse } = await import("../../ast/parser");
+  const { functionBlockBody } = await import("../../ast/inspect");
   // 観点: 自由変数抽出 / lexical chain の hoist 束縛抽出 / 内部依存の選別 (and-交差) / lib ソースの穴あけ /
   // __HOLE__ 関数式・観測ラッパの組み立て。
 
