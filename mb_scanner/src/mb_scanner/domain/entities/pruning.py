@@ -63,15 +63,14 @@ class PruningInput(BaseModel):
     ``id`` はバッチ API で Python ↔ Node 間の順序暗黙依存を避ける optional マーカー。
     ``setup`` を単数 string にした採用判断は ai-guide/adr/0004-pruning-setup-single.md 参照。
 
-    ``environment`` / ``module_base_dir`` / ``mount_html`` / ``aspect`` / ``candidate_kind`` /
-    ``enclosure_type`` は後段の等価検証 (``mbs check-equivalence`` 相当) にそのまま渡される実行
-    コンテキスト。pruning アルゴリズム本体 (TS ``pruning/common/``) はこれらを **解釈しない** —
-    TS ``pruning/selakovic/`` が ``checkEquivalence`` 呼び出しの closure に閉じ込めるだけ。値の集合・
-    意味論は ``mb_scanner.domain.entities.equivalence.EquivalenceInput`` と揃える (``environment`` 省略時
+    ``environment`` / ``module_base_dir`` / ``mount_html`` は後段の等価検証
+    (``mbs check-equivalence`` 相当) にそのまま渡される実行コンテキスト。pruning アルゴリズム
+    本体 (TS ``pruning/common/``) はこれらを **解釈しない** — TS ``pruning/selakovic/`` が
+    ``checkEquivalence`` 呼び出しの closure に閉じ込めるだけ。値の集合・意味論は
+    ``mb_scanner.domain.entities.equivalence.EquivalenceInput`` と揃える (``environment`` 省略時
     は等価検証側で ``vm``、``module_base_dir`` は jsdom で相対 ``require('./x')`` の解決基準、
-    ``mount_html`` は jsdom で mount する HTML、``aspect``/``candidate_kind``/``enclosure_type`` は
-    oracle 選択 / 記録 Proxy で包む対象を決める preprocess 由来 hint)。pruning 用に ``extracted.jsonl``
-    から入力を組む層が ``module_base_dir``/``mount_html`` を補完する想定。
+    ``mount_html`` は jsdom で mount する HTML)。pruning 用に ``extracted.jsonl`` から入力を組む層が
+    ``module_base_dir``/``mount_html`` を補完する想定。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -87,9 +86,6 @@ class PruningInput(BaseModel):
     environment: str | None = None
     module_base_dir: str | None = None
     mount_html: str | None = None
-    aspect: str | None = None
-    candidate_kind: str | None = None
-    enclosure_type: str | None = None
 
 
 class PruningResult(BaseModel):

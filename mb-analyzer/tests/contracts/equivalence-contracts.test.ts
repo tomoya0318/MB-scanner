@@ -5,7 +5,7 @@
  *   - VERDICT / ORACLE_VERDICT / ORACLE: Python 側 StrEnum と同一の文字列値 (runtime)
  *   - Verdict / OracleVerdict / Oracle: union 型が Python と同じ列挙幅 (型レベル)
  *   - ALL_ORACLES: 6 oracle を過不足なく列挙
- *   - EquivalenceInput: slow/fast 必須、setup/timeout_ms/mount_html/aspect 等は任意
+ *   - EquivalenceInput: slow/fast 必須、id/setup/timeout_ms/environment/module_base_dir/mount_html は任意
  *   - OracleObservation: JSON 往復でフィールド名と値を保持
  *   - EquivalenceCheckResult: equal は observations 必須、error は error_message を伴える
  */
@@ -74,9 +74,10 @@ describe("ORACLE", () => {
 });
 
 describe("EquivalenceInput", () => {
-  it("slow / fast 必須、それ以外 (setup / timeout_ms / environment / module_base_dir / mount_html / aspect / candidate_kind / enclosure_type) は任意", () => {
+  it("slow / fast 必須、それ以外 (id / setup / timeout_ms / environment / module_base_dir / mount_html) は任意", () => {
     const minimal: EquivalenceInput = { slow: "1", fast: "1" };
     const full: EquivalenceInput = {
+      id: "case-001",
       setup: "const x = 1;",
       slow: "x",
       fast: "x",
@@ -84,14 +85,12 @@ describe("EquivalenceInput", () => {
       environment: "jsdom",
       module_base_dir: "/abs/issue",
       mount_html: "<div id='demo'></div>",
-      aspect: "lib",
-      candidate_kind: "lib",
-      enclosure_type: "server-test-case",
     };
     expect(minimal.slow).toBe("1");
+    expect(full.id).toBe("case-001");
     expect(full.timeout_ms).toBe(5000);
     expect(full.mount_html).toContain("demo");
-    expect(full.aspect).toBe("lib");
+    expect(full.environment).toBe("jsdom");
   });
 });
 

@@ -5,7 +5,7 @@
 `preprocessing/` / `equivalence-checker/` と対称の二層構成（ESLint `import/no-restricted-paths` で機械強制）:
 
 - **`common/`** — dataset 非依存の pruning アルゴリズム本体。候補列挙（AST 差分フィルタ）と iterate&revert ループ。「この slow 変種はまだ等価か」を判定するための等価検証関数を **DI（`PruneDeps`）で受け取る** だけで、`equivalence-checker/` を直接知らない。`common/` は `pruning/selakovic` も `equivalence-checker` も import しない。
-- **`selakovic/`** — dataset adapter。`equivalence-checker` の `checkEquivalence` を bind して `common/engine.prune()` に注入する薄い層。等価検証の実行環境（`environment` / `module_base_dir` / `mount_html`）や oracle routing hint（`aspect` / `candidate_kind` / `enclosure_type`）といった dataset 固有の事情はこの層が `checkEquivalence` への呼び出しに閉じ込める。
+- **`selakovic/`** — dataset adapter。`equivalence-checker` の `checkEquivalence` を bind して `common/engine.prune()` に注入する薄い層。等価検証の実行環境（`environment` / `module_base_dir` / `mount_html`）といった dataset 固有の事情はこの層が `checkEquivalence` への呼び出しに閉じ込める。
 
 「主軸（pruning など）は論文 / dataset 非依存」というルールを構造で担保するための分割: `common/` がアルゴリズム、`selakovic/` が dataset の事情を closure に閉じ込める層。`equivalence-checker/common ↔ selakovic` と完全に対称。
 

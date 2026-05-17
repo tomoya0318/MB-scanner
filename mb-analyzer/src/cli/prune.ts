@@ -40,17 +40,11 @@ function validateMaxIterations(value: unknown): number | string {
 }
 
 const ENVIRONMENT_VALUES = ["vm", "jsdom"] as const;
-const EQUIV_CONTEXT_STRING_KEYS = [
-  "module_base_dir",
-  "mount_html",
-  "aspect",
-  "candidate_kind",
-  "enclosure_type",
-] as const;
+const EQUIV_CONTEXT_STRING_KEYS = ["module_base_dir", "mount_html"] as const;
 
 /**
- * `PruningInput` 由来の等価検証コンテキスト (`environment` / `module_base_dir` / `mount_html` /
- * `aspect` / `candidate_kind` / `enclosure_type`) を `obj` から `input` へ転記する。
+ * `PruningInput` 由来の等価検証コンテキスト (`environment` / `module_base_dir` / `mount_html`) を
+ * `obj` から `input` へ転記する。
  * pruning 本体は解釈しない pass-through (selakovic/pruner が checkEquivalence にそのまま渡す) なので
  * 最小限の型チェックのみ — `environment` は `"vm" | "jsdom"`、残りは string。
  * 問題があればエラーメッセージ文字列を返す (`null` なら OK)。
