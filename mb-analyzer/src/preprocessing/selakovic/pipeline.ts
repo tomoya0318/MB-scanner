@@ -146,8 +146,9 @@ function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "clie
 /**
  * `aspect: lib` (および `aspect: lib+workload` 独立判定の lib 側) について、`<lib>_*.js` の変更を unit に切り分け
  * (`findChangeUnits`)、workload (`f1`) が (推移的に) exercise する fn unit ごとに changed-fn candidate を `candidates`
- * の末尾に push する。workload が exercise しない変更 (version-bump ノイズ等) は DROP — embedded `#0` がカバーする。
- * angular controller wrapper の f1 は v1 では skip (embedded のみ)。
+ * の末尾に push する。workload が exercise しない変更 (version-bump ノイズ等) は `change-not-exercised` marker
+ * (`buildExcludedChangedFnCandidate`) として push し、痕跡を残す (setup/slow/fast は持たない、ADR-0022 §計装) —
+ * 等価検証本体は embedded `#0` がカバーする。angular controller wrapper の f1 は v1 では skip (embedded のみ)。
  */
 function appendChangedFnCandidates(
   candidates: PreprocessingCandidate[],
