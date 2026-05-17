@@ -1,6 +1,7 @@
 import type { Node, Statement } from "@babel/types";
 
 import {
+  SELAKOVIC_EXCLUSION_REASON,
   TARGET_SIDE,
   type PreprocessingCandidate,
 } from "../../../contracts/preprocessing-contracts";
@@ -68,6 +69,22 @@ export function buildChangedFnCandidate(
     before_node_count: countSubtreeNodes(beforeBody as unknown as Node),
     after_node_count: countSubtreeNodes(afterBody as unknown as Node),
     candidate_meta: { adapter: "selakovic", target_side: TARGET_SIDE.LIB, is_workload_reachable: true },
+  };
+}
+
+/**
+ * workload-unreachable な fn unit を表す excluded marker (ADR-0022 §計装 / ADR-0024 §candidate_excluded)。
+ * setup/slow/fast を持たず、`candidate_excluded` のみ立てた candidate を返す。痕跡が extracted.jsonl に残り、
+ * `inspect_candidates.py` で「lib に変更があったが workload が呼ばなかった関数」の件数を集計できる。
+ */
+export function buildExcludedChangedFnCandidate(): PreprocessingCandidate {
+  return {
+    candidate_excluded: SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED,
+    candidate_meta: {
+      adapter: "selakovic",
+      target_side: TARGET_SIDE.LIB,
+      is_workload_reachable: false,
+    },
   };
 }
 
@@ -158,6 +175,19 @@ lib.norm = function (x) {
       expect(c.slow).not.toContain("/*");
       expect(c.fast).not.toContain("after: bit-shift");
       expect(c.setup).toContain("after: bit-shift");
+    });
+
+    it("buildExcludedChangedFnCandidate: candidate_excluded のみ立つ marker (setup/slow/fast は undefined)", () => {
+      const c = buildExcludedChangedFnCandidate();
+      expect(c.candidate_excluded).toBe("change-not-exercised");
+      expect(c.candidate_meta.adapter).toBe("selakovic");
+      expect(c.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
+      expect(c.candidate_meta.is_workload_reachable).toBe(false);
+      expect(c.setup).toBeUndefined();
+      expect(c.slow).toBeUndefined();
+      expect(c.fast).toBeUndefined();
+      expect(c.before_node_count).toBeUndefined();
+      expect(c.after_node_count).toBeUndefined();
     });
 
     it("angular controller wrapper の f1 → null (v1 では embedded のみ)", () => {

@@ -10,7 +10,13 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { ASPECT, LAYOUT_KIND, TARGET_SIDE, WRAPPER_KIND } from "../../src/contracts/preprocessing-contracts";
+import {
+  ASPECT,
+  LAYOUT_KIND,
+  SELAKOVIC_EXCLUSION_REASON,
+  TARGET_SIDE,
+  WRAPPER_KIND,
+} from "../../src/contracts/preprocessing-contracts";
 import { preprocess } from "../../src/preprocessing/selakovic";
 
 describe("preprocess — client / top-level f1", () => {
@@ -49,7 +55,7 @@ describe("preprocess — client / top-level f1", () => {
     expect(c.setup).not.toContain("execute"); // 計測ハーネスは setup に残らない
   });
 
-  it("作用点 lib: lib 変化・body 不変 + f1 が変更 lib 関数を呼ばない → embedded のみ (changed-fn は reachability で DROP)", () => {
+  it("作用点 lib: lib 変化・body 不変 + f1 が変更 lib 関数を呼ばない → embedded #0 + change-not-exercised marker #1", () => {
     const result = preprocess({
       kind: "client",
       before_inline: inlineBefore,
@@ -63,17 +69,30 @@ describe("preprocess — client / top-level f1", () => {
       lib_kind: "file",
       lib_referenced_by_workload: true,
     });
-    expect(result.candidate_count).toBe(1);
-    const embedded = result.candidates[0]!;
+    // #0 = embedded (lib 全文)、#1 = workload が helpers.even を呼ばないので change-not-exercised marker
+    expect(result.candidate_count).toBe(2);
     expect(result.issue_meta?.aspect).toBe(ASPECT.LIB);
+
+    const embedded = result.candidates[0]!;
     expect(embedded.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
     expect(embedded.candidate_meta.is_workload_reachable).toBe(false);
+    expect(embedded.candidate_excluded).toBeUndefined();
     expect(embedded.setup).toBe(""); // lib が runnable 本体に入るので setup は空
     expect(embedded.slow).toContain("var helpers = {}"); // lib 全文が slow に埋まる
     expect(embedded.slow).toContain("index % 2 == 0"); // lib_before
     expect(embedded.fast).toContain("index & 1 == 0"); // lib_after
     expect(embedded.slow).toContain("keys[i] % 2 === 0"); // f1 body — slow/fast 両側とも before のまま固定
     expect(embedded.fast).toContain("keys[i] % 2 === 0");
+
+    const excluded = result.candidates[1]!;
+    expect(excluded.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED);
+    expect(excluded.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
+    expect(excluded.candidate_meta.is_workload_reachable).toBe(false);
+    expect(excluded.setup).toBeUndefined();
+    expect(excluded.slow).toBeUndefined();
+    expect(excluded.fast).toBeUndefined();
+    expect(excluded.before_node_count).toBeUndefined();
+    expect(excluded.after_node_count).toBeUndefined();
   });
 
   it("作用点 lib: f1 が変更 lib 関数を呼ぶ → embedded #0 + changed-fn #1 (lambda-lift + 観測する形)", () => {
@@ -119,6 +138,42 @@ describe("preprocess — client / top-level f1", () => {
     expect(cf.before_node_count).toBeLessThan(embedded.before_node_count!);
   });
 
+  it("作用点 lib: 混在 (reachable + unreachable の変更関数) → embedded #0 + changed-fn #1 + change-not-exercised marker #2", () => {
+    // lib.norm は workload (f1) から呼ばれる reachable な変更関数、lib.dead はどこからも呼ばれない unreachable な変更関数
+    const libBefore = "var lib = {};\nlib.norm = function (x) { return x % 2 === 0; };\nlib.dead = function (y) { return y % 3 === 0; };";
+    const libAfter = "var lib = {};\nlib.norm = function (x) { return x & 1 === 0; };\nlib.dead = function (y) { return y & 3 === 0; };";
+    const inlineCallsLib = `
+      var f1 = function () { lib.norm(1); };
+      var a = execute(f1, 10);
+    `;
+    const result = preprocess({
+      kind: "client",
+      before_inline: inlineCallsLib,
+      after_inline: inlineCallsLib,
+      lib_before_files: { "lib.js": libBefore },
+      lib_after_files: { "lib.js": libAfter },
+      lib_kind: "file",
+      lib_referenced_by_workload: true,
+    });
+    expect(result.candidate_count).toBe(3);
+    expect(result.issue_meta?.aspect).toBe(ASPECT.LIB);
+
+    const embedded = result.candidates[0]!;
+    expect(embedded.candidate_meta.is_workload_reachable).toBe(false);
+    expect(embedded.candidate_excluded).toBeUndefined();
+
+    const reachable = result.candidates[1]!;
+    expect(reachable.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
+    expect(reachable.candidate_meta.is_workload_reachable).toBe(true);
+    expect(reachable.candidate_excluded).toBeUndefined();
+    expect(reachable.slow).toContain("% 2 === 0"); // norm の before
+
+    const excluded = result.candidates[2]!;
+    expect(excluded.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED);
+    expect(excluded.candidate_meta.is_workload_reachable).toBe(false);
+    expect(excluded.setup).toBeUndefined();
+  });
+
   it("作用点 lib: dep_lib_sources は全候補の setup 先頭に連結される (`<script src>` CDN dep)", () => {
     const libBefore = "var lib = {};\nlib.norm = function (x) { return x % 2 === 0; };";
     const libAfter = "var lib = {};\nlib.norm = function (x) { return x & 1 === 0; };";
@@ -150,7 +205,7 @@ describe("preprocess — client / top-level f1", () => {
     expect(cf.setup).toContain("globalThis.__HOLE__.call");
   });
 
-  it("作用点 lib: 変更が複数 top-level 関数にまたがっても embedded (#0) が出る", () => {
+  it("作用点 lib: 変更が複数 top-level 関数にまたがっても embedded (#0) が出る (unreachable な変更関数は marker として残る)", () => {
     const result = preprocess({
       kind: "client",
       before_inline: inlineBefore,
@@ -160,10 +215,18 @@ describe("preprocess — client / top-level f1", () => {
       lib_kind: "file",
       lib_referenced_by_workload: true,
     });
-    expect(result.candidate_count).toBe(1);
-    const c = result.candidates[0]!;
-    expect(c.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
-    expect(c.candidate_meta.is_workload_reachable).toBe(false);
+    // embedded #0 + helperA / helperB はどちらも workload (f1) から呼ばれない → change-not-exercised marker x2
+    expect(result.candidate_count).toBe(3);
+    const embedded = result.candidates[0]!;
+    expect(embedded.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
+    expect(embedded.candidate_meta.is_workload_reachable).toBe(false);
+    expect(embedded.candidate_excluded).toBeUndefined();
+    const excludedMarkers = result.candidates.slice(1);
+    expect(excludedMarkers).toHaveLength(2);
+    for (const m of excludedMarkers) {
+      expect(m.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED);
+      expect(m.setup).toBeUndefined();
+    }
   });
 
   it("作用点 lib+workload co-evolution: body の参照 identifier が lib 変更関数名と交差 → 1 candidate (target_side=both)", () => {
@@ -239,7 +302,7 @@ describe("preprocess — client / top-level f1", () => {
     }
   });
 
-  it("作用点 lib+workload independent: body の参照 identifier が lib 変更関数名と交差しない → lib / workload の 2 candidate (ADR-0014 split)", () => {
+  it("作用点 lib+workload independent: body の参照 identifier が lib 変更関数名と交差しない → lib / workload の 2 candidate (ADR-0014 split) + helper は unreachable で marker", () => {
     const result = preprocess({
       kind: "client",
       before_inline: inlineBefore,
@@ -249,12 +312,17 @@ describe("preprocess — client / top-level f1", () => {
       lib_kind: "file",
       lib_referenced_by_workload: false,
     });
-    expect(result.candidate_count).toBe(2);
+    // #0 lib (embedded) + #1 workload (body) + #2 helper は workload (f1) から呼ばれない → change-not-exercised marker
+    expect(result.candidate_count).toBe(3);
     expect(result.issue_meta?.aspect).toBe(ASPECT.BOTH);
     expect(result.candidates.map((c) => c.candidate_meta.target_side)).toEqual([
       TARGET_SIDE.LIB,
       TARGET_SIDE.WORKLOAD,
+      TARGET_SIDE.LIB,
     ]);
+    const marker = result.candidates[2]!;
+    expect(marker.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED);
+    expect(marker.setup).toBeUndefined();
   });
 });
 

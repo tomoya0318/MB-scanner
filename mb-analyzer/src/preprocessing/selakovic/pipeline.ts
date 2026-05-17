@@ -6,7 +6,6 @@ import {
   TARGET_SIDE,
   WRAPPER_KIND,
   type Aspect,
-  type ExclusionReasonAny,
   type LayoutKind,
   type PreprocessingCandidate,
   type PreprocessingIssueResult,
@@ -15,7 +14,7 @@ import {
 } from "../../contracts/preprocessing-contracts";
 import { findChangeUnits, type FnChangeUnit } from "../common/change-units";
 import { buildCallGraph, isReachedByAnyWorkload } from "../common/reachability";
-import { buildChangedFnCandidate } from "./assemble/changed-fn";
+import { buildChangedFnCandidate, buildExcludedChangedFnCandidate } from "./assemble/changed-fn";
 import {
   buildClientBodyCandidate,
   buildClientCombinedCandidate,
@@ -120,6 +119,8 @@ function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "clie
   // CDN 依存 lib (jquery/handlebars/underscore) を各候補の setup 先頭に連結。
   const depPrefix = (input.dep_lib_sources ?? []).join("\n;\n");
   const finalized = candidates.map((c) => {
+    // excluded marker (change-not-exercised) は setup/node count を持たない: dep 連結も node count 上書きも skip。
+    if (c.candidate_excluded !== undefined) return c;
     const base =
       depPrefix.length > 0 && typeof c.setup === "string"
         ? { ...c, setup: c.setup.length > 0 ? `${depPrefix}\n;\n${c.setup}` : depPrefix }
@@ -145,8 +146,9 @@ function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "clie
 /**
  * `aspect: lib` (および `aspect: lib+workload` 独立判定の lib 側) について、`<lib>_*.js` の変更を unit に切り分け
  * (`findChangeUnits`)、workload (`f1`) が (推移的に) exercise する fn unit ごとに changed-fn candidate を `candidates`
- * の末尾に push する。workload が exercise しない変更 (version-bump ノイズ等) は DROP — embedded `#0` がカバーする。
- * angular controller wrapper の f1 は v1 では skip (embedded のみ)。
+ * の末尾に push する。workload が exercise しない変更 (version-bump ノイズ等) は `change-not-exercised` marker
+ * (`buildExcludedChangedFnCandidate`) として push し、痕跡を残す (setup/slow/fast は持たない、ADR-0022 §計装) —
+ * 等価検証本体は embedded `#0` がカバーする。angular controller wrapper の f1 は v1 では skip (embedded のみ)。
  */
 function appendChangedFnCandidates(
   candidates: PreprocessingCandidate[],
@@ -169,7 +171,10 @@ function appendChangedFnCandidates(
 
   const graph = buildCallGraph(cu.beforeAst, [{ name: "f1", body: [...f1Before.preWorkloadStatements, ...f1Before.f1Body.body] }]);
   for (const u of fnUnits) {
-    if (!isReachedByAnyWorkload(graph, u.name)) continue; // DROP (change-not-exercised) — 計装は別タスク
+    if (!isReachedByAnyWorkload(graph, u.name)) {
+      candidates.push(buildExcludedChangedFnCandidate());
+      continue;
+    }
     const candidate = buildChangedFnCandidate(u, libSourceAfter, f1Before);
     if (candidate !== null) candidates.push(candidate);
   }
@@ -256,7 +261,7 @@ function buildIssueResult(
       issue_meta: issueMeta,
     };
     if (fb.issue_excluded !== undefined) {
-      result.issue_excluded = fb.issue_excluded as ExclusionReasonAny;
+      result.issue_excluded = fb.issue_excluded;
       if (fb.issue_excluded_detail !== undefined) result.issue_excluded_detail = fb.issue_excluded_detail;
     }
     return result;
