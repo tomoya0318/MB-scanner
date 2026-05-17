@@ -14,7 +14,7 @@ import {
 } from "../../contracts/preprocessing-contracts";
 import { findChangeUnits, type FnChangeUnit } from "../common/change-units";
 import { buildCallGraph, isReachedByAnyWorkload } from "../common/reachability";
-import { buildChangedFnCandidate } from "./assemble/changed-fn";
+import { buildChangedFnCandidate, buildExcludedChangedFnCandidate } from "./assemble/changed-fn";
 import {
   buildClientBodyCandidate,
   buildClientCombinedCandidate,
@@ -119,6 +119,8 @@ function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "clie
   // CDN 依存 lib (jquery/handlebars/underscore) を各候補の setup 先頭に連結。
   const depPrefix = (input.dep_lib_sources ?? []).join("\n;\n");
   const finalized = candidates.map((c) => {
+    // excluded marker (change-not-exercised) は setup/node count を持たない: dep 連結も node count 上書きも skip。
+    if (c.candidate_excluded !== undefined) return c;
     const base =
       depPrefix.length > 0 && typeof c.setup === "string"
         ? { ...c, setup: c.setup.length > 0 ? `${depPrefix}\n;\n${c.setup}` : depPrefix }
@@ -168,7 +170,10 @@ function appendChangedFnCandidates(
 
   const graph = buildCallGraph(cu.beforeAst, [{ name: "f1", body: [...f1Before.preWorkloadStatements, ...f1Before.f1Body.body] }]);
   for (const u of fnUnits) {
-    if (!isReachedByAnyWorkload(graph, u.name)) continue; // DROP (change-not-exercised) — 計装は別タスク
+    if (!isReachedByAnyWorkload(graph, u.name)) {
+      candidates.push(buildExcludedChangedFnCandidate());
+      continue;
+    }
     const candidate = buildChangedFnCandidate(u, libSourceAfter, f1Before);
     if (candidate !== null) candidates.push(candidate);
   }
