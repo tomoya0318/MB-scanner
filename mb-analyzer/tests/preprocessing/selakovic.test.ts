@@ -95,7 +95,7 @@ describe("preprocess — client / top-level f1", () => {
     expect(excluded.after_node_count).toBeUndefined();
   });
 
-  it("作用点 lib: f1 が変更 lib 関数を呼ぶ → embedded #0 + changed-fn #1 (lambda-lift + 観測する形)", () => {
+  it("作用点 lib: f1 が変更 lib 関数を呼ぶ → embedded #0 + changed-fn #1 (4 値契約: setup に $BODY$ / slow・fast に観測ラッパ / workload に IIFE)", () => {
     const libBefore = "var slice = [].slice;\nvar lib = {};\nlib.norm = function (x) { return slice.call([x]).length % 2 === 0; };\nlib.unused = function () { return 0; };";
     const libAfter = "var slice = [].slice;\nvar lib = {};\nlib.norm = function (x) { return slice.call([x]).length & 1 === 0; };\nlib.unused = function () { return 0; };";
     const inlineCallsLib = `
@@ -119,21 +119,39 @@ describe("preprocess — client / top-level f1", () => {
 
     const embedded = result.candidates[0]!;
     expect(embedded.before_node_count).toBeGreaterThan(0);
+    expect(embedded.workload).toBeUndefined(); // embedded は旧経路 = workload 無し
 
     const cf = result.candidates[1]!;
     expect(cf.enclosure_node_type).toBe("FunctionExpression"); // lib.norm = function(){...}
-    // setup = lib 全文 (norm だけ穴あき + ガード + after 本体インライン fallback) + preWorkload (空)
+
+    // setup = lib 全文 (norm body のみ $BODY$ 1 個で穴あき) + preWorkload (空)
     expect(cf.setup).toContain("var slice = [].slice;");
     expect(cf.setup).toContain("var lib = {};");
-    expect(cf.setup).toContain("globalThis.__HOLE__.call(this, slice, x)"); // 内部依存 slice が lambda-lift で引数化
-    expect(cf.setup).toContain("& 1 === 0"); // after 本体はインライン fallback として残る
-    expect(cf.slow).toContain("function (slice, x)");
+    expect(cf.setup).toContain("$BODY$");
+    expect((cf.setup!.match(/\$BODY\$/g) ?? []).length).toBe(1);
+    expect(cf.setup).toContain("lib.unused"); // 変更外の関数は原形のまま残る
+    // v1 残骸が消えていること
+    expect(cf.setup).not.toContain("globalThis.__HOLE__");
+    expect(cf.setup).not.toContain("& 1 === 0"); // body は $BODY$ で穴あき、after 本体は残らない
+
+    // slow: 変更前 body (% 2 === 0) を __OBS__ で観測する形 (body 断片、lib 宣言は含まない)
     expect(cf.slow).toContain("% 2 === 0");
-    expect(cf.slow).toContain("globalThis.__OBS");
-    expect(cf.slow).toContain("lib.norm(i);");
-    expect(cf.slow).not.toContain("var lib = {};"); // lib は setup 側、slow には入らない
+    expect(cf.slow).toContain("let __OBS_R__");
+    expect(cf.slow).toContain("__OBS__.push");
+    expect(cf.slow).not.toContain("globalThis.__OBS"); // 単独参照 (top-level let __OBS__ を closure 経由)
+    expect(cf.slow).not.toContain("var lib = {};");
+    expect(cf.slow).not.toContain("lib.norm(i);"); // workload 呼び出しは workload 側に移動
+
+    // fast: 変更後 body (& 1 === 0)
     expect(cf.fast).toContain("& 1 === 0");
-    expect(cf.fast).toContain("lib.norm(i);");
+    expect(cf.fast).toContain("let __OBS_R__");
+
+    // workload: __OBS__ を init → workload 呼び出し列 → JSON.stringify(__OBS__) を完了値で返す IIFE
+    expect(cf.workload).toContain("(function () {");
+    expect(cf.workload).toContain("__OBS__ = [];");
+    expect(cf.workload).toContain("lib.norm(i);"); // workload 呼び出しはここに集約
+    expect(cf.workload).toContain("return JSON.stringify(__OBS__);");
+
     expect(cf.before_node_count).toBeGreaterThan(0);
     expect(cf.before_node_count).toBeLessThan(embedded.before_node_count!);
   });
@@ -202,7 +220,10 @@ describe("preprocess — client / top-level f1", () => {
     expect(embedded.setup).toMatch(/^\/\* jquery 2\.1\.3 stub \*\//);
     const cf = result.candidates.find((c) => c.candidate_meta.is_workload_reachable)!;
     expect(cf.setup).toMatch(/^\/\* jquery 2\.1\.3 stub \*\//);
-    expect(cf.setup).toContain("globalThis.__HOLE__.call");
+    // 4 値契約: dep prefix の後に穴あき lib が来て $BODY$ 1 個を含む
+    expect(cf.setup).toContain("$BODY$");
+    expect((cf.setup!.match(/\$BODY\$/g) ?? []).length).toBe(1);
+    expect(cf.setup).not.toContain("globalThis.__HOLE__"); // v1 残骸が消えている
   });
 
   it("作用点 lib: 変更が複数 top-level 関数にまたがっても embedded (#0) が出る (unreachable な変更関数は marker として残る)", () => {
