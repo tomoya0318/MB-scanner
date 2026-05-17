@@ -167,3 +167,13 @@ IssueMeta = Annotated[SelakovicIssueMeta, Field(discriminator="adapter")]
 
 - 議論経緯と検討した代替案の詳細は `tmp/0001_candidate-kind-redesign-discussion/plan.md` 全体を参照。特に §C-§D (kind の起源) / §I (現実生成経路の組合せ表) / §Q (フィールド意味重複の洗い出し) / §S (oracle hint 不要の実証) / §V-§Z (base/adapter 分離の段階的整理) が本 ADR の根拠。
 - ADR-0023 D-β との実装順序判断は本セッションでは保留。実装着手前に再決定する想定。
+
+## §更新: 2026-05-18 — `workload?: string` を `PreprocessingCandidate` base に配置 (ADR-0023 D-β 確定)
+
+ADR-0023 D-β の placeholder substitution + 4 値契約マージに伴い、本 ADR §諦めるもの「`workload?: string` フィールドの配置」を確定する:
+
+- **配置**: `PreprocessingCandidate` (base) に `workload?: string` を optional 追加。`EquivalenceInput` / `PruningInput` にも同名 optional フィールドで paired (TS は `workload?: string`、Python は `workload: str | None = Field(default=None, max_length=MAX_CODE_LENGTH)`)
+- **根拠**: changed-fn 経路のみ非 None だが、「workload 文字列を持つ」という構造は dataset 非依存の placeholder substitution model の構成要素 (= base に置ける一般概念)。adapter sub-class に押し下げると別 dataset でも同じ手法を使う際に再宣言が要る
+- **経路判別**: TS `input.workload != null` (loose) / Python `input.workload is not None`。null と undefined の両方を旧経路扱いに統一 (Python `model_dump()` は null を JSON に乗せるので、TS は loose 比較が必須)
+- **対称な空欄**: `is_workload_reachable=false` の candidate (旧経路 / change-not-exercised marker) は `workload === undefined`。adapter_meta で別途 `is_workload_reachable` を持つので、`workload` 有無と完全には連動しない (excluded marker は両方 false / undefined)
+- **実装範囲**: PR #18 (contracts paired-change + 汎用 AST helper 集約) で base への追加は完了。本 §更新 は ADR 末尾追記のみ。実装の影響範囲は ADR-0023 D-β Phase 1〜6 にすべて記載

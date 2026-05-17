@@ -125,7 +125,7 @@ export const BODY_PLACEHOLDER = PLACEHOLDER;
 // 判断: ai-guide/adr/0007-in-source-testing-internal-helpers.md
 if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
-  const { parse } = await import("../../ast/parser");
+  const { parse } = await import("../ast/parser");
 
   describe("declareObservationGlobal (in-source)", () => {
     it("setup の最先頭に let __OBS__ = []; を prepend する", () => {

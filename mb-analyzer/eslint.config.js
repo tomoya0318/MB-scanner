@@ -6,7 +6,10 @@ import globals from "globals";
 // 機能間の依存方向ルール。
 // - contracts/ は Python ↔ TS の JSON 契約 (末端層、誰からも import される、何も import しない)
 // - ast/ は Babel AST 操作の汎用ユーティリティ (末端層、機能間で共有)
-// - contracts と ast は互いに独立した末端層なので、相互 import も禁止する
+// - codegen/ は AST 非依存の string-level コード組み立て (ADR-0023 placeholder substitution model)。
+//   preprocessing / equivalence-checker / pruning から参照される末端層 (in-source test の valid JS
+//   検証のため codegen → ast のみ例外的に許容)
+// - contracts と ast と codegen は互いに独立した末端層なので、相互 import も原則禁止
 // - equivalence-checker/ は pruning/ 等の将来機能を import してはならない
 // - preprocessing/ は pipeline 上 equivalence-checker / pruning の前段だが、機能的には
 //   独立 (CLI で順次呼び出すだけ)。preprocessing/common は preprocessing/selakovic を
@@ -23,6 +26,7 @@ const DEPENDENCY_ZONES = [
     target: "./src/contracts",
     from: [
       "./src/ast",
+      "./src/codegen",
       "./src/equivalence-checker",
       "./src/preprocessing",
       "./src/pruning",
@@ -33,6 +37,19 @@ const DEPENDENCY_ZONES = [
   },
   {
     target: "./src/ast",
+    from: [
+      "./src/contracts",
+      "./src/codegen",
+      "./src/equivalence-checker",
+      "./src/preprocessing",
+      "./src/pruning",
+      "./src/equivalence-class-test",
+      "./src/eslint-rule-codegen",
+      "./src/cli",
+    ],
+  },
+  {
+    target: "./src/codegen",
     from: [
       "./src/contracts",
       "./src/equivalence-checker",

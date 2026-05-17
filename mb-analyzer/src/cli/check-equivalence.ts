@@ -11,7 +11,7 @@ function parseEnvironment(value: unknown): ExecutionEnvironment | null {
 }
 
 // 単純な optional string フィールド一覧。型は文字列のみ、無効値は error 行化する。
-const OPTIONAL_STRING_FIELDS = ["module_base_dir", "mount_html"] as const;
+const OPTIONAL_STRING_FIELDS = ["module_base_dir", "mount_html", "workload"] as const;
 
 function assignOptionalStringFields(
   obj: Record<string, unknown>,

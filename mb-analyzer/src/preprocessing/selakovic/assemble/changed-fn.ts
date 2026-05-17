@@ -8,24 +8,30 @@ import {
 } from "../../../contracts/preprocessing-contracts";
 import type { FnChangeUnit } from "../../common/change-units";
 import {
-  buildHoleFunction,
-  holeLibSource,
-  pickLiftedDeps,
-  wrapWorkloadObserved,
-} from "../../common/function-hole";
+  replaceFunctionBody,
+  wrapBodyObserved,
+  wrapObservedWorkload,
+} from "../../../codegen/placeholder";
 import { statementsToCode } from "../../common/setup-cleanup";
 import type { F1Decomposition } from "../decompose/f1";
 
 /**
- * `aspect: lib` の changed-fn candidate を組む (plan §D1 / spike v2)。`unit` は workload が (推移的に) exercise
- * すると判定済の fn unit (= `pipeline.ts` が `isReachedByAnyWorkload` で KEEP したもの)。`libAfterSrc` は
- * `findChangeUnits` に渡したのと同じ after lib ソース (`unit.afterFn` の span がここを指す)。
+ * `aspect: lib` の changed-fn candidate を組む (ADR-0023 §4 値契約、placeholder substitution model)。
+ * `unit` は workload が (推移的に) exercise すると判定済の fn unit (= `pipeline.ts` が `isReachedByAnyWorkload`
+ * で KEEP したもの)。`libAfterSrc` は `findChangeUnits` に渡したのと同じ after lib ソース
+ * (`unit.afterFn` の span がここを指す)。
  *
- * 構造:
- *  - `setup` = lib (after、変更関数の body だけ穴あき + ガード + after 本体インライン fallback) + preWorkload
- *  - `slow` = `globalThis.__HOLE__ = function(<liftDeps>, <fnParams>){…変更前の本体…+ 戻り値を __OBS に記録}` + workload
- *  - `fast` = 同じく `__HOLE__` に変更後の本体 + 観測する形の workload
- *  - pruning が削る対象は `slow` (= 変更関数本体 + workload) の AST、`setup` (= lib 全文 + dep) は不変
+ * 出力する 4 値:
+ *  - `setup` = 穴あき lib (変更関数の body を `{ $BODY$ }` プレースホルダで置換) + preWorkload を結合した文字列。
+ *    `$BODY$` を厳密に 1 個含み、equivalence-checker 側で `substituteBody(setup, slow|fast)` で差し込む。
+ *  - `slow` = `wrapBodyObserved(変更前 body の statementsToCode)` (= 戻り値を `__OBS__` に push して返す形)。
+ *    関数本体に差し込まれることが前提の statement 列で、単独では top-level program として動かない。
+ *  - `fast` = 同じく変更後 body 版。
+ *  - `workload` = `wrapObservedWorkload(f1Body の statementsToCode)` (= `__OBS__ = []` 初期化 → workload 実行
+ *    → `JSON.stringify(__OBS__)` を完了値で返す IIFE)。
+ *
+ * sandbox 投入時は equivalence-checker が `let __OBS__ = [];` を setup 先頭に prepend
+ * (`declareObservationGlobal`) し、`substituteBody(setup, slow)` で `$BODY$` を差し替えてから executor へ渡す。
  *
  * adapter_meta:
  *  - target_side = lib (変更関数は lib 側、ADR-0024)
@@ -34,8 +40,8 @@ import type { F1Decomposition } from "../decompose/f1";
  * 次のケースは `null` を返す (= この unit からは candidate を作らない、embedded `#0` がカバー):
  *  - `unit.afterFn === null` (rename / 削除)
  *  - `afterFn` / `beforeFn` の本体が BlockStatement でない (arrow `=> expr` 等)
- *  - before / after の param 名リストが一致しない
- *  - workload (`f1`) が top-level wrapper でない (Angular controller wrapper は v1 では skip)
+ *  - before / after の param 名リストが一致しない (D-γ で緩和検討)
+ *  - workload (`f1`) が top-level wrapper でない (Angular controller wrapper は D-β では skip)
  */
 export function buildChangedFnCandidate(
   unit: FnChangeUnit,
@@ -51,17 +57,18 @@ export function buildChangedFnCandidate(
   const aParams = paramNames(afterFn);
   if (aParams.join(",") !== paramNames(unit.beforeFn).join(",")) return null;
 
-  const liftDeps = pickLiftedDeps(unit.beforeFn, afterFn, unit.afterFnAncestors);
-  const holeParams = [...liftDeps, ...aParams];
-
-  const holedLib = holeLibSource(libAfterSrc, afterBody, liftDeps, aParams);
+  const holedLib = replaceFunctionBody(libAfterSrc, { start: afterBody.start, end: afterBody.end });
   const preWorkload = statementsToCode([...f1Decomposition.preWorkloadStatements]);
-  const workload = wrapWorkloadObserved(statementsToCode([...f1Decomposition.f1Body.body]));
+  const setup = [holedLib, preWorkload].filter((s) => s.length > 0).join("\n;\n");
+  const slow = wrapBodyObserved(statementsToCode(beforeBody.body as readonly Statement[]));
+  const fast = wrapBodyObserved(statementsToCode(afterBody.body as readonly Statement[]));
+  const workload = wrapObservedWorkload(statementsToCode([...f1Decomposition.f1Body.body]));
 
   return {
-    setup: [holedLib, preWorkload].filter((s) => s.length > 0).join("\n;\n"),
-    slow: `globalThis.__HOLE__ = ${buildHoleFunction(holeParams, statementsToCode(beforeBody.body as readonly Statement[]))};\n;\n${workload}`,
-    fast: `globalThis.__HOLE__ = ${buildHoleFunction(holeParams, statementsToCode(afterBody.body as readonly Statement[]))};\n;\n${workload}`,
+    setup,
+    slow,
+    fast,
+    workload,
     enclosure_node_type: afterFn.type,
     // node count は「pruning が削る対象 = 変更関数の本体」のサイズ (inline 全文サイズ ≠ embedded の値)。
     before_node_count: countNodes(beforeBody as unknown as Node),
@@ -92,8 +99,10 @@ if (import.meta.vitest) {
   const { findChangeUnits } = await import("../../common/change-units");
   const { extractF1 } = await import("../decompose/f1");
   const { parse } = await import("../../../ast/parser");
-  // 観点: workload が呼ぶ変更関数の fn unit から changed-fn candidate を組む。setup に lib 全文 (変更関数だけ穴あき)、
-  // slow/fast に __HOLE__ (変更前/後の本体) + 観測ラッパ + workload。lib 内部依存は lambda-lift で引数化。
+  const { substituteBody } = await import("../../../codegen/placeholder");
+  // 観点: workload が呼ぶ変更関数の fn unit から changed-fn candidate を組む (placeholder substitution model)。
+  // setup に lib 全文 (変更関数の body を $BODY$ 1 個で穴あき)、slow/fast に変更前/後 body を観測ラッパで包んだ
+  // statement 列の断片、workload に f1 body を IIFE で包んだ完了値返却形式。
   // param 不一致 / arrow body / angular wrapper は null。
 
   const inline = `var f1 = function () { lib.norm(7); lib.norm(8); };\nvar a = execute(f1, 10);`;
@@ -108,7 +117,7 @@ if (import.meta.vitest) {
   };
 
   describe("buildChangedFnCandidate (in-source)", () => {
-    it("workload が呼ぶ変更関数 → setup に穴あき lib / slow・fast に __HOLE__ + 観測 + workload、内部依存は lift", () => {
+    it("workload が呼ぶ変更関数 → setup に $BODY$ 1 個入り穴あき lib / slow・fast に観測ラッパ / workload に IIFE", () => {
       const f1d = extractF1(inline)!;
       const unit = fnUnitFor(libBefore, libAfter);
       const c = buildChangedFnCandidate(unit, libAfter, f1d);
@@ -117,30 +126,50 @@ if (import.meta.vitest) {
       expect(r.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
       expect(r.candidate_meta.is_workload_reachable).toBe(true);
       expect(r.enclosure_node_type).toBe("FunctionExpression"); // lib.norm = function(){...}
-      // setup: lib 全文 (norm だけ穴あき) + preWorkload
+
+      // setup: lib 全文 (norm body のみ $BODY$ 1 個で穴あき) + preWorkload
       expect(r.setup).toContain("var slice = [].slice;");
       expect(r.setup).toContain("var lib = {};");
-      expect(r.setup).toContain("globalThis.__HOLE__.call(this, slice, x)");
-      expect(r.setup).toContain("& 1 === 0");
-      // slow: __HOLE__ = 変更前の本体 (% 2 === 0) + 観測ラッパ + workload
-      expect(r.slow).toContain("function (slice, x)");
+      expect(r.setup).toContain("$BODY$");
+      // $BODY$ は厳密に 1 個
+      expect((r.setup!.match(/\$BODY\$/g) ?? []).length).toBe(1);
+      // v1 残骸 (__HOLE__ ガード / after 本体インライン) が消えている
+      expect(r.setup).not.toContain("globalThis.__HOLE__");
+      expect(r.setup).not.toContain("& 1 === 0");
+
+      // slow: 変更前 body (% 2 === 0) を __OBS__ に push して返す形
       expect(r.slow).toContain("% 2 === 0");
-      expect(r.slow).toContain("globalThis.__OBS");
-      expect(r.slow).toContain("lib.norm(7);");
+      expect(r.slow).toContain("let __OBS_R__");
+      expect(r.slow).toContain("__OBS__.push");
+      // 単独参照 (globalThis. プレフィックス無し)
+      expect(r.slow).not.toContain("globalThis.__OBS");
+      // body 断片なので lib 宣言 / workload 呼び出しは含まれない
       expect(r.slow).not.toContain("var lib = {};");
-      // fast: __HOLE__ = 変更後の本体 (& 1 === 0)
+      expect(r.slow).not.toContain("lib.norm(7);");
+
+      // fast: 変更後 body (& 1 === 0)
       expect(r.fast).toContain("& 1 === 0");
-      expect(r.fast).toContain("lib.norm(7);");
+      expect(r.fast).toContain("let __OBS_R__");
+
+      // workload: __OBS__ = [] 初期化 → workload → JSON.stringify(__OBS__)
+      expect(r.workload).toContain("__OBS__ = [];");
+      expect(r.workload).toContain("lib.norm(7);");
+      expect(r.workload).toContain("lib.norm(8);");
+      expect(r.workload).toContain("return JSON.stringify(__OBS__);");
+      expect(r.workload).not.toContain("globalThis.__OBS");
+
       // node count は変更関数本体のサイズ (小さい)
       expect(r.before_node_count).toBeGreaterThan(0);
       expect(r.before_node_count).toBeLessThan(100);
-      // parse できる
-      expect(() => parse(r.setup!)).not.toThrow();
-      expect(() => parse(r.slow!)).not.toThrow();
-      expect(() => parse(r.fast!)).not.toThrow();
+
+      // sandbox 投入直前形 (= substituteBody(setup, slow) を関数本体内に差し込んだ形) が valid JS
+      const substituted = substituteBody(r.setup!, r.slow!);
+      expect(() => parse(substituted)).not.toThrow();
+      // workload は単独で式として valid
+      expect(() => parse(`var _ = ${r.workload!};`)).not.toThrow();
     });
 
-    it("before / after の param 名が違う → null (spike の簡略化)", () => {
+    it("before / after の param 名が違う → null (D-γ で緩和検討)", () => {
       const f1d = extractF1(inline)!;
       const before = `var lib = {};\nlib.norm = function (x) { return x % 2 === 0; };`;
       const after = `var lib = {};\nlib.norm = function (y) { return y & 1 === 0; };`;
@@ -148,7 +177,7 @@ if (import.meta.vitest) {
       expect(buildChangedFnCandidate(unit, after, f1d)).toBeNull();
     });
 
-    it("変更関数本体の leading / trailing コメントは slow/fast から落ちる", () => {
+    it("変更関数本体の leading / trailing コメントは slow/fast から落ちる ($BODY$ には setup 側の文字列が残る)", () => {
       const libBeforeWithComments = `
 var lib = {};
 lib.norm = function (x) {
@@ -168,14 +197,18 @@ lib.norm = function (x) {
       const unit = fnUnitFor(libBeforeWithComments, libAfterWithComments);
       const c = buildChangedFnCandidate(unit, libAfterWithComments, f1d)!;
       expect(c).not.toBeNull();
+      // slow / fast は statementsToCode (comments:false) なので元コメントは落ちる
       expect(c.slow).not.toContain("before: ascii-rule");
       expect(c.slow).not.toContain("trailing line");
       expect(c.slow).not.toContain("/*");
       expect(c.fast).not.toContain("after: bit-shift");
-      expect(c.setup).toContain("after: bit-shift");
+      // setup には after lib ソース原文がそのまま残っている (= replaceFunctionBody は body span 外を保持)
+      // ただし body 内のコメント (after: bit-shift) は body 内なので $BODY$ に置換されて消える
+      expect(c.setup).toContain("$BODY$");
+      expect(c.setup).not.toContain("after: bit-shift");
     });
 
-    it("buildExcludedChangedFnCandidate: candidate_excluded のみ立つ marker (setup/slow/fast は undefined)", () => {
+    it("buildExcludedChangedFnCandidate: candidate_excluded のみ立つ marker (setup/slow/fast/workload は undefined)", () => {
       const c = buildExcludedChangedFnCandidate();
       expect(c.candidate_excluded).toBe("change-not-exercised");
       expect(c.candidate_meta.adapter).toBe("selakovic");
@@ -184,11 +217,12 @@ lib.norm = function (x) {
       expect(c.setup).toBeUndefined();
       expect(c.slow).toBeUndefined();
       expect(c.fast).toBeUndefined();
+      expect(c.workload).toBeUndefined();
       expect(c.before_node_count).toBeUndefined();
       expect(c.after_node_count).toBeUndefined();
     });
 
-    it("angular controller wrapper の f1 → null (v1 では embedded のみ)", () => {
+    it("angular controller wrapper の f1 → null (D-β では top-level のみ)", () => {
       const angularInline = `
         var app = angular.module("benchApp", []);
         app.controller("BenchCtrl", function ($scope) { lib.norm(1); });
