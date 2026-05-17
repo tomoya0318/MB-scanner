@@ -81,8 +81,10 @@ export interface EquivalenceInput {
    *   2. 観測配列 `__OBS__` を `setup` 最先頭に `let __OBS__ = [];` で宣言
    *   3. 結果を executor の `setup` 引数として、本フィールドを executor の `workload` 引数として渡す
    *
-   * `undefined` のとき (= client embedded / fallback / server 等の旧経路) は既存通り
+   * `null` / `undefined` のとき (= client embedded / fallback / server 等の旧経路) は既存通り
    * `slow` / `fast` がそのまま executor の workload に流れる (executor 側は無改修)。
+   * Python `EquivalenceInput.workload=None` は JSON 経由で `null` として届くので、checker 側の
+   * 経路判定は `input.workload != null` (loose) で書く。
    */
   workload?: string;
 }

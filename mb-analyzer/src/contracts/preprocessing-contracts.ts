@@ -58,7 +58,8 @@ export interface PreprocessingInput {
  * `workload` は ADR-0023 D-β の placeholder substitution + 4 値契約フィールド。
  * `setup` に `$BODY$` プレースホルダを 1 個含み、`slow` / `fast` を `setup` の `$BODY$`
  * に差し込んで sandbox に渡す経路 (= changed-fn 経路) でのみ定義される。それ以外の
- * 経路 (client embedded / fallback / server 等) では `undefined`。
+ * 経路 (client embedded / fallback / server 等) では `null` / `undefined`
+ * (Python paired side が `None` を送ると JSON 経由で `null` になる)。
  */
 export interface PreprocessingCandidate {
   setup?: string;
