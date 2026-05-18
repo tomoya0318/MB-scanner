@@ -57,7 +57,7 @@ mb-analyzer/                  # === TypeScript CLI (現行実装) ===
 │   │   ├── subtree-hash.ts   # canonicalHash / SubtreeSet (top-down 同型判定)
 │   │   └── inspect.ts        # countNodes / nodeSize / snippetOfNode
 │   ├── codegen/              # 末端層: ADR-0023 placeholder substitution model の 5 helper
-│   │   └── placeholder.ts    # declareObservationGlobal / replaceFunctionBody / wrapBodyObserved / wrapObservedWorkload / substituteBody
+│   │   └── placeholder.ts    # declareObservationGlobal / replaceFunctionBody / replaceFunctionBodyWithObserver / wrapObservedWorkload / substituteBody
 │   ├── contracts/            # 末端層: Python ↔ TS の JSON 契約のみ
 │   │   ├── equivalence-contracts.ts    # Python `equivalence.py` と JSON 互換
 │   │   ├── pruning-contracts.ts        # Python `pruning.py` と JSON 互換
@@ -214,7 +214,7 @@ mb-analyzer-legacy/           # [DEPRECATED] 旧 pnpm workspace monorepo
   - pruning: `$P0`, `$P1`, ... (AST identifier、連番で複数共存 — `pruning/common/rules/replacement.ts` の `PLACEHOLDER_NAME_PATTERN = /^\$P\d+$/` が単一ソース、ADR-0009)
 - **sandbox 実行時の internal 変数**: **`__NAME__`** (両端 underscore)
   - 例: `__OBS__` (戻り値観測配列) / `__OBS_R__` (1 回の呼び出し戻り値の一時保持)
-  - `__OBS__` は setup の最先頭で `let __OBS__ = [];` として宣言・初期化 (`placeholder.ts` の `declareObservationGlobal` helper)。sandbox top-level の lexical binding なので `wrapBodyObserved` / `wrapObservedWorkload` から closure 経由で参照される (= `globalThis.__OBS__` 経由のアクセスは top-level `let` の特性上**不可**、これは scope を跨いだ誤参照を仕様レベルで防ぐ意図)
+  - `__OBS__` は setup の最先頭で `let __OBS__ = [];` として宣言・初期化 (`placeholder.ts` の `declareObservationGlobal` helper)。sandbox top-level の lexical binding なので `replaceFunctionBodyWithObserver` で setup 側に inline 化された観測 IIFE / `wrapObservedWorkload` から closure 経由で参照される (= `globalThis.__OBS__` 経由のアクセスは top-level `let` の特性上**不可**、これは scope を跨いだ誤参照を仕様レベルで防ぐ意図)
 
 新しく magic 識別子を導入するときは、置換マーカーなら `$` 系、sandbox に残る実行時変数なら `__` 系で命名する。詳細・案 B/C を不採用にした理由は [ADR-0023](../adr/0023-preprocess-placeholder-substitution.md) §命名規則 を参照。
 
