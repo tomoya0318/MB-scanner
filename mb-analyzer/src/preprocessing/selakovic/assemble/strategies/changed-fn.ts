@@ -1,6 +1,12 @@
 import type { Node, Statement } from "@babel/types";
 
-import { countNodes, functionBlockBody, paramNames } from "../../../../ast/inspect";
+import {
+  classifyParamDiff,
+  countNodes,
+  functionBlockBody,
+  hasBindingCollision,
+  renameIdentifiersInStatements,
+} from "../../../../ast/inspect";
 import {
   SELAKOVIC_EXCLUSION_REASON,
   TARGET_SIDE,
@@ -43,7 +49,9 @@ import type { F1Decomposition } from "../../decompose/f1";
  * 作らない、ADR-0023 D-γ §DROP 可視化で reason を残す):
  *  - `unit.afterFn === null` (rename / 削除) → `FN_RENAMED_OR_REMOVED`
  *  - `afterFn` / `beforeFn` の本体が BlockStatement でない (arrow `=> expr` 等) → `FN_NON_BLOCK_BODY`
- *  - before / after の param 名リストが一致しない → `FN_PARAM_NAMES_MISMATCH`
+ *  - before / after の param が本質変更 (個数差・pattern type 違い・default 付き等)、または
+ *    rename-only でも rename 先名と body 内 binding が衝突 → `FN_PARAM_NAMES_MISMATCH`
+ *    (rename-only かつ衝突なしのケースは body を identifier-rename して candidate 化、ADR-0023 D-γ §DROP 可視化緩和)
  *  - workload (`f1`) が top-level wrapper でない → `ANGULAR_WRAPPER_SKIP` (pipeline 側で先に弾かれる前提だが防御的に判定)
  */
 export function buildChangedFnCandidate(
@@ -63,15 +71,26 @@ export function buildChangedFnCandidate(
   if (afterBody === null || beforeBody === null) {
     return buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.FN_NON_BLOCK_BODY);
   }
-  const aParams = paramNames(afterFn);
-  if (aParams.join(",") !== paramNames(unit.beforeFn).join(",")) {
+  const paramDiff = classifyParamDiff(unit.beforeFn, afterFn);
+  if (paramDiff.kind === "structural-diff") {
     return buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.FN_PARAM_NAMES_MISMATCH);
   }
+  if (
+    paramDiff.kind === "rename-only" &&
+    hasBindingCollision(beforeBody.body as readonly Statement[], paramDiff.nameMap)
+  ) {
+    return buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.FN_PARAM_NAMES_MISMATCH);
+  }
+  // rename-only は before body の Identifier を after の param 名に rewrite して candidate 化 (semantic 等価、ADR-0023 D-γ §DROP 可視化緩和)。
+  const beforeBodyStatements: readonly Statement[] =
+    paramDiff.kind === "rename-only"
+      ? renameIdentifiersInStatements(beforeBody.body as readonly Statement[], paramDiff.nameMap)
+      : (beforeBody.body as readonly Statement[]);
 
   const holedLib = replaceFunctionBodyWithObserver(libAfterSrc, { start: afterBody.start, end: afterBody.end });
   const preWorkload = statementsToCode([...f1Decomposition.preWorkloadStatements]);
   const setup = [holedLib, preWorkload].filter((s) => s.length > 0).join("\n;\n");
-  const slow = statementsToCode(beforeBody.body as readonly Statement[]);
+  const slow = statementsToCode(beforeBodyStatements);
   const fast = statementsToCode(afterBody.body as readonly Statement[]);
   const workload = wrapObservedWorkload(statementsToCode([...f1Decomposition.f1Body.body]));
 
@@ -191,10 +210,49 @@ if (import.meta.vitest) {
       expect(() => parse(`var _ = ${r.workload!};`)).not.toThrow();
     });
 
-    it("before / after の param 名が違う → FN_PARAM_NAMES_MISMATCH marker (D-γ で緩和検討)", () => {
+    it("before / after で param 名のみ差 (rename-only) → before body を rename して candidate 化 (ADR-0023 D-γ 緩和)", () => {
       const f1d = extractF1(inline)!;
       const before = `var lib = {};\nlib.norm = function (x) { return x % 2 === 0; };`;
-      const after = `var lib = {};\nlib.norm = function (y) { return y & 1 === 0; };`;
+      const after = `var lib = {};\nlib.norm = function (y) { return y % 2 === 0; };`;
+      const unit = fnUnitFor(before, after);
+      const r = buildChangedFnCandidate(unit, after, f1d);
+      expect(r.candidate_excluded).toBeUndefined();
+      // slow には after の param 名 y で書き換えられた body が入り、旧 param 名 x は残らない
+      expect(r.slow).toContain("y % 2 === 0");
+      expect(r.slow).not.toMatch(/\bx\b/);
+      // fast は after body そのまま
+      expect(r.fast).toContain("y % 2 === 0");
+      // setup の $BODY$ は 1 個、substituteBody 後も valid JS
+      expect((r.setup!.match(/\$BODY\$/g) ?? []).length).toBe(1);
+      expect(() => parse(substituteBody(r.setup!, r.slow!))).not.toThrow();
+    });
+
+    it("param 個数差 (本質変更) → FN_PARAM_NAMES_MISMATCH marker", () => {
+      const f1d = extractF1(inline)!;
+      const before = `var lib = {};\nlib.norm = function (x) { return x % 2 === 0; };`;
+      const after = `var lib = {};\nlib.norm = function (x, scale) { return (x * scale) % 2 === 0; };`;
+      const unit = fnUnitFor(before, after);
+      const r = buildChangedFnCandidate(unit, after, f1d);
+      expect(r.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.FN_PARAM_NAMES_MISMATCH);
+      expect(r.setup).toBeUndefined();
+    });
+
+    it("rename 先名が body 内 binding と衝突 → collision guard で FN_PARAM_NAMES_MISMATCH marker", () => {
+      const f1d = extractF1(inline)!;
+      // before fn body 内に const y がある状態で param x → y rewrite すると semantic 衝突
+      const before = `var lib = {};\nlib.norm = function (x) { var y = 2; return x % y === 0; };`;
+      const after = `var lib = {};\nlib.norm = function (y) { var y = 2; return y % y === 0; };`;
+      const unit = fnUnitFor(before, after);
+      const r = buildChangedFnCandidate(unit, after, f1d);
+      expect(r.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.FN_PARAM_NAMES_MISMATCH);
+      expect(r.setup).toBeUndefined();
+    });
+
+    it("AssignmentPattern (default 付き param) は名前が同じでも structural-diff 扱いで marker (default 内 rewrite 回避)", () => {
+      const f1d = extractF1(inline)!;
+      // body にも diff を入れて findChangeUnits が fn unit として捉えるようにする
+      const before = `var lib = {};\nlib.norm = function (x) { return x % 2 === 0; };`;
+      const after = `var lib = {};\nlib.norm = function (x = 0) { return (x + 1) % 2 === 0; };`;
       const unit = fnUnitFor(before, after);
       const r = buildChangedFnCandidate(unit, after, f1d);
       expect(r.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.FN_PARAM_NAMES_MISMATCH);

@@ -1,4 +1,5 @@
-import type { Node } from "@babel/types";
+import { cloneNode, isIdentifier, isRestElement } from "@babel/types";
+import type { Node, Statement } from "@babel/types";
 
 import { tryGenerateNode } from "./parser";
 import { walkNodes } from "./walk";
@@ -48,6 +49,127 @@ export function functionBlockBody(fnNode: Node): { type: string; start: number; 
   const b = (fnNode as unknown as { body?: { type?: string; start?: number; end?: number; body?: Node[] } }).body;
   if (!b || b.type !== "BlockStatement" || typeof b.start !== "number" || typeof b.end !== "number") return null;
   return b as { type: string; start: number; end: number; body: Node[] };
+}
+
+/**
+ * before/after fn の param 列を「rename-only / identical / structural-diff」のいずれかに分類する。
+ *
+ * - 配列長違い / pattern type 違い → `structural-diff`
+ * - 両側 `Identifier` で同名 → no-op (`identical` 維持)
+ * - 両側 `Identifier` で異名 → `nameMap` に `before -> after` を登録 (`rename-only`)
+ * - 両側 `RestElement` で `argument` が両側 Identifier → 同上
+ * - `AssignmentPattern` (default 付き) / `ObjectPattern` / `ArrayPattern` / `TSParameterProperty` 等は `structural-diff`
+ *   (default 内 identifier の意図せぬ rewrite を回避するための保守側、ADR-0023 D-γ §DROP 可視化緩和の MVP)
+ *
+ * `Identifier` の `name` ベース判定で、`typeAnnotation` などの TS 情報は比較しない (parser は TS plugin off)。
+ */
+export type ParamDiffResult =
+  | { readonly kind: "identical" }
+  | { readonly kind: "rename-only"; readonly nameMap: ReadonlyMap<string, string> }
+  | { readonly kind: "structural-diff" };
+
+export function classifyParamDiff(beforeFn: Node, afterFn: Node): ParamDiffResult {
+  const before = (beforeFn as unknown as { params?: readonly Node[] }).params ?? [];
+  const after = (afterFn as unknown as { params?: readonly Node[] }).params ?? [];
+  if (before.length !== after.length) return { kind: "structural-diff" };
+  const nameMap = new Map<string, string>();
+  for (let i = 0; i < before.length; i++) {
+    const b = before[i]!;
+    const a = after[i]!;
+    if (b.type !== a.type) return { kind: "structural-diff" };
+    if (isIdentifier(b) && isIdentifier(a)) {
+      if (b.name !== a.name) nameMap.set(b.name, a.name);
+    } else if (isRestElement(b) && isRestElement(a)) {
+      if (!isIdentifier(b.argument) || !isIdentifier(a.argument)) return { kind: "structural-diff" };
+      if (b.argument.name !== a.argument.name) nameMap.set(b.argument.name, a.argument.name);
+    } else {
+      return { kind: "structural-diff" };
+    }
+  }
+  return nameMap.size === 0 ? { kind: "identical" } : { kind: "rename-only", nameMap };
+}
+
+/**
+ * `body` を deep clone し、`nameMap` (`before -> after`) に従って Identifier の `name` を書き換えた新 Statement 列を返す。
+ * 元 AST は mutation しない。プロパティ名側 Identifier (`MemberExpression.property` の非 computed / `ObjectProperty.key`
+ * `ObjectMethod.key` の非 computed) は変数参照ではないので除外する。scope-aware rewrite ではないので、param と同名の
+ * 局所 binding (`VariableDeclarator.id` / inner fn の `id` / param) との collision は事前に `hasBindingCollision` で
+ * 弾くこと。
+ */
+export function renameIdentifiersInStatements(
+  body: readonly Statement[],
+  nameMap: ReadonlyMap<string, string>,
+): Statement[] {
+  if (nameMap.size === 0) return body.slice();
+  return body.map((stmt) => {
+    const cloned = cloneNode(stmt, true, true);
+    walkNodes(cloned, ({ node, parent, parentKey }) => {
+      if (!isIdentifier(node)) return;
+      if (parent) {
+        if (parent.type === "MemberExpression" && parentKey === "property" && !parent.computed) return;
+        if (
+          (parent.type === "ObjectProperty" || parent.type === "ObjectMethod") &&
+          parentKey === "key" &&
+          !parent.computed
+        ) {
+          return;
+        }
+      }
+      const replacement = nameMap.get(node.name);
+      if (replacement !== undefined) node.name = replacement;
+    });
+    return cloned;
+  });
+}
+
+/**
+ * before body 内に、rename 先名 (`nameMap.values()`) と衝突する binding (`VariableDeclarator.id` /
+ * inner `FunctionDeclaration|FunctionExpression|ArrowFunctionExpression` の id / param) があれば `true`。
+ * scope-aware ではない浅い形 (MVP) — 衝突候補があれば呼び出し側で `FN_PARAM_NAMES_MISMATCH` にデモートする。
+ */
+export function hasBindingCollision(
+  body: readonly Statement[],
+  nameMap: ReadonlyMap<string, string>,
+): boolean {
+  if (nameMap.size === 0) return false;
+  const targets = new Set(nameMap.values());
+  let collided = false;
+  for (const stmt of body) {
+    walkNodes(stmt, ({ node }) => {
+      if (collided) return;
+      if (node.type === "VariableDeclarator") {
+        if (isIdentifier(node.id) && targets.has(node.id.name)) collided = true;
+        return;
+      }
+      if (
+        node.type === "FunctionDeclaration" ||
+        node.type === "FunctionExpression" ||
+        node.type === "ArrowFunctionExpression"
+      ) {
+        if (node.type !== "ArrowFunctionExpression" && node.id && targets.has(node.id.name)) {
+          collided = true;
+          return;
+        }
+        for (const p of node.params) {
+          if (isIdentifier(p) && targets.has(p.name)) {
+            collided = true;
+            return;
+          }
+          if (isRestElement(p) && isIdentifier(p.argument) && targets.has(p.argument.name)) {
+            collided = true;
+            return;
+          }
+          // default 付き param (`function inner(y = 0)`) の left も binding を作るので chase する。
+          if (p.type === "AssignmentPattern" && isIdentifier(p.left) && targets.has(p.left.name)) {
+            collided = true;
+            return;
+          }
+        }
+      }
+    });
+    if (collided) return true;
+  }
+  return false;
 }
 
 /**
@@ -187,6 +309,142 @@ if (import.meta.vitest) {
     it("generate も失敗するような不完全ノードは空文字を返す (defensive)", () => {
       const broken = { type: "NotARealType" } as unknown as Node;
       expect(snippetOfNode(broken, "")).toBe("");
+    });
+  });
+
+  describe("classifyParamDiff (in-source)", () => {
+    it("同名 Identifier param → identical", () => {
+      const a = firstFn("function f(x, y) { return x + y; }");
+      const b = firstFn("function g(x, y) { return x * y; }");
+      const r = classifyParamDiff(a, b);
+      expect(r.kind).toBe("identical");
+    });
+
+    it("Identifier 名のみ差 → rename-only (nameMap に before→after)", () => {
+      const a = firstFn("function f(x) { return x + 1; }");
+      const b = firstFn("function g(y) { return y + 1; }");
+      const r = classifyParamDiff(a, b);
+      expect(r.kind).toBe("rename-only");
+      if (r.kind === "rename-only") {
+        expect(r.nameMap.get("x")).toBe("y");
+        expect(r.nameMap.size).toBe(1);
+      }
+    });
+
+    it("配列長違い → structural-diff", () => {
+      const a = firstFn("function f(x) {}");
+      const b = firstFn("function g(x, scale) {}");
+      expect(classifyParamDiff(a, b).kind).toBe("structural-diff");
+    });
+
+    it("pattern type 違い (Identifier vs RestElement) → structural-diff", () => {
+      const a = firstFn("function f(x) {}");
+      const b = firstFn("function g(...x) {}");
+      expect(classifyParamDiff(a, b).kind).toBe("structural-diff");
+    });
+
+    it("両側 RestElement で argument 名のみ差 → rename-only", () => {
+      const a = firstFn("function f(...args) {}");
+      const b = firstFn("function g(...rest) {}");
+      const r = classifyParamDiff(a, b);
+      expect(r.kind).toBe("rename-only");
+      if (r.kind === "rename-only") expect(r.nameMap.get("args")).toBe("rest");
+    });
+
+    it("AssignmentPattern (default 付き) → structural-diff (default 内 identifier rewrite を回避)", () => {
+      const a = firstFn("function f(x = 1) {}");
+      const b = firstFn("function g(y = 1) {}");
+      expect(classifyParamDiff(a, b).kind).toBe("structural-diff");
+    });
+
+    it("ObjectPattern → structural-diff", () => {
+      const a = firstFn("function f({ x }) {}");
+      const b = firstFn("function g({ y }) {}");
+      expect(classifyParamDiff(a, b).kind).toBe("structural-diff");
+    });
+  });
+
+  describe("renameIdentifiersInStatements (in-source)", () => {
+    const stmtsOf = (src: string): Statement[] => {
+      const fn = firstFn(`function f() { ${src} }`);
+      const body = functionBlockBody(fn);
+      if (!body) throw new Error("no body");
+      return body.body as Statement[];
+    };
+
+    it("variable 参照を nameMap に従って書き換える (clone なので元 AST は不変)", async () => {
+      const { default: generate } = await import("@babel/generator");
+      const original = stmtsOf("return x + 1;");
+      const renamed = renameIdentifiersInStatements(original, new Map([["x", "y"]]));
+      expect(generate(renamed[0]!).code).toContain("y + 1");
+      expect(generate(original[0]!).code).toContain("x + 1");
+    });
+
+    it("MemberExpression のプロパティ名は書き換えない (非 computed)", async () => {
+      const { default: generate } = await import("@babel/generator");
+      const original = stmtsOf("return obj.x;");
+      const renamed = renameIdentifiersInStatements(original, new Map([["x", "y"]]));
+      expect(generate(renamed[0]!).code).toContain("obj.x");
+    });
+
+    it("computed MemberExpression のプロパティは書き換える (式評価される変数参照)", async () => {
+      const { default: generate } = await import("@babel/generator");
+      const original = stmtsOf("return obj[x];");
+      const renamed = renameIdentifiersInStatements(original, new Map([["x", "y"]]));
+      expect(generate(renamed[0]!).code).toContain("obj[y]");
+    });
+
+    it("ObjectProperty / ObjectMethod の key は書き換えない (非 computed、shorthand 経由は書き換える)", async () => {
+      const { default: generate } = await import("@babel/generator");
+      const original = stmtsOf("return { x: x };");
+      const renamed = renameIdentifiersInStatements(original, new Map([["x", "y"]]));
+      const code = generate(renamed[0]!).code;
+      expect(code).toMatch(/x: y/);
+    });
+
+    it("空 nameMap は no-op (新しい配列を返すが内容は同じ)", () => {
+      const original = stmtsOf("return x + 1;");
+      const renamed = renameIdentifiersInStatements(original, new Map());
+      expect(renamed).toHaveLength(original.length);
+    });
+  });
+
+  describe("hasBindingCollision (in-source)", () => {
+    const stmtsOf = (src: string): Statement[] => {
+      const fn = firstFn(`function f() { ${src} }`);
+      const body = functionBlockBody(fn);
+      if (!body) throw new Error("no body");
+      return body.body as Statement[];
+    };
+
+    it("rename 先と同名の VariableDeclarator があれば true", () => {
+      const body = stmtsOf("const y = 1; return x + y;");
+      expect(hasBindingCollision(body, new Map([["x", "y"]]))).toBe(true);
+    });
+
+    it("rename 先と同名の inner FunctionDeclaration があれば true", () => {
+      const body = stmtsOf("function y() {} return y;");
+      expect(hasBindingCollision(body, new Map([["x", "y"]]))).toBe(true);
+    });
+
+    it("rename 先と同名の inner fn param があれば true", () => {
+      const body = stmtsOf("const f = function (y) { return y; }; return f(x);");
+      expect(hasBindingCollision(body, new Map([["x", "y"]]))).toBe(true);
+    });
+
+    it("rename 先と同名の inner fn AssignmentPattern param (default 付き) も collision 扱い", () => {
+      const body = stmtsOf("function inner(y = 0) { return y; } return inner(x);");
+      expect(hasBindingCollision(body, new Map([["x", "y"]]))).toBe(true);
+    });
+
+    it("衝突なし → false", () => {
+      const body = stmtsOf("const z = 1; return x + z;");
+      expect(hasBindingCollision(body, new Map([["x", "y"]]))).toBe(false);
+    });
+
+    it("空 nameMap → false", () => {
+      const body = stmtsOf("const y = 1; return x + y;");
+      expect(hasBindingCollision(body, new Map())).toBe(false);
     });
   });
 }
