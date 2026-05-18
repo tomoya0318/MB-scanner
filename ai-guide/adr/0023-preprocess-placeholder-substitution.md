@@ -120,6 +120,7 @@ await executeSandboxed({ setup: fastSetup, workload, timeout_ms });
 - bootstrap-invocation 中も body は元の場所で走るが、`workload` IIFE 先頭の `__OBS__ = []` reset で bootstrap 中の観測値は捨て、純粋な workload 観測だけを残す (= v1 の bootstrap ガードが不要)
 - 観測 hook を外置きしないので、変更関数の **外側からの参照名** (lib IIFE 内ローカル名 / 外部エイリアス / AMD モジュール内ローカル名 等) のいずれであっても観測が成立する
 - **観測ハーネスは setup 側に inline 化** (D-δ §observation 仕様): pruning 入力 (slow/fast) から観測足場を除き、抽出 pattern を「変更関数の等価性の核」だけに絞る。slow/fast が裸 body になっても、`substituteBody(setup, slow=裸body)` で `$BODY$` (= 観測 IIFE 内側) に差し込まれた最終実行コードは D-β/D-γ と同形
+- **stmt unit (no-fn-unit rescue、順 1-d) は workload-driven の退化形**: 変更対象が関数本体でなく文 (`var VERSION='...'` / `Ember.X = ...;` 等) の場合、observer hook を inline 化する関数本体が存在しないため、setup の hole は裸 `$BODY$` で stmt 全体を置換するのみ (`{ $BODY$ }` の brace なし)、slow/fast も裸 stmt のまま。観測差は workload IIFE の `__OBS__` 完了値だけで取り、reachability で「変更 stmt の binding を読む reachable な named fn がある」と判定済の前提で運用する (`assemble/strategies/changed-stmt.ts`、`workload` 側に依存しない変更は equal verdict として正しく落ちる)
 
 旧契約 (= `workload` フィールドなし、placeholder model でない candidate_kind) は **後方互換**: そのまま既存 executor の (setup, workload) に直接渡る (= 旧 candidate_kind では slow/fast の本体そのものが workload 引数に直接入る)。placeholder 経路との差は呼び出し側 (`changed-fn.ts`) で setup を `substituteBody(setup, slow/fast)` に展開するかどうかだけで、executor 側は無改修。
 

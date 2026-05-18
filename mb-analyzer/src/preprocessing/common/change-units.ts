@@ -112,7 +112,7 @@ function nearestBlockStatement(node: Node, ancestors: readonly Node[]): Node | n
 }
 
 /** 文ノードが定義する binding / property 名 (`var a=1, b=2;` → `["a","b"]` / `X.f = ...;` → `["X.f"]` / `function f(){}` → `["f"]`)。 */
-function statementBindings(stmt: Node): string[] {
+export function statementBindings(stmt: Node): string[] {
   const t = nodeType(stmt);
   if (t === "VariableDeclaration") {
     return (stmt as unknown as { declarations: Array<{ id: Node }> }).declarations

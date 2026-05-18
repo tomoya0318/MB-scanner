@@ -129,6 +129,19 @@ export function isReachedByAnyWorkload(graph: CallGraph, target: string): boolea
   return false;
 }
 
+/**
+ * stmt unit のように複数 binding 名 (`var a = 1, b = 2;` → `["a", "b"]` / `Ember.VERSION = '...'` →
+ * `["Ember.VERSION"]`) が紐付く unit 用。いずれか 1 つでも workload から到達可能なら true (= 安全側 KEEP)。
+ * 空配列なら常に false (= 名指しできない stmt は観測不能、CHANGE_NOT_EXERCISED に落とす)。
+ */
+export function isAnyBindingReachedByWorkload(
+  graph: CallGraph,
+  bindings: readonly string[],
+): boolean {
+  for (const b of bindings) if (isReachedByAnyWorkload(graph, b)) return true;
+  return false;
+}
+
 // 判断: ai-guide/adr/0007-in-source-testing-internal-helpers.md
 if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
@@ -197,6 +210,16 @@ if (import.meta.vitest) {
       expect(callers.has("foo")).toBe(true);
       expect(callers.has("@workload:f1")).toBe(true);
       expect(callers.has("helper")).toBe(false);
+    });
+
+    it("isAnyBindingReachedByWorkload: いずれか reachable → true / 全 unreachable → false / 空 → false", () => {
+      const g = buildCallGraph(lib, [{ name: "f1", body: stmts("api.foo();") }]);
+      // helper は foo -> helper で reachable / unused は到達不能
+      expect(isAnyBindingReachedByWorkload(g, ["unused", "helper"])).toBe(true);
+      expect(isAnyBindingReachedByWorkload(g, ["unused", "bar"])).toBe(false);
+      expect(isAnyBindingReachedByWorkload(g, [])).toBe(false);
+      // member-access 名でも末端で照合 (lastSegment)
+      expect(isAnyBindingReachedByWorkload(g, ["api.foo"])).toBe(true);
     });
   });
 }

@@ -13,10 +13,11 @@ import {
   type SelakovicIssueMeta,
   type WrapperKind,
 } from "../../contracts/preprocessing-contracts";
-import { findChangeUnits, type FnChangeUnit } from "../common/change-units";
-import { buildCallGraph, isReachedByAnyWorkload } from "../common/reachability";
+import { findChangeUnits, type FnChangeUnit, type StmtChangeUnit } from "../common/change-units";
+import { buildCallGraph, isAnyBindingReachedByWorkload, isReachedByAnyWorkload } from "../common/reachability";
 import { buildChangedFnCandidate, buildExcludedChangedFnCandidate } from "./assemble/strategies/changed-fn";
-import { extractFromScripts, extractFromServerFiles, type FallbackResult } from "./assemble/strategies/raw-stmt";
+import { buildChangedStmtCandidate } from "./assemble/strategies/changed-stmt";
+import { extractFromScripts, extractFromServerFiles, type FallbackResult } from "./assemble/strategies/fallback";
 import {
   buildClientBodyCandidate,
   buildClientCombinedCandidate,
@@ -101,7 +102,7 @@ function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "clie
   if (aspect === ASPECT.LIB) {
     // embedded (#0、target_side=lib) + workload が exercise する変更関数ごとに changed-fn 候補 (#1+、target_side=lib)
     candidates = [buildClientLibCandidate(f1Before, libSourceBefore, libSourceAfter, TARGET_SIDE.LIB)];
-    appendChangedFnCandidates(candidates, libSourceBefore, libSourceAfter, f1Before);
+    appendChangeUnitCandidates(candidates, libSourceBefore, libSourceAfter, f1Before);
   } else if (aspect === ASPECT.WORKLOAD) {
     candidates = [buildClientBodyCandidate(f1Before, f1After, libSourceBefore, libNeededInSetup, TARGET_SIDE.WORKLOAD)];
   } else {
@@ -111,7 +112,7 @@ function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "clie
         buildClientLibCandidate(f1Before, libSourceBefore, libSourceAfter, TARGET_SIDE.LIB),
         buildClientBodyCandidate(f1Before, f1After, libSourceBefore, libNeededInSetup, TARGET_SIDE.WORKLOAD),
       ];
-      appendChangedFnCandidates(candidates, libSourceBefore, libSourceAfter, f1Before);
+      appendChangeUnitCandidates(candidates, libSourceBefore, libSourceAfter, f1Before);
     } else {
       candidates = [buildClientCombinedCandidate(f1Before, f1After, libSourceBefore, libSourceAfter)];
     }
@@ -147,13 +148,15 @@ function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "clie
 
 /**
  * `aspect: lib` (および `aspect: lib+workload` 独立判定の lib 側) について、`<lib>_*.js` の変更を unit に切り分け
- * (`findChangeUnits`)、workload (`f1`) が (推移的に) exercise する fn unit ごとに changed-fn candidate を `candidates`
- * の末尾に push する。各 fn unit について真の candidate を作れない場合は `candidate_excluded` marker
- * (`buildExcludedChangedFnCandidate(reason)`) として push し、痕跡を残す (setup/slow/fast は持たない、
- * ADR-0022 §計装 / ADR-0023 D-γ §DROP 可視化)。早期 return (= lib 全体の DROP) も issue ごとに 1 件 marker。
- * 等価検証本体は embedded `#0` がカバーする。angular controller wrapper の f1 は D-β では skip (D-γ で対応検討)。
+ * (`findChangeUnits`)、workload (`f1`) が (推移的に) exercise する変更 unit ごとに candidate を `candidates`
+ * の末尾に push する (fn unit / stmt unit の両方を扱うので関数名は `ChangeUnit` 単位、順 1-d で responsibility
+ * 拡大)。fn unit は changed-fn strategy (`buildChangedFnCandidate`)、stmt unit は changed-stmt strategy
+ * (`buildChangedStmtCandidate`、ADR-0023 §observation 仕様 の workload-driven 退化形) で組む。真の candidate を
+ * 作れない unit は `candidate_excluded` marker として push し、痕跡を残す (setup/slow/fast は持たない、ADR-0022
+ * §計装 / ADR-0023 D-γ §DROP 可視化)。早期 return (= lib 全体の DROP) も issue ごとに 1 件 marker。等価検証
+ * 本体は embedded `#0` がカバーする。angular controller wrapper の f1 は D-β では skip (D-γ で対応検討)。
  */
-function appendChangedFnCandidates(
+function appendChangeUnitCandidates(
   candidates: PreprocessingCandidate[],
   libSourceBefore: string,
   libSourceAfter: string,
@@ -180,9 +183,13 @@ function appendChangedFnCandidates(
     return;
   }
   // afterFn=null (rename / 削除) も含めて fn unit を可視化対象にする (ADR-0023 D-γ §DROP 可視化、
-  // FN_RENAMED_OR_REMOVED reason を builder 内で marker 化)。
+  // FN_RENAMED_OR_REMOVED reason を builder 内で marker 化)。stmt unit も changed-stmt strategy で 1st-class
+  // candidate に格上げ (no-fn-unit rescue、phase3 順 1-d): モジュール本体 / 匿名 IIFE 本体直下の変更
+  // (`var VERSION = '...'` 等) を、reachable な named fn から読まれるなら workload-driven observation で
+  // 等価検証に乗せる。
   const fnUnits = cu.units.filter((u): u is FnChangeUnit => u.kind === "fn");
-  if (fnUnits.length === 0) {
+  const stmtUnits = cu.units.filter((u): u is StmtChangeUnit => u.kind === "stmt");
+  if (fnUnits.length === 0 && stmtUnits.length === 0) {
     candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.NO_FN_UNIT));
     return;
   }
@@ -194,6 +201,20 @@ function appendChangedFnCandidates(
       continue;
     }
     candidates.push(buildChangedFnCandidate(u, libSourceAfter, f1Before));
+  }
+  for (const u of stmtUnits) {
+    // 名指しできない stmt (`if`/`for` 等の制御構文 top-level、bindings=[]) は workload-reachability で
+    // 判定不能なので NO_FN_UNIT marker で先弾く (CHANGE_NOT_EXERCISED は「判定したが到達不能」を意味する
+    // ので、判定不能と区別する)。
+    if (u.bindings.length === 0) {
+      candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.NO_FN_UNIT));
+      continue;
+    }
+    if (!isAnyBindingReachedByWorkload(graph, u.bindings)) {
+      candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED));
+      continue;
+    }
+    candidates.push(buildChangedStmtCandidate(u, libSourceBefore, libSourceAfter, f1Before));
   }
 }
 
@@ -314,4 +335,54 @@ function safeCount(source: string): number {
   } catch {
     return 0;
   }
+}
+
+// 判断: ai-guide/adr/0007-in-source-testing-internal-helpers.md
+if (import.meta.vitest) {
+  const { describe, it, expect } = import.meta.vitest;
+  // 観点: appendChangeUnitCandidates の routing (順 1-d で stmt unit を 1st-class 化したパス)。
+  // preprocess() を直接呼んで、fn+stmt 混在 / stmt unreachable / 空 bindings の 3 分岐を確認する。
+
+  const inlineCallingBothFooBar = `var f1 = function () { lib.foo(); lib.bar(); };\nvar a = execute(f1, 10);`;
+  const inlineCallingFoo = `var f1 = function () { lib.foo(); };\nvar a = execute(f1, 10);`;
+
+  const clientInput = (libBefore: string, libAfter: string, inline: string) => ({
+    kind: "client" as const,
+    before_inline: inline,
+    after_inline: inline,
+    lib_before_files: { "lib.js": libBefore },
+    lib_after_files: { "lib.js": libAfter },
+    lib_kind: "file" as const,
+    lib_referenced_by_workload: true,
+  });
+
+  describe("appendChangeUnitCandidates routing (in-source)", () => {
+    it("fn unit + stmt unit 混在 → fn は changed-fn、stmt は changed-stmt で両方候補化", () => {
+      // VERSION 変更 (stmt unit) + lib.bar body 変更 (fn unit)。lib.foo は VERSION を読むので
+      // VERSION reachable。lib.bar は workload が直接呼ぶので reachable。
+      const libBefore = `var VERSION = '1.0';\nvar lib = {};\nlib.foo = function () { return VERSION; };\nlib.bar = function () { return 1; };`;
+      const libAfter = `var VERSION = '2.0';\nvar lib = {};\nlib.foo = function () { return VERSION; };\nlib.bar = function () { return 2; };`;
+      const r = preprocess(clientInput(libBefore, libAfter, inlineCallingBothFooBar));
+      const real = r.candidates.filter((c) => c.candidate_excluded === undefined && c.candidate_meta.is_workload_reachable);
+      // embedded #0 を除いた is_workload_reachable=true な候補が 2 件 (stmt + fn) 出る
+      expect(real.length).toBe(2);
+    });
+
+    it("stmt unit が unreachable → CHANGE_NOT_EXERCISED marker", () => {
+      // UNUSED は誰も読まない binding。reachability で false に落ちる。
+      const libBefore = `var UNUSED = '1.0';\nvar lib = {};\nlib.foo = function () { return 'ok'; };`;
+      const libAfter = `var UNUSED = '2.0';\nvar lib = {};\nlib.foo = function () { return 'ok'; };`;
+      const r = preprocess(clientInput(libBefore, libAfter, inlineCallingFoo));
+      expect(r.candidates.some((c) => c.candidate_excluded === SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED)).toBe(true);
+    });
+
+    it("名指しできない stmt (bindings=[]) → NO_FN_UNIT marker (CHANGE_NOT_EXERCISED とは区別)", () => {
+      // console.log は ExpressionStatement かつ CallExpression で AssignmentExpression でない →
+      // statementBindings が [] を返す。pipeline 側で先弾きされ NO_FN_UNIT に落ちる。
+      const libBefore = `var lib = {};\nlib.foo = function () { return 1; };\nconsole.log('start');`;
+      const libAfter = `var lib = {};\nlib.foo = function () { return 1; };\nconsole.log('end');`;
+      const r = preprocess(clientInput(libBefore, libAfter, inlineCallingFoo));
+      expect(r.candidates.some((c) => c.candidate_excluded === SELAKOVIC_EXCLUSION_REASON.NO_FN_UNIT)).toBe(true);
+    });
+  });
 }

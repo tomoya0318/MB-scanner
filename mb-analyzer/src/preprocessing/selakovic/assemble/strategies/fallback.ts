@@ -27,7 +27,10 @@ import { statementToCode, statementsToCode } from "../../../common/setup-cleanup
  *
  * adapter_meta:
  *  - target_side = both (fallback は lib/workload 両方の patch を含みうる top-level diff、ADR-0024 §D-2)
- *  - is_workload_reachable = false (changed-fn 抽出経路ではない)
+ *  - is_workload_reachable = false (changed-fn / changed-stmt 抽出経路ではない)
+ *
+ * fn unit / stmt unit を切り分けて 1st-class candidate を組む経路は `changed-fn.ts` / `changed-stmt.ts` 参照
+ * (順 1-d で 2 軸に整理)。
  */
 
 /** 抽出失敗時の戻り値: `(candidates, issueExcluded)` のペア。 */
