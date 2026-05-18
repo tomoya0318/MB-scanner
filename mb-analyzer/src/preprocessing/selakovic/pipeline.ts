@@ -120,7 +120,8 @@ function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "clie
   // CDN 依存 lib (jquery/handlebars/underscore) を各候補の setup 先頭に連結。
   const depPrefix = (input.dep_lib_sources ?? []).join("\n;\n");
   const finalized = candidates.map((c) => {
-    // excluded marker (change-not-exercised) は setup/node count を持たない: dep 連結も node count 上書きも skip。
+    // excluded marker (= candidate_excluded を持つ) は setup/node count を持たない (ADR-0023 D-γ §DROP 可視化):
+    // reason に依らず dep 連結も node count 上書きも skip する。
     if (c.candidate_excluded !== undefined) return c;
     const base =
       depPrefix.length > 0 && typeof c.setup === "string"

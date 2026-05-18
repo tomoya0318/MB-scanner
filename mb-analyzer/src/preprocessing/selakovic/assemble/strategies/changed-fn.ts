@@ -91,7 +91,10 @@ export function buildChangedFnCandidate(
  * changed-fn 経路の excluded marker (ADR-0022 §計装 / ADR-0024 §candidate_excluded / ADR-0023 D-γ §DROP 可視化)。
  * setup/slow/fast を持たず、`candidate_excluded` に reason を立てた candidate を返す。痕跡が extracted.jsonl に
  * 残り、`funnel.py` / `inspect_candidates.py` で reason 別件数を集計できる。
- * `is_workload_reachable` は workload 到達性そのものを反映するので `CHANGE_NOT_EXERCISED` の場合のみ false。
+ * `is_workload_reachable` は excluded marker では常に `false` で固定 — `CHANGE_NOT_EXERCISED` 以外の reason
+ * (例: `FN_RENAMED_OR_REMOVED`) では本来 workload 到達済の unit を含むが、「真の candidate のみ true」と
+ * いう規約で `build_equiv_input.py:is_small_candidate` / 集計ロジックを単純化するための便宜的扱い。
+ * reason 別の意味は `candidate_excluded` 自体を参照すること。
  */
 export function buildExcludedChangedFnCandidate(
   reason: SelakovicExclusionReason,
@@ -239,6 +242,28 @@ lib.norm = function (x) {
       const c2 = buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.FN_PARAM_NAMES_MISMATCH);
       expect(c2.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.FN_PARAM_NAMES_MISMATCH);
       expect(c2.setup).toBeUndefined();
+    });
+
+    it("afterFn === null (rename / 削除) → FN_RENAMED_OR_REMOVED marker", () => {
+      const f1d = extractF1(inline)!;
+      const baseUnit = fnUnitFor(libBefore, libAfter);
+      const renamedUnit: FnChangeUnit = { ...baseUnit, afterFn: null, afterFnAncestors: [] };
+      const r = buildChangedFnCandidate(renamedUnit, libAfter, f1d);
+      expect(r.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.FN_RENAMED_OR_REMOVED);
+      expect(r.setup).toBeUndefined();
+    });
+
+    it("arrow body (=> expr) → FN_NON_BLOCK_BODY marker", () => {
+      const f1d = extractF1(inline)!;
+      const baseUnit = fnUnitFor(libBefore, libAfter);
+      // ArrowFunctionExpression body=Expression (BlockStatement でない) の after を組む
+      const arrowAst = parse("(x => x * 2);");
+      const exprStmt = arrowAst.program.body[0] as { expression: Node };
+      const arrowFn = exprStmt.expression;
+      const arrowUnit: FnChangeUnit = { ...baseUnit, afterFn: arrowFn };
+      const r = buildChangedFnCandidate(arrowUnit, libAfter, f1d);
+      expect(r.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.FN_NON_BLOCK_BODY);
+      expect(r.setup).toBeUndefined();
     });
 
     it("angular controller wrapper の f1 → ANGULAR_WRAPPER_SKIP marker (D-β では top-level のみ)", () => {
