@@ -57,18 +57,37 @@ describe("EXCLUSION_REASON_BASE", () => {
 });
 
 describe("SELAKOVIC_EXCLUSION_REASON", () => {
-  it("Python 側 SelakovicExclusionReason StrEnum と同じ文字列値を持つ", () => {
+  it("Python 側 SelakovicExclusionReason StrEnum と同じ文字列値を持つ (ADR-0023 D-γ §DROP 可視化で 4 → 12 値に拡張)", () => {
     expect(SELAKOVIC_EXCLUSION_REASON).toStrictEqual({
       MODULE_WIDE_CHANGE: "module-wide-change",
       NO_ENCLOSURE_CANDIDATE: "no-enclosure-candidate",
       LAYOUT_UNKNOWN: "layout-unknown",
       CHANGE_NOT_EXERCISED: "change-not-exercised",
+      NO_LIB_SOURCE: "no-lib-source",
+      ANGULAR_WRAPPER_SKIP: "angular-wrapper-skip",
+      CHANGE_UNITS_PARSE_FAIL: "change-units-parse-fail",
+      EMPTY_DIFF: "empty-diff",
+      NO_FN_UNIT: "no-fn-unit",
+      FN_RENAMED_OR_REMOVED: "fn-renamed-or-removed",
+      FN_NON_BLOCK_BODY: "fn-non-block-body",
+      FN_PARAM_NAMES_MISMATCH: "fn-param-names-mismatch",
     });
   });
 
-  it("SelakovicExclusionReason 型が 4 値の union", () => {
+  it("SelakovicExclusionReason 型が 12 値の union", () => {
     expectTypeOf<SelakovicExclusionReason>().toEqualTypeOf<
-      "module-wide-change" | "no-enclosure-candidate" | "layout-unknown" | "change-not-exercised"
+      | "module-wide-change"
+      | "no-enclosure-candidate"
+      | "layout-unknown"
+      | "change-not-exercised"
+      | "no-lib-source"
+      | "angular-wrapper-skip"
+      | "change-units-parse-fail"
+      | "empty-diff"
+      | "no-fn-unit"
+      | "fn-renamed-or-removed"
+      | "fn-non-block-body"
+      | "fn-param-names-mismatch"
     >();
   });
 

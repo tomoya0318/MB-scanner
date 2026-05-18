@@ -1,19 +1,20 @@
 import type { Node, Statement } from "@babel/types";
 
-import { countNodes, functionBlockBody, paramNames } from "../../../ast/inspect";
+import { countNodes, functionBlockBody, paramNames } from "../../../../ast/inspect";
 import {
   SELAKOVIC_EXCLUSION_REASON,
   TARGET_SIDE,
   type PreprocessingCandidate,
-} from "../../../contracts/preprocessing-contracts";
-import type { FnChangeUnit } from "../../common/change-units";
+  type SelakovicExclusionReason,
+} from "../../../../contracts/preprocessing-contracts";
+import type { FnChangeUnit } from "../../../common/change-units";
 import {
   replaceFunctionBody,
   wrapBodyObserved,
   wrapObservedWorkload,
-} from "../../../codegen/placeholder";
-import { statementsToCode } from "../../common/setup-cleanup";
-import type { F1Decomposition } from "../decompose/f1";
+} from "../../../../codegen/placeholder";
+import { statementsToCode } from "../../../common/setup-cleanup";
+import type { F1Decomposition } from "../../decompose/f1";
 
 /**
  * `aspect: lib` の changed-fn candidate を組む (ADR-0023 §4 値契約、placeholder substitution model)。
@@ -37,25 +38,34 @@ import type { F1Decomposition } from "../decompose/f1";
  *  - target_side = lib (変更関数は lib 側、ADR-0024)
  *  - is_workload_reachable = true (workload 到達性で抽出された変更関数)
  *
- * 次のケースは `null` を返す (= この unit からは candidate を作らない、embedded `#0` がカバー):
- *  - `unit.afterFn === null` (rename / 削除)
- *  - `afterFn` / `beforeFn` の本体が BlockStatement でない (arrow `=> expr` 等)
- *  - before / after の param 名リストが一致しない (D-γ で緩和検討)
- *  - workload (`f1`) が top-level wrapper でない (Angular controller wrapper は D-β では skip)
+ * 次のケースは `buildExcludedChangedFnCandidate(reason)` を返す (= この unit からは真の candidate を
+ * 作らない、ADR-0023 D-γ §DROP 可視化で reason を残す):
+ *  - `unit.afterFn === null` (rename / 削除) → `FN_RENAMED_OR_REMOVED`
+ *  - `afterFn` / `beforeFn` の本体が BlockStatement でない (arrow `=> expr` 等) → `FN_NON_BLOCK_BODY`
+ *  - before / after の param 名リストが一致しない → `FN_PARAM_NAMES_MISMATCH`
+ *  - workload (`f1`) が top-level wrapper でない → `ANGULAR_WRAPPER_SKIP` (pipeline 側で先に弾かれる前提だが防御的に判定)
  */
 export function buildChangedFnCandidate(
   unit: FnChangeUnit,
   libAfterSrc: string,
   f1Decomposition: F1Decomposition,
-): PreprocessingCandidate | null {
-  if (f1Decomposition.wrapperKind !== "top-level") return null;
+): PreprocessingCandidate {
+  if (f1Decomposition.wrapperKind !== "top-level") {
+    return buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.ANGULAR_WRAPPER_SKIP);
+  }
   const afterFn = unit.afterFn;
-  if (afterFn === null) return null;
+  if (afterFn === null) {
+    return buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.FN_RENAMED_OR_REMOVED);
+  }
   const afterBody = functionBlockBody(afterFn);
   const beforeBody = functionBlockBody(unit.beforeFn);
-  if (afterBody === null || beforeBody === null) return null;
+  if (afterBody === null || beforeBody === null) {
+    return buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.FN_NON_BLOCK_BODY);
+  }
   const aParams = paramNames(afterFn);
-  if (aParams.join(",") !== paramNames(unit.beforeFn).join(",")) return null;
+  if (aParams.join(",") !== paramNames(unit.beforeFn).join(",")) {
+    return buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.FN_PARAM_NAMES_MISMATCH);
+  }
 
   const holedLib = replaceFunctionBody(libAfterSrc, { start: afterBody.start, end: afterBody.end });
   const preWorkload = statementsToCode([...f1Decomposition.preWorkloadStatements]);
@@ -78,13 +88,19 @@ export function buildChangedFnCandidate(
 }
 
 /**
- * workload-unreachable な fn unit を表す excluded marker (ADR-0022 §計装 / ADR-0024 §candidate_excluded)。
- * setup/slow/fast を持たず、`candidate_excluded` のみ立てた candidate を返す。痕跡が extracted.jsonl に残り、
- * `inspect_candidates.py` で「lib に変更があったが workload が呼ばなかった関数」の件数を集計できる。
+ * changed-fn 経路の excluded marker (ADR-0022 §計装 / ADR-0024 §candidate_excluded / ADR-0023 D-γ §DROP 可視化)。
+ * setup/slow/fast を持たず、`candidate_excluded` に reason を立てた candidate を返す。痕跡が extracted.jsonl に
+ * 残り、`funnel.py` / `inspect_candidates.py` で reason 別件数を集計できる。
+ * `is_workload_reachable` は excluded marker では常に `false` で固定 — `CHANGE_NOT_EXERCISED` 以外の reason
+ * (例: `FN_RENAMED_OR_REMOVED`) では本来 workload 到達済の unit を含むが、「真の candidate のみ true」と
+ * いう規約で `build_equiv_input.py:is_small_candidate` / 集計ロジックを単純化するための便宜的扱い。
+ * reason 別の意味は `candidate_excluded` 自体を参照すること。
  */
-export function buildExcludedChangedFnCandidate(): PreprocessingCandidate {
+export function buildExcludedChangedFnCandidate(
+  reason: SelakovicExclusionReason,
+): PreprocessingCandidate {
   return {
-    candidate_excluded: SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED,
+    candidate_excluded: reason,
     candidate_meta: {
       adapter: "selakovic",
       target_side: TARGET_SIDE.LIB,
@@ -96,14 +112,14 @@ export function buildExcludedChangedFnCandidate(): PreprocessingCandidate {
 // 判断: ai-guide/adr/0007-in-source-testing-internal-helpers.md
 if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
-  const { findChangeUnits } = await import("../../common/change-units");
-  const { extractF1 } = await import("../decompose/f1");
-  const { parse } = await import("../../../ast/parser");
-  const { substituteBody } = await import("../../../codegen/placeholder");
+  const { findChangeUnits } = await import("../../../common/change-units");
+  const { extractF1 } = await import("../../decompose/f1");
+  const { parse } = await import("../../../../ast/parser");
+  const { substituteBody } = await import("../../../../codegen/placeholder");
   // 観点: workload が呼ぶ変更関数の fn unit から changed-fn candidate を組む (placeholder substitution model)。
   // setup に lib 全文 (変更関数の body を $BODY$ 1 個で穴あき)、slow/fast に変更前/後 body を観測ラッパで包んだ
   // statement 列の断片、workload に f1 body を IIFE で包んだ完了値返却形式。
-  // param 不一致 / arrow body / angular wrapper は null。
+  // param 不一致 / arrow body / angular wrapper は excluded marker (ADR-0023 D-γ §DROP 可視化)。
 
   const inline = `var f1 = function () { lib.norm(7); lib.norm(8); };\nvar a = execute(f1, 10);`;
   const libBefore = `var slice = [].slice;\nvar lib = {};\nlib.norm = function (x) { return slice.call([x]).length % 2 === 0; };`;
@@ -120,9 +136,8 @@ if (import.meta.vitest) {
     it("workload が呼ぶ変更関数 → setup に $BODY$ 1 個入り穴あき lib / slow・fast に観測ラッパ / workload に IIFE", () => {
       const f1d = extractF1(inline)!;
       const unit = fnUnitFor(libBefore, libAfter);
-      const c = buildChangedFnCandidate(unit, libAfter, f1d);
-      expect(c).not.toBeNull();
-      const r = c!;
+      const r = buildChangedFnCandidate(unit, libAfter, f1d);
+      expect(r.candidate_excluded).toBeUndefined();
       expect(r.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
       expect(r.candidate_meta.is_workload_reachable).toBe(true);
       expect(r.enclosure_node_type).toBe("FunctionExpression"); // lib.norm = function(){...}
@@ -169,12 +184,14 @@ if (import.meta.vitest) {
       expect(() => parse(`var _ = ${r.workload!};`)).not.toThrow();
     });
 
-    it("before / after の param 名が違う → null (D-γ で緩和検討)", () => {
+    it("before / after の param 名が違う → FN_PARAM_NAMES_MISMATCH marker (D-γ で緩和検討)", () => {
       const f1d = extractF1(inline)!;
       const before = `var lib = {};\nlib.norm = function (x) { return x % 2 === 0; };`;
       const after = `var lib = {};\nlib.norm = function (y) { return y & 1 === 0; };`;
       const unit = fnUnitFor(before, after);
-      expect(buildChangedFnCandidate(unit, after, f1d)).toBeNull();
+      const r = buildChangedFnCandidate(unit, after, f1d);
+      expect(r.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.FN_PARAM_NAMES_MISMATCH);
+      expect(r.setup).toBeUndefined();
     });
 
     it("変更関数本体の leading / trailing コメントは slow/fast から落ちる ($BODY$ には setup 側の文字列が残る)", () => {
@@ -195,8 +212,8 @@ lib.norm = function (x) {
 `;
       const f1d = extractF1(inline)!;
       const unit = fnUnitFor(libBeforeWithComments, libAfterWithComments);
-      const c = buildChangedFnCandidate(unit, libAfterWithComments, f1d)!;
-      expect(c).not.toBeNull();
+      const c = buildChangedFnCandidate(unit, libAfterWithComments, f1d);
+      expect(c.candidate_excluded).toBeUndefined();
       // slow / fast は statementsToCode (comments:false) なので元コメントは落ちる
       expect(c.slow).not.toContain("before: ascii-rule");
       expect(c.slow).not.toContain("trailing line");
@@ -208,9 +225,9 @@ lib.norm = function (x) {
       expect(c.setup).not.toContain("after: bit-shift");
     });
 
-    it("buildExcludedChangedFnCandidate: candidate_excluded のみ立つ marker (setup/slow/fast/workload は undefined)", () => {
-      const c = buildExcludedChangedFnCandidate();
-      expect(c.candidate_excluded).toBe("change-not-exercised");
+    it("buildExcludedChangedFnCandidate: reason 引数を candidate_excluded に伝搬 (setup/slow/fast/workload は undefined)", () => {
+      const c = buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED);
+      expect(c.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED);
       expect(c.candidate_meta.adapter).toBe("selakovic");
       expect(c.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
       expect(c.candidate_meta.is_workload_reachable).toBe(false);
@@ -220,9 +237,36 @@ lib.norm = function (x) {
       expect(c.workload).toBeUndefined();
       expect(c.before_node_count).toBeUndefined();
       expect(c.after_node_count).toBeUndefined();
+
+      // 別 reason も同形 (ADR-0023 D-γ §DROP 可視化、reason を変えても shape 不変)
+      const c2 = buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.FN_PARAM_NAMES_MISMATCH);
+      expect(c2.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.FN_PARAM_NAMES_MISMATCH);
+      expect(c2.setup).toBeUndefined();
     });
 
-    it("angular controller wrapper の f1 → null (D-β では top-level のみ)", () => {
+    it("afterFn === null (rename / 削除) → FN_RENAMED_OR_REMOVED marker", () => {
+      const f1d = extractF1(inline)!;
+      const baseUnit = fnUnitFor(libBefore, libAfter);
+      const renamedUnit: FnChangeUnit = { ...baseUnit, afterFn: null, afterFnAncestors: [] };
+      const r = buildChangedFnCandidate(renamedUnit, libAfter, f1d);
+      expect(r.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.FN_RENAMED_OR_REMOVED);
+      expect(r.setup).toBeUndefined();
+    });
+
+    it("arrow body (=> expr) → FN_NON_BLOCK_BODY marker", () => {
+      const f1d = extractF1(inline)!;
+      const baseUnit = fnUnitFor(libBefore, libAfter);
+      // ArrowFunctionExpression body=Expression (BlockStatement でない) の after を組む
+      const arrowAst = parse("(x => x * 2);");
+      const exprStmt = arrowAst.program.body[0] as { expression: Node };
+      const arrowFn = exprStmt.expression;
+      const arrowUnit: FnChangeUnit = { ...baseUnit, afterFn: arrowFn };
+      const r = buildChangedFnCandidate(arrowUnit, libAfter, f1d);
+      expect(r.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.FN_NON_BLOCK_BODY);
+      expect(r.setup).toBeUndefined();
+    });
+
+    it("angular controller wrapper の f1 → ANGULAR_WRAPPER_SKIP marker (D-β では top-level のみ)", () => {
       const angularInline = `
         var app = angular.module("benchApp", []);
         app.controller("BenchCtrl", function ($scope) { lib.norm(1); });
@@ -230,7 +274,8 @@ lib.norm = function (x) {
       const f1d = extractF1(angularInline);
       if (f1d && f1d.wrapperKind !== "top-level") {
         const unit = fnUnitFor(libBefore, libAfter);
-        expect(buildChangedFnCandidate(unit, libAfter, f1d)).toBeNull();
+        const r = buildChangedFnCandidate(unit, libAfter, f1d);
+        expect(r.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.ANGULAR_WRAPPER_SKIP);
       }
     });
   });

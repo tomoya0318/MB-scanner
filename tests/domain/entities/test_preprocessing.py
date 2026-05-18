@@ -40,6 +40,14 @@ class TestEnums:
             "no-enclosure-candidate",
             "layout-unknown",
             "change-not-exercised",
+            "no-lib-source",
+            "angular-wrapper-skip",
+            "change-units-parse-fail",
+            "empty-diff",
+            "no-fn-unit",
+            "fn-renamed-or-removed",
+            "fn-non-block-body",
+            "fn-param-names-mismatch",
         }
 
     def test_aspect_values(self) -> None:

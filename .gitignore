@@ -43,3 +43,7 @@ mb-analyzer/coverage/
 .mise/
 .cmux-surface
 research/src/research/*/inputs/
+
+# research 配下の実走 artifact (extracted/equiv-input/equiv-results/prune-* など) は
+# 中間生成物なので git に含めない (= preprocess-batch / equiv-batch / prune-batch の出力)
+research/research/preprocess_workload_reachability/code/*.jsonl
