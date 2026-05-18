@@ -95,7 +95,7 @@ describe("preprocess — client / top-level f1", () => {
     expect(excluded.after_node_count).toBeUndefined();
   });
 
-  it("作用点 lib: f1 が変更 lib 関数を呼ぶ → embedded #0 + changed-fn #1 (4 値契約: setup に $BODY$ / slow・fast に観測ラッパ / workload に IIFE)", () => {
+  it("作用点 lib: f1 が変更 lib 関数を呼ぶ → embedded #0 + changed-fn #1 (4 値契約: setup に観測ハーネス + $BODY$ / slow・fast は裸 body / workload に IIFE)", () => {
     const libBefore = "var slice = [].slice;\nvar lib = {};\nlib.norm = function (x) { return slice.call([x]).length % 2 === 0; };\nlib.unused = function () { return 0; };";
     const libAfter = "var slice = [].slice;\nvar lib = {};\nlib.norm = function (x) { return slice.call([x]).length & 1 === 0; };\nlib.unused = function () { return 0; };";
     const inlineCallsLib = `
@@ -124,27 +124,32 @@ describe("preprocess — client / top-level f1", () => {
     const cf = result.candidates[1]!;
     expect(cf.enclosure_node_type).toBe("FunctionExpression"); // lib.norm = function(){...}
 
-    // setup = lib 全文 (norm body のみ $BODY$ 1 個で穴あき) + preWorkload (空)
+    // setup = lib 全文 (norm body の位置に観測ハーネス + $BODY$ 1 個入り) + preWorkload (空)
     expect(cf.setup).toContain("var slice = [].slice;");
     expect(cf.setup).toContain("var lib = {};");
     expect(cf.setup).toContain("$BODY$");
     expect((cf.setup!.match(/\$BODY\$/g) ?? []).length).toBe(1);
     expect(cf.setup).toContain("lib.unused"); // 変更外の関数は原形のまま残る
+    // 観測ハーネスが setup 側に inline 化されている (ADR-0023 D-δ)
+    expect(cf.setup).toContain("let __OBS_R__");
+    expect(cf.setup).toContain("__OBS__.push");
+    expect(cf.setup).toContain("return __OBS_R__;");
+    expect(cf.setup).not.toContain("globalThis.__OBS"); // 単独参照 (top-level let __OBS__ を closure 経由)
     // v1 残骸が消えていること
     expect(cf.setup).not.toContain("globalThis.__HOLE__");
     expect(cf.setup).not.toContain("& 1 === 0"); // body は $BODY$ で穴あき、after 本体は残らない
 
-    // slow: 変更前 body (% 2 === 0) を __OBS__ で観測する形 (body 断片、lib 宣言は含まない)
+    // slow: 変更前 body (% 2 === 0) の裸 statement 列 (= 観測ハーネス無し、lib 宣言も含まない)
     expect(cf.slow).toContain("% 2 === 0");
-    expect(cf.slow).toContain("let __OBS_R__");
-    expect(cf.slow).toContain("__OBS__.push");
-    expect(cf.slow).not.toContain("globalThis.__OBS"); // 単独参照 (top-level let __OBS__ を closure 経由)
+    expect(cf.slow).not.toContain("__OBS_R__"); // 観測ハーネスは setup 側に移動
+    expect(cf.slow).not.toContain("__OBS__.push");
     expect(cf.slow).not.toContain("var lib = {};");
     expect(cf.slow).not.toContain("lib.norm(i);"); // workload 呼び出しは workload 側に移動
 
-    // fast: 変更後 body (& 1 === 0)
+    // fast: 変更後 body (& 1 === 0) の裸 statement 列
     expect(cf.fast).toContain("& 1 === 0");
-    expect(cf.fast).toContain("let __OBS_R__");
+    expect(cf.fast).not.toContain("__OBS_R__");
+    expect(cf.fast).not.toContain("__OBS__.push");
 
     // workload: __OBS__ を init → workload 呼び出し列 → JSON.stringify(__OBS__) を完了値で返す IIFE
     expect(cf.workload).toContain("(function () {");

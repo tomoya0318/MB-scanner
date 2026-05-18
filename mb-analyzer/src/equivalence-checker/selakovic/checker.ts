@@ -193,9 +193,10 @@ if (import.meta.vitest) {
         });
       try {
         await checkEquivalence({
-          setup: "var f = function (x) { $BODY$ };",
-          slow: "let __OBS_R__ = (function () { return x + 1; }).call(this);\n__OBS__.push(JSON.stringify(__OBS_R__));\nreturn __OBS_R__;",
-          fast: "let __OBS_R__ = (function () { return x + 2; }).call(this);\n__OBS__.push(JSON.stringify(__OBS_R__));\nreturn __OBS_R__;",
+          // ADR-0023 D-δ: 観測ハーネスは setup 側に inline 化、slow/fast は裸 body 断片
+          setup: "var f = function (x) { let __OBS_R__ = (function () { $BODY$ }).call(this); __OBS__.push(JSON.stringify(__OBS_R__)); return __OBS_R__; };",
+          slow: "return x + 1;",
+          fast: "return x + 2;",
           workload: "(function () { __OBS__ = []; f(7); f(8); return JSON.stringify(__OBS__); })()",
           timeout_ms: 1000,
         });

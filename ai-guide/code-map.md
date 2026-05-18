@@ -581,7 +581,7 @@ candidate i に対する setup:
 
 | 要素 | 内容 | optional になりうるケース |
 |------|------|------------------------|
-| **`libs`** | workload が必要とする lib テキスト群の連結。物理的な出処 (`<script src>` 由来の外部依存 / `<lib>_*.js` 由来の変更対象 SUT lib) を問わず、sandbox にとっては同列の「workload が叩く lib」として扱う。`changed-fn` の場合、このうち 1 つ (= 変更対象の SUT lib) に `$BODY$` プレースホルダが含まれる | workload が lib を要求しない issue |
+| **`libs`** | workload が必要とする lib テキスト群の連結。物理的な出処 (`<script src>` 由来の外部依存 / `<lib>_*.js` 由来の変更対象 SUT lib) を問わず、sandbox にとっては同列の「workload が叩く lib」として扱う。`changed-fn` の場合、このうち 1 つ (= 変更対象の SUT lib) の **変更関数本体に観測 IIFE が inline 化され、その内側に `$BODY$` プレースホルダが残る** (= `replaceFunctionBodyWithObserver` の出力、ADR-0023 D-δ §observation 仕様) | workload が lib を要求しない issue |
 | **`preWorkload`** | workload 関数 (= dataset の `var f1 = function () { ... }`) を実行する前に必要な top-level 文。計測ハーネス (`execute()` / `mean()` / `$.ajax({mark, mean})`) は preprocess 段階で剥がして含めない (ADR-0011) | dataset に該当文がない issue |
 
 連結ルール:
@@ -590,9 +590,9 @@ candidate i に対する setup:
 setup = [libs, preWorkload].filter((s) => s.length > 0).join("\n;\n")
 ```
 
-`$BODY$` プレースホルダは sandbox 実行直前に `before` / `after` の変更関数本体 (観測ラップ済) で差し替えられる (`preprocessing/common/placeholder.ts` の `substituteBody`)。
+`$BODY$` プレースホルダは sandbox 実行直前に `before` / `after` の変更関数本体 (= 裸 statement 列、観測ハーネスは setup 側の `replaceFunctionBodyWithObserver` 出力に inline 化済) で差し替えられる (`codegen/placeholder.ts` の `substituteBody`)。
 
-加えて executor に渡す直前で **`let __OBS__ = [];` 宣言** が setup の最先頭に prepend される (`declareObservationGlobal` helper)。これにより `wrapBodyObserved` / `wrapObservedWorkload` が出力する `__OBS__` 参照が sandbox top-level の lexical binding として全関数から closure 経由で見える。executor.setup 引数の最終形は:
+加えて executor に渡す直前で **`let __OBS__ = [];` 宣言** が setup の最先頭に prepend される (`declareObservationGlobal` helper)。これにより `replaceFunctionBodyWithObserver` で inline 化された観測 IIFE / `wrapObservedWorkload` が出力する `__OBS__` 参照が sandbox top-level の lexical binding として全関数から closure 経由で見える。executor.setup 引数の最終形は:
 
 ```
 let __OBS__ = [];
@@ -609,11 +609,16 @@ let __OBS__ = [];
 例: Underscore 1222 (`_.values` の changed-fn) では:
 
 ```js
-// libs (= Underscore lib 本体、_.values の body だけ $BODY$ 化)
+// libs (= Underscore lib 本体、_.values の body だけ「観測 IIFE + $BODY$」化、D-δ)
 //   = workload が叩く lib テキスト
 (function () {
   // ... Underscore lib 本体 ...
-  _.values = function (obj) { $BODY$ };
+  _.values = function (obj) {
+    // ↓ replaceFunctionBodyWithObserver で setup 側に inline 化された観測 IIFE
+    let __OBS_R__ = (function () { $BODY$ }).call(this);
+    __OBS__.push((function () { try { return JSON.stringify(__OBS_R__); } catch (e) { return "<unserializable>"; } })());
+    return __OBS_R__;
+  };
   // ... lib bootstrap ...
 }).call(this);
 
@@ -622,7 +627,7 @@ var map = {};
 for (var i = 0; i < 100; i++) { map["prop" + i] = i; }
 ```
 
-物理層 (dataset の `<script src>` 解決 / `<lib>_*.js` 読み込み) は `preprocessing/selakovic/io/script-deps.ts` および `preprocessing/selakovic/pipeline.ts` で吸収する。`preprocessing/common/placeholder.ts` (common 層) は dep / SUT の区別を持たず、純粋に AST/string transform として動作する。
+物理層 (dataset の `<script src>` 解決 / `<lib>_*.js` 読み込み) は `preprocessing/selakovic/io/script-deps.ts` および `preprocessing/selakovic/pipeline.ts` で吸収する。`codegen/placeholder.ts` (末端層) は dep / SUT の区別を持たず、純粋に AST/string transform として動作する。
 
 ### レイアウト判定 (clientServer 救済は段1 ① で自然に解決)
 

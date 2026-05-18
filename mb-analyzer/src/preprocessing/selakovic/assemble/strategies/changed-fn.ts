@@ -9,8 +9,7 @@ import {
 } from "../../../../contracts/preprocessing-contracts";
 import type { FnChangeUnit } from "../../../common/change-units";
 import {
-  replaceFunctionBody,
-  wrapBodyObserved,
+  replaceFunctionBodyWithObserver,
   wrapObservedWorkload,
 } from "../../../../codegen/placeholder";
 import { statementsToCode } from "../../../common/setup-cleanup";
@@ -22,17 +21,19 @@ import type { F1Decomposition } from "../../decompose/f1";
  * で KEEP したもの)。`libAfterSrc` は `findChangeUnits` に渡したのと同じ after lib ソース
  * (`unit.afterFn` の span がここを指す)。
  *
- * 出力する 4 値:
- *  - `setup` = 穴あき lib (変更関数の body を `{ $BODY$ }` プレースホルダで置換) + preWorkload を結合した文字列。
- *    `$BODY$` を厳密に 1 個含み、equivalence-checker 側で `substituteBody(setup, slow|fast)` で差し込む。
- *  - `slow` = `wrapBodyObserved(変更前 body の statementsToCode)` (= 戻り値を `__OBS__` に push して返す形)。
- *    関数本体に差し込まれることが前提の statement 列で、単独では top-level program として動かない。
- *  - `fast` = 同じく変更後 body 版。
+ * 出力する 4 値 (ADR-0023 D-δ §observation 仕様: 観測ハーネスは setup 側に inline 化):
+ *  - `setup` = 穴あき lib (変更関数の body を「観測ハーネス入り `{ $BODY$ }`」で置換 =
+ *    `replaceFunctionBodyWithObserver`) + preWorkload を結合した文字列。`$BODY$` を厳密に 1 個含み、
+ *    equivalence-checker 側で `substituteBody(setup, slow|fast)` で差し込む。
+ *  - `slow` = 変更前 body の statementsToCode 出力 (= 裸 body)。観測ハーネスは setup 側の `$BODY$` を
+ *    囲う観測 IIFE が担うので、ここには載らない (= pruning が見る範囲から観測足場が消える)。
+ *  - `fast` = 同じく変更後 body の裸 statementsToCode 出力。
  *  - `workload` = `wrapObservedWorkload(f1Body の statementsToCode)` (= `__OBS__ = []` 初期化 → workload 実行
  *    → `JSON.stringify(__OBS__)` を完了値で返す IIFE)。
  *
- * sandbox 投入時は equivalence-checker が `let __OBS__ = [];` を setup 先頭に prepend
- * (`declareObservationGlobal`) し、`substituteBody(setup, slow)` で `$BODY$` を差し替えてから executor へ渡す。
+ * sandbox 投入時は equivalence-checker が `substituteBody(setup, slow)` で `$BODY$` (= 観測 IIFE 内側)
+ * に裸 body を差し込み、`declareObservationGlobal` で `let __OBS__ = [];` を setup 先頭に prepend してから
+ * executor へ渡す。
  *
  * adapter_meta:
  *  - target_side = lib (変更関数は lib 側、ADR-0024)
@@ -67,11 +68,11 @@ export function buildChangedFnCandidate(
     return buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.FN_PARAM_NAMES_MISMATCH);
   }
 
-  const holedLib = replaceFunctionBody(libAfterSrc, { start: afterBody.start, end: afterBody.end });
+  const holedLib = replaceFunctionBodyWithObserver(libAfterSrc, { start: afterBody.start, end: afterBody.end });
   const preWorkload = statementsToCode([...f1Decomposition.preWorkloadStatements]);
   const setup = [holedLib, preWorkload].filter((s) => s.length > 0).join("\n;\n");
-  const slow = wrapBodyObserved(statementsToCode(beforeBody.body as readonly Statement[]));
-  const fast = wrapBodyObserved(statementsToCode(afterBody.body as readonly Statement[]));
+  const slow = statementsToCode(beforeBody.body as readonly Statement[]);
+  const fast = statementsToCode(afterBody.body as readonly Statement[]);
   const workload = wrapObservedWorkload(statementsToCode([...f1Decomposition.f1Body.body]));
 
   return {
@@ -117,8 +118,9 @@ if (import.meta.vitest) {
   const { parse } = await import("../../../../ast/parser");
   const { substituteBody } = await import("../../../../codegen/placeholder");
   // 観点: workload が呼ぶ変更関数の fn unit から changed-fn candidate を組む (placeholder substitution model)。
-  // setup に lib 全文 (変更関数の body を $BODY$ 1 個で穴あき)、slow/fast に変更前/後 body を観測ラッパで包んだ
-  // statement 列の断片、workload に f1 body を IIFE で包んだ完了値返却形式。
+  // ADR-0023 D-δ §observation 仕様: 観測ハーネスは setup 側の関数本体に inline 化、slow/fast は裸 body。
+  // setup に lib 全文 (変更関数の body を「観測ハーネス入り $BODY$」で穴あき)、slow/fast に変更前/後 body を
+  // statementsToCode した裸断片、workload に f1 body を IIFE で包んだ完了値返却形式。
   // param 不一致 / arrow body / angular wrapper は excluded marker (ADR-0023 D-γ §DROP 可視化)。
 
   const inline = `var f1 = function () { lib.norm(7); lib.norm(8); };\nvar a = execute(f1, 10);`;
@@ -133,7 +135,7 @@ if (import.meta.vitest) {
   };
 
   describe("buildChangedFnCandidate (in-source)", () => {
-    it("workload が呼ぶ変更関数 → setup に $BODY$ 1 個入り穴あき lib / slow・fast に観測ラッパ / workload に IIFE", () => {
+    it("workload が呼ぶ変更関数 → setup に観測ハーネス + $BODY$ 1 個入り穴あき lib / slow・fast は裸 body / workload に IIFE", () => {
       const f1d = extractF1(inline)!;
       const unit = fnUnitFor(libBefore, libAfter);
       const r = buildChangedFnCandidate(unit, libAfter, f1d);
@@ -142,29 +144,34 @@ if (import.meta.vitest) {
       expect(r.candidate_meta.is_workload_reachable).toBe(true);
       expect(r.enclosure_node_type).toBe("FunctionExpression"); // lib.norm = function(){...}
 
-      // setup: lib 全文 (norm body のみ $BODY$ 1 個で穴あき) + preWorkload
+      // setup: lib 全文 (norm body の位置に観測ハーネス + $BODY$ 1 個入り) + preWorkload
       expect(r.setup).toContain("var slice = [].slice;");
       expect(r.setup).toContain("var lib = {};");
       expect(r.setup).toContain("$BODY$");
-      // $BODY$ は厳密に 1 個
+      // $BODY$ は厳密に 1 個 (= 観測 IIFE 内側のみ、外側は埋まる)
       expect((r.setup!.match(/\$BODY\$/g) ?? []).length).toBe(1);
+      // 観測ハーネスが setup 側に inline 化されている (ADR-0023 D-δ)
+      expect(r.setup).toContain("let __OBS_R__");
+      expect(r.setup).toContain("__OBS__.push");
+      expect(r.setup).toContain("return __OBS_R__;");
+      // 単独参照 (globalThis. プレフィックス無し)
+      expect(r.setup).not.toContain("globalThis.__OBS");
       // v1 残骸 (__HOLE__ ガード / after 本体インライン) が消えている
       expect(r.setup).not.toContain("globalThis.__HOLE__");
       expect(r.setup).not.toContain("& 1 === 0");
 
-      // slow: 変更前 body (% 2 === 0) を __OBS__ に push して返す形
+      // slow: 変更前 body (% 2 === 0) の裸 statement 列 (= 観測ハーネス無し)
       expect(r.slow).toContain("% 2 === 0");
-      expect(r.slow).toContain("let __OBS_R__");
-      expect(r.slow).toContain("__OBS__.push");
-      // 単独参照 (globalThis. プレフィックス無し)
-      expect(r.slow).not.toContain("globalThis.__OBS");
+      expect(r.slow).not.toContain("__OBS_R__"); // 観測ハーネスは setup 側に移動
+      expect(r.slow).not.toContain("__OBS__.push");
       // body 断片なので lib 宣言 / workload 呼び出しは含まれない
       expect(r.slow).not.toContain("var lib = {};");
       expect(r.slow).not.toContain("lib.norm(7);");
 
-      // fast: 変更後 body (& 1 === 0)
+      // fast: 変更後 body (& 1 === 0) の裸 statement 列
       expect(r.fast).toContain("& 1 === 0");
-      expect(r.fast).toContain("let __OBS_R__");
+      expect(r.fast).not.toContain("__OBS_R__");
+      expect(r.fast).not.toContain("__OBS__.push");
 
       // workload: __OBS__ = [] 初期化 → workload → JSON.stringify(__OBS__)
       expect(r.workload).toContain("__OBS__ = [];");
@@ -177,7 +184,7 @@ if (import.meta.vitest) {
       expect(r.before_node_count).toBeGreaterThan(0);
       expect(r.before_node_count).toBeLessThan(100);
 
-      // sandbox 投入直前形 (= substituteBody(setup, slow) を関数本体内に差し込んだ形) が valid JS
+      // sandbox 投入直前形 (= substituteBody(setup, slow) で観測 IIFE 内側に裸 body を差し込んだ形) が valid JS
       const substituted = substituteBody(r.setup!, r.slow!);
       expect(() => parse(substituted)).not.toThrow();
       // workload は単独で式として valid
