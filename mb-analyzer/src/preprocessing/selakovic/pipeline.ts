@@ -179,7 +179,9 @@ function appendChangedFnCandidates(
     candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.EMPTY_DIFF));
     return;
   }
-  const fnUnits = cu.units.filter((u): u is FnChangeUnit => u.kind === "fn" && u.afterFn !== null);
+  // afterFn=null (rename / 削除) も含めて fn unit を可視化対象にする (ADR-0023 D-γ §DROP 可視化、
+  // FN_RENAMED_OR_REMOVED reason を builder 内で marker 化)。
+  const fnUnits = cu.units.filter((u): u is FnChangeUnit => u.kind === "fn");
   if (fnUnits.length === 0) {
     candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.NO_FN_UNIT));
     return;

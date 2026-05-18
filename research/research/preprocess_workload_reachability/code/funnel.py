@@ -3,7 +3,7 @@
 
 `extracted.jsonl` → `equiv-input.jsonl` → `equiv-results.jsonl` の 4 段集計:
   ① issue 総数 (= extracted.jsonl 行数)
-  ② candidate 抽出済 issue (= issue_excluded でなく candidates が 1 件以上ある)
+  ② 真の candidate 抽出済 issue (= issue_excluded でなく、excluded marker でない candidate を 1 件以上含む)
   ③ equiv 投入 issue (= equiv-input.jsonl に 1 行以上の id がある issue)
   ④ verdict 別 issue (= equiv-results.jsonl の verdict、equal / not_equal / inconclusive / error)
 
@@ -45,7 +45,7 @@ class FunnelStats:
     """
 
     n_issues: int
-    n_extracted: int  # issue_excluded でなく candidates 数 ≥ 1
+    n_extracted: int  # issue_excluded でなく、excluded marker でない candidate を 1 件以上含む issue 数
     n_equiv_input_issues: int
     verdict_issue_counts: dict[str, int]
     issue_excluded_reasons: dict[str, int]
@@ -186,7 +186,7 @@ def format_text(s: FunnelStats) -> str:
     lines = [
         f"funnel ({n} issues):",
         f"  ① 全 issue:                {n}",
-        f"  ② candidate 抽出済:        {s.n_extracted}  ({_pct(s.n_extracted, n)})  DROP={_drop(n, s.n_extracted)}",
+        f"  ② 真の candidate 抽出済:   {s.n_extracted}  ({_pct(s.n_extracted, n)})  DROP={_drop(n, s.n_extracted)}",
         f"  ③ equiv-input 投入 issue:  {s.n_equiv_input_issues}  ({_pct(s.n_equiv_input_issues, n)})  DROP={_drop(s.n_extracted, s.n_equiv_input_issues)}",
     ]
     total_verdict = sum(s.verdict_issue_counts.values())
@@ -226,7 +226,7 @@ def format_md(s: FunnelStats) -> str:
         "| 段 | 件数 | DROP | 到達率 |",
         "|----|------|------|--------|",
         f"| ① 全 issue | {n} | - | 100% |",
-        f"| ② candidate 抽出済 | {s.n_extracted} | {_drop(n, s.n_extracted)} | {_pct(s.n_extracted, n)} |",
+        f"| ② 真の candidate 抽出済 | {s.n_extracted} | {_drop(n, s.n_extracted)} | {_pct(s.n_extracted, n)} |",
         f"| ③ equiv-input 投入 issue | {s.n_equiv_input_issues} | {_drop(s.n_extracted, s.n_equiv_input_issues)} | {_pct(s.n_equiv_input_issues, n)} |",
         f"| ④ verdict 到達 issue | {total_verdict} | - | {_pct(total_verdict, n)} |",
     ]
