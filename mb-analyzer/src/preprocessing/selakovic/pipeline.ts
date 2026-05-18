@@ -3,6 +3,7 @@ import { parse } from "../../ast/parser";
 import {
   ASPECT,
   LAYOUT_KIND,
+  SELAKOVIC_EXCLUSION_REASON,
   TARGET_SIDE,
   WRAPPER_KIND,
   type Aspect,
@@ -14,14 +15,14 @@ import {
 } from "../../contracts/preprocessing-contracts";
 import { findChangeUnits, type FnChangeUnit } from "../common/change-units";
 import { buildCallGraph, isReachedByAnyWorkload } from "../common/reachability";
-import { buildChangedFnCandidate, buildExcludedChangedFnCandidate } from "./assemble/changed-fn";
+import { buildChangedFnCandidate, buildExcludedChangedFnCandidate } from "./assemble/strategies/changed-fn";
+import { extractFromScripts, extractFromServerFiles, type FallbackResult } from "./assemble/strategies/raw-stmt";
 import {
   buildClientBodyCandidate,
   buildClientCombinedCandidate,
   buildClientLibCandidate,
-} from "./assemble/client";
-import { extractFromScripts, extractFromServerFiles, type FallbackResult } from "./assemble/fallback";
-import { buildServerRunnable } from "./assemble/server";
+} from "./assemble/wrappers/top-level";
+import { buildServerRunnable } from "./assemble/wrappers/server";
 import { extractF1, type F1Decomposition, type WrapperKind as DecomposeWrapperKind } from "./decompose/f1";
 import { extractTest } from "./decompose/test-case";
 import { routeAspect, statementsChanged } from "./route/aspect";
@@ -146,9 +147,10 @@ function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "clie
 /**
  * `aspect: lib` (および `aspect: lib+workload` 独立判定の lib 側) について、`<lib>_*.js` の変更を unit に切り分け
  * (`findChangeUnits`)、workload (`f1`) が (推移的に) exercise する fn unit ごとに changed-fn candidate を `candidates`
- * の末尾に push する。workload が exercise しない変更 (version-bump ノイズ等) は `change-not-exercised` marker
- * (`buildExcludedChangedFnCandidate`) として push し、痕跡を残す (setup/slow/fast は持たない、ADR-0022 §計装) —
- * 等価検証本体は embedded `#0` がカバーする。angular controller wrapper の f1 は v1 では skip (embedded のみ)。
+ * の末尾に push する。各 fn unit について真の candidate を作れない場合は `candidate_excluded` marker
+ * (`buildExcludedChangedFnCandidate(reason)`) として push し、痕跡を残す (setup/slow/fast は持たない、
+ * ADR-0022 §計装 / ADR-0023 D-γ §DROP 可視化)。早期 return (= lib 全体の DROP) も issue ごとに 1 件 marker。
+ * 等価検証本体は embedded `#0` がカバーする。angular controller wrapper の f1 は D-β では skip (D-γ で対応検討)。
  */
 function appendChangedFnCandidates(
   candidates: PreprocessingCandidate[],
@@ -156,27 +158,39 @@ function appendChangedFnCandidates(
   libSourceAfter: string,
   f1Before: F1Decomposition,
 ): void {
-  if (libSourceBefore.length === 0 || libSourceAfter.length === 0) return;
-  if (f1Before.wrapperKind !== "top-level") return;
+  if (libSourceBefore.length === 0 || libSourceAfter.length === 0) {
+    candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.NO_LIB_SOURCE));
+    return;
+  }
+  if (f1Before.wrapperKind !== "top-level") {
+    candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.ANGULAR_WRAPPER_SKIP));
+    return;
+  }
 
   let cu;
   try {
     cu = findChangeUnits(libSourceBefore, libSourceAfter);
   } catch {
+    candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.CHANGE_UNITS_PARSE_FAIL));
     return;
   }
-  if (cu.empty) return;
+  if (cu.empty) {
+    candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.EMPTY_DIFF));
+    return;
+  }
   const fnUnits = cu.units.filter((u): u is FnChangeUnit => u.kind === "fn" && u.afterFn !== null);
-  if (fnUnits.length === 0) return;
+  if (fnUnits.length === 0) {
+    candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.NO_FN_UNIT));
+    return;
+  }
 
   const graph = buildCallGraph(cu.beforeAst, [{ name: "f1", body: [...f1Before.preWorkloadStatements, ...f1Before.f1Body.body] }]);
   for (const u of fnUnits) {
     if (!isReachedByAnyWorkload(graph, u.name)) {
-      candidates.push(buildExcludedChangedFnCandidate());
+      candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED));
       continue;
     }
-    const candidate = buildChangedFnCandidate(u, libSourceAfter, f1Before);
-    if (candidate !== null) candidates.push(candidate);
+    candidates.push(buildChangedFnCandidate(u, libSourceAfter, f1Before));
   }
 }
 

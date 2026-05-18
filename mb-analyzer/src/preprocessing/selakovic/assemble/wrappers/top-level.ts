@@ -2,11 +2,11 @@ import {
   TARGET_SIDE,
   type PreprocessingCandidate,
   type TargetSide,
-} from "../../../contracts/preprocessing-contracts";
-import { statementsToCode } from "../../common/setup-cleanup";
-import type { F1Decomposition } from "../decompose/f1";
+} from "../../../../contracts/preprocessing-contracts";
+import { statementsToCode } from "../../../common/setup-cleanup";
+import type { F1Decomposition } from "../../decompose/f1";
 import { buildAngularRunnable } from "./angular";
-import { wrapClientLibGlobalsStatement } from "./recorder-hooks";
+import { wrapClientLibGlobalsStatement } from "../recorder-hooks";
 
 /**
  * clientIssues の `(setup, slow, fast)` candidate を作用点 (lib / workload / lib+workload) × wrapper kind

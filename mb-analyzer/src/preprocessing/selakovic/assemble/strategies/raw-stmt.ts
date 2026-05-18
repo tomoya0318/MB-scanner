@@ -1,18 +1,18 @@
 import type { File, Node, Statement } from "@babel/types";
 
-import { countNodes } from "../../../ast/inspect";
-import { parse } from "../../../ast/parser";
-import { canonicalHash } from "../../../ast/subtree-hash";
+import { countNodes } from "../../../../ast/inspect";
+import { parse } from "../../../../ast/parser";
+import { canonicalHash } from "../../../../ast/subtree-hash";
 import {
   EXCLUSION_REASON_BASE,
   SELAKOVIC_EXCLUSION_REASON,
   TARGET_SIDE,
   type ExclusionReasonAny,
   type PreprocessingCandidate,
-} from "../../../contracts/preprocessing-contracts";
-import { findChangedNodes } from "../../common/ast-diff";
-import { findMinimalEnclosure } from "../../common/enclosure";
-import { statementToCode, statementsToCode } from "../../common/setup-cleanup";
+} from "../../../../contracts/preprocessing-contracts";
+import { findChangedNodes } from "../../../common/ast-diff";
+import { findMinimalEnclosure } from "../../../common/enclosure";
+import { statementToCode, statementsToCode } from "../../../common/setup-cleanup";
 
 /**
  * 段2 が「①にも②にも実質差がない / `f1`・`test` が規約外フォーマット」と判定した issue 用の安全弁 —

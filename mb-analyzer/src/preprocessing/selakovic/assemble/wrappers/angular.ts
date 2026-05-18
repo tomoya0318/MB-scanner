@@ -1,4 +1,4 @@
-import { wrapBoundaryVarsStatement } from "./recorder-hooks";
+import { wrapBoundaryVarsStatement } from "../recorder-hooks";
 
 /**
  * Angular controller-wrapper の `f1` を「lib を load → module/controller を再構成 (計測ハーネス除去済)

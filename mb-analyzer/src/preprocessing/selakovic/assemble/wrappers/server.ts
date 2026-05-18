@@ -1,4 +1,4 @@
-import { wrapBoundaryVarsStatement } from "./recorder-hooks";
+import { wrapBoundaryVarsStatement } from "../recorder-hooks";
 
 /**
  * server `test_case_*.js` の `(setup, slow, fast)` の slow/fast 部 (= runnable program) を組み立てる。

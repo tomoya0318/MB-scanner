@@ -96,12 +96,24 @@ class WrapperKind(StrEnum):
 
 
 class SelakovicExclusionReason(StrEnum):
-    """Selakovic dataset 固有の除外理由 (ADR-0024 で base から分離)"""
+    """Selakovic dataset 固有の除外理由 (ADR-0024 で base から分離)
+
+    changed-fn 経路 (ADR-0023 D-γ §DROP 可視化) の DROP reason は
+    ``NO_LIB_SOURCE`` 以下を参照。
+    """
 
     MODULE_WIDE_CHANGE = "module-wide-change"
     NO_ENCLOSURE_CANDIDATE = "no-enclosure-candidate"
     LAYOUT_UNKNOWN = "layout-unknown"
     CHANGE_NOT_EXERCISED = "change-not-exercised"
+    NO_LIB_SOURCE = "no-lib-source"
+    ANGULAR_WRAPPER_SKIP = "angular-wrapper-skip"
+    CHANGE_UNITS_PARSE_FAIL = "change-units-parse-fail"
+    EMPTY_DIFF = "empty-diff"
+    NO_FN_UNIT = "no-fn-unit"
+    FN_RENAMED_OR_REMOVED = "fn-renamed-or-removed"
+    FN_NON_BLOCK_BODY = "fn-non-block-body"
+    FN_PARAM_NAMES_MISMATCH = "fn-param-names-mismatch"
 
 
 # Union 型 (base + Selakovic)

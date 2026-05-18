@@ -155,12 +155,31 @@ export type WrapperKind = (typeof WRAPPER_KIND)[keyof typeof WRAPPER_KIND];
  *  - `no-enclosure-candidate`: 候補型 (Function/Method/Block) が見つからない (fallback 経路)
  *  - `layout-unknown`: client / server のどちらでもないディレクトリ構造
  *  - `change-not-exercised`: lib の変更を (推移的にも) exercise する workload (`f1` / `test()`) が無い
+ *
+ * changed-fn 経路 (ADR-0023 D-γ §DROP 可視化) で `appendChangedFnCandidates` の早期 return / builder
+ * 内部 null を marker として残すための reason 値:
+ *  - `no-lib-source`: lib_before / lib_after の片方が空 (aspect=workload-only 等)
+ *  - `angular-wrapper-skip`: f1 wrapperKind が top-level でない (D-β の制約、D-γ で対応検討)
+ *  - `change-units-parse-fail`: `findChangeUnits` が AST parse 例外で失敗
+ *  - `empty-diff`: AST diff が空 (lib に実質変更なし)
+ *  - `no-fn-unit`: 変更が関数単位に切り分けられなかった (= module-wide-change 相当の changed-fn 版)
+ *  - `fn-renamed-or-removed`: 変更前関数が after 側で見つからない (rename / 削除)
+ *  - `fn-non-block-body`: arrow `=> expr` 等で BlockStatement 本体が無い
+ *  - `fn-param-names-mismatch`: before/after で param 名リストが一致しない
  */
 export const SELAKOVIC_EXCLUSION_REASON = {
   MODULE_WIDE_CHANGE: "module-wide-change",
   NO_ENCLOSURE_CANDIDATE: "no-enclosure-candidate",
   LAYOUT_UNKNOWN: "layout-unknown",
   CHANGE_NOT_EXERCISED: "change-not-exercised",
+  NO_LIB_SOURCE: "no-lib-source",
+  ANGULAR_WRAPPER_SKIP: "angular-wrapper-skip",
+  CHANGE_UNITS_PARSE_FAIL: "change-units-parse-fail",
+  EMPTY_DIFF: "empty-diff",
+  NO_FN_UNIT: "no-fn-unit",
+  FN_RENAMED_OR_REMOVED: "fn-renamed-or-removed",
+  FN_NON_BLOCK_BODY: "fn-non-block-body",
+  FN_PARAM_NAMES_MISMATCH: "fn-param-names-mismatch",
 } as const;
 export type SelakovicExclusionReason =
   (typeof SELAKOVIC_EXCLUSION_REASON)[keyof typeof SELAKOVIC_EXCLUSION_REASON];
