@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
-"""pruning 出力の placeholder を統合・reindex する後処理 (ADR-0023 D-δ Phase 2)。
+"""pruning 出力の placeholder を spelling 単位で統合・reindex する後処理 (ADR-0023 D-δ Phase 2)。
 
 pruning は AST の identifier node ごとに別 placeholder (`$P6 / $P7 / $P8`) を立てるので、
-同じ binding を指す identifier (例: `obj` × 3 出現) が複数 placeholder に分裂する。
-これは「各位置で独立に置き換えられる」と読めるが、実際は同じ binding を指すので
-「ここは同じものでなければならない」が正しい制約。
+同 spelling の identifier (例: `obj` × 3 出現) が複数 placeholder に分裂する。これは「各位置で
+独立に置き換えられる」と読めるが、人間が読む際には冗長で、pattern として過剰に一般的に見える。
 
-本スクリプトは ``prune-results.jsonl`` の各 row について:
+本スクリプトは ``prune-results.jsonl`` の各 row について保守的な heuristic で正規化する:
   1. ``placeholders`` を ``(kind, original_snippet)`` で group by
-  2. ``kind=identifier`` のグループは複数 placeholder を 1 つに集約 (= 同 binding 統合)
+  2. ``kind=identifier`` のグループは複数 placeholder を 1 つに集約 (= 同 kind + 同 spelling 統合)
   3. 残った placeholder を ``$P0, $P1, ...`` に reindex
   4. ``pattern_code`` 内の ``$Pn`` 参照を新 id で書き換え
   5. ``kind=expression`` / ``kind=statement`` は触らない (= 偶然一致リスク回避、保守的に identifier のみ)
+
+**重要な heuristic limitation** (Copilot review 指摘、2026-05-18): 統合判定は ``original_snippet``
+(= pruning が出力したテキスト) の文字列一致だけで、**scope 解析は行わない**。そのため外側 / 内側
+scope に同名 binding (例: ネストした function param ``x``) があると、別 binding でも統合されて
+pattern を **過剰制約** する (= "ここは同じものでなければならない" と claim する) リスクがある。
+
+Selakovic dataset の小さい変更関数では実害は限定的だが、現状は明示的に「spelling heuristic」と
+扱い、研究者の目視確認用途に閉じる。将来 scope-aware 化が必要なら ``pattern_ast`` + scope walk
+で binding identity を取って統合判定する拡張に進む (= 未着手、研究ニーズに応じて判断)。
 
 出力は別 jsonl (``prune-results-normalized.jsonl``) として書き出し、元 artifact は不変。
 
@@ -34,8 +42,9 @@ WORK = os.path.abspath(os.path.dirname(__file__))
 DEFAULT_INPUT = os.path.join(WORK, "prune-results.jsonl")
 DEFAULT_OUTPUT = os.path.join(WORK, "prune-results-normalized.jsonl")
 
-# `$Pn` 参照の正規表現。negative lookahead `(?!\d)` で `$P10` を `$P1` と誤マッチさせない
-# (= 降順処理を強制する代わりに正規表現側で安全化、判断 e: 軸 6)。
+# `$Pn` 参照の正規表現。`\d+` は greedy なので `$P10` は `$P10` 全体としてマッチする
+# (= `$P1` 部分だけ抜き出すことはない)。後続の `(?!\d)` は redundant だが、将来 `\d*` 化や
+# 別人による誤改変への防衛として「数字 boundary 明示」を残す (Copilot review 指摘で訂正)。
 PLACEHOLDER_REF_RE = re.compile(r"\$P(\d+)(?!\d)")
 
 
@@ -75,8 +84,9 @@ def normalize_row(row: dict) -> tuple[dict, NormalizeStats]:
         key = (p["kind"], p["original_snippet"])
         groups.setdefault(key, []).append(p)
 
-    # 各元 id → 代表 id (= 同 binding 統合後の id) のマッピング。
-    # kind=identifier の重複 group のみ統合、expression / statement は触らない (判断 b1)
+    # 各元 id → 代表 id (= 同 kind + 同 spelling で統合後の id) のマッピング。
+    # kind=identifier の重複 group のみ統合、expression / statement は触らない (判断 b1)。
+    # scope 解析は行わない heuristic (= module docstring §heuristic limitation 参照)
     rep_map: dict[str, str] = {}
     for (kind, _snippet), members in groups.items():
         if kind == "identifier" and len(members) > 1:

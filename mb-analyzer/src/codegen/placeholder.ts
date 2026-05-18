@@ -88,9 +88,16 @@ export function replaceFunctionBody(
  *    裸 body (= statementsToCode の出力) のまま `substituteBody` で `$BODY$` に差し込まれる。
  *  - 結果として pruning が見る slow/fast から観測 IIFE が消え、抽出 pattern が「変更関数の等価性の核」だけになる。
  *
- * 合成パターン: `replaceFunctionBody` で `{ $BODY$ }` を埋め、その内側 `$BODY$` を観測ハーネス string
- * (内部に `$BODY$` を 1 個含む) で再置換する 2 段階置換 (ADR-0023 §設計のポイント、判断 e: a1-i)。
- * 最終戻り値は `$BODY$` を **厳密に 1 個** 含む string (= `substituteBody` の 1 個契約と整合)。
+ * 実装: `replaceFunctionBody` と同じ span slicing で観測ハーネスを直接埋め込む
+ * (= `source.slice(0, start) + "{ <observer> }" + source.slice(end)`)。span 外には触らないので:
+ *  - 通常ケース (source に `$BODY$` リテラル無し): 戻り値は `$BODY$` を **厳密に 1 個** 含む (= 観測 IIFE 内側のみ)。
+ *    `substituteBody` の 1 個契約と整合
+ *  - 異常ケース (source のコメント / 文字列リテラルに `$BODY$` が紛れている): 戻り値の `$BODY$` 個数は 2 個以上に
+ *    なり、`substituteBody` が `count !== 1` で **fail-loud に throw**。silent な誤 substitution は起きない
+ *
+ * 旧実装 (`replaceFunctionBody` 出力に対する `.replace(PLACEHOLDER, ...)` の first match) では、source 側に
+ * 既存の `$BODY$` があると観測ハーネスが誤った位置に挿入されつつ `substituteBody` の count check を通過する
+ * silent bug の余地があった。span slicing への変更でこのリスクを除去 (Copilot review 指摘、2026-05-18)。
  *
  * 戻り値のままでは構文として valid でないので、呼び出し側は `substituteBody` で裸 body を差し込んでから
  * `declareObservationGlobal` で `__OBS__` 宣言を prepend し、実行コンテキストに投入する。
@@ -99,8 +106,7 @@ export function replaceFunctionBodyWithObserver(
   source: string,
   fnBodySpan: { start: number; end: number },
 ): string {
-  const holed = replaceFunctionBody(source, fnBodySpan);
-  return holed.replace(PLACEHOLDER, () => OBSERVER_HARNESS);
+  return source.slice(0, fnBodySpan.start) + `{ ${OBSERVER_HARNESS} }` + source.slice(fnBodySpan.end);
 }
 
 /**
@@ -225,6 +231,18 @@ if (import.meta.vitest) {
       expect(substituted).toContain("return __OBS_R__;");
       // 構文として valid
       expect(() => parse(declareObservationGlobal(substituted))).not.toThrow();
+    });
+
+    it("source 側のコメント/文字列に $BODY$ が紛れていても fail-loud (substituteBody が throw) で silent bug を防ぐ", () => {
+      // source 内に `$BODY$` リテラルがコメントで混入しているケース。span 外なので置換されない。
+      const src = `/* $BODY$ marker comment */ var g = function (x) { return x + 1; };`;
+      const out = replaceFunctionBodyWithObserver(src, fnBodySpanOf(src));
+      // $BODY$ は 2 個 (= コメント内 + 観測 IIFE 内側)
+      expect(out.split("$BODY$").length - 1).toBe(2);
+      // コメントは残る (= span 外には触らない)
+      expect(out).toContain("/* $BODY$ marker comment */");
+      // substituteBody は count !== 1 で fail-loud に throw (= silent な誤 substitution を防ぐ)
+      expect(() => substituteBody(out, "return 0;")).toThrow(/exactly 1 \$BODY\$/);
     });
   });
 
