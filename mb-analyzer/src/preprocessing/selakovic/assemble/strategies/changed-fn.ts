@@ -81,7 +81,7 @@ export function buildChangedFnCandidate(
   ) {
     return buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.FN_PARAM_NAMES_MISMATCH);
   }
-  // rename-only は before body の Identifier を after の param 名に rewrite して candidate 化 (semantic 等価、ADR-0023 D-γ §DROP 可視化緩和)。
+  // rename-only は before body の Identifier を after の param 名に rewrite して candidate 化 (ADR-0023 D-γ §DROP 可視化緩和、collision guard 方針は ADR-0027)。
   const beforeBodyStatements: readonly Statement[] =
     paramDiff.kind === "rename-only"
       ? renameIdentifiersInStatements(beforeBody.body as readonly Statement[], paramDiff.nameMap)

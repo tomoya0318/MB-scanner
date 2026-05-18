@@ -123,22 +123,40 @@ export function renameIdentifiersInStatements(
 }
 
 /**
- * before body 内に、rename 先名 (`nameMap.values()`) と衝突する binding (`VariableDeclarator.id` /
- * inner `FunctionDeclaration|FunctionExpression|ArrowFunctionExpression` の id / param) があれば `true`。
- * scope-aware ではない浅い形 (MVP) — 衝突候補があれば呼び出し側で `FN_PARAM_NAMES_MISMATCH` にデモートする。
+ * before body 内に、rename 元名 (`nameMap.keys()`) または rename 先名 (`nameMap.values()`) と衝突する
+ * binding があれば `true`。scope-aware ではない保守的な安全弁で、衝突候補があれば呼び出し側で
+ * `FN_PARAM_NAMES_MISMATCH` にデモートする。検出対象 binding は以下:
+ *  - `VariableDeclarator.id` (`var/let/const`)
+ *  - `FunctionDeclaration.id` / `FunctionExpression.id`
+ *  - inner fn (`FunctionDeclaration|FunctionExpression|ArrowFunctionExpression`) の params
+ *    (`Identifier` / `RestElement(Identifier)` / `AssignmentPattern(Identifier)`)
+ *  - `CatchClause.param` (`Identifier` の場合のみ)
+ *  - `ClassDeclaration.id` / `ClassExpression.id`
+ *
+ * 判断: ai-guide/adr/0027-changed-fn-rename-collision-guard.md (case A 採用)
  */
 export function hasBindingCollision(
   body: readonly Statement[],
   nameMap: ReadonlyMap<string, string>,
 ): boolean {
   if (nameMap.size === 0) return false;
-  const targets = new Set(nameMap.values());
+  const targets = new Set<string>([...nameMap.keys(), ...nameMap.values()]);
   let collided = false;
   for (const stmt of body) {
     walkNodes(stmt, ({ node }) => {
       if (collided) return;
       if (node.type === "VariableDeclarator") {
         if (isIdentifier(node.id) && targets.has(node.id.name)) collided = true;
+        return;
+      }
+      if (node.type === "CatchClause") {
+        if (node.param && isIdentifier(node.param) && targets.has(node.param.name)) {
+          collided = true;
+        }
+        return;
+      }
+      if (node.type === "ClassDeclaration" || node.type === "ClassExpression") {
+        if (node.id && targets.has(node.id.name)) collided = true;
         return;
       }
       if (
@@ -159,7 +177,6 @@ export function hasBindingCollision(
             collided = true;
             return;
           }
-          // default 付き param (`function inner(y = 0)`) の left も binding を作るので chase する。
           if (p.type === "AssignmentPattern" && isIdentifier(p.left) && targets.has(p.left.name)) {
             collided = true;
             return;
@@ -437,8 +454,28 @@ if (import.meta.vitest) {
       expect(hasBindingCollision(body, new Map([["x", "y"]]))).toBe(true);
     });
 
+    it("rename 先と同名の CatchClause.param も collision 扱い (ADR-0027 案 A)", () => {
+      const body = stmtsOf("try { throw 0; } catch (y) { return y + x; }");
+      expect(hasBindingCollision(body, new Map([["x", "y"]]))).toBe(true);
+    });
+
+    it("rename 先と同名の ClassDeclaration.id も collision 扱い", () => {
+      const body = stmtsOf("class y {} return x;");
+      expect(hasBindingCollision(body, new Map([["x", "y"]]))).toBe(true);
+    });
+
+    it("rename 元と同名の別 binding (`var x` 等) も collision 扱い (ADR-0027: targets に nameMap.keys() も含める)", () => {
+      const body = stmtsOf("var x = 1; return x;");
+      expect(hasBindingCollision(body, new Map([["x", "y"]]))).toBe(true);
+    });
+
+    it("rename 元と同名の CatchClause.param も collision 扱い", () => {
+      const body = stmtsOf("try { throw 0; } catch (x) { return x; }");
+      expect(hasBindingCollision(body, new Map([["x", "y"]]))).toBe(true);
+    });
+
     it("衝突なし → false", () => {
-      const body = stmtsOf("const z = 1; return x + z;");
+      const body = stmtsOf("const z = 1; return z + 1;");
       expect(hasBindingCollision(body, new Map([["x", "y"]]))).toBe(false);
     });
 
