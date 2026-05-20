@@ -430,6 +430,36 @@ describe("preprocess — client / Angular controller-wrapper", () => {
     // ANGULAR_WRAPPER_SKIP marker はもう出ない
     expect(result.candidates.some((c) => c.candidate_excluded === "angular-wrapper-skip")).toBe(false);
   });
+
+  it("作用点 lib: controller 内 f1 が読む module-level binding の差 (stmt unit) → changed-stmt は top-level 前提なので angular は marker 止まり (Copilot #2 回帰防止)", () => {
+    // changed-stmt 経路 (no-fn-unit rescue) は top-level wrapper 前提。angular の stmt unit を通すと
+    // controller-scoped preWorkload/$scope を top-level で実行する invalid candidate になるため、
+    // pipeline が ANGULAR_WRAPPER_SKIP marker で先弾くことを担保する。
+    const libBefore = "var KEY = 'foo';\nvar lib = {};\nlib.get = function () { return KEY; };";
+    const libAfter = "var KEY = 'bar';\nvar lib = {};\nlib.get = function () { return KEY; };";
+    const angularReadsBinding = `
+      var app = angular.module("benchApp", []);
+      app.controller("BenchCtrl", function ($scope) {
+        var f1 = function () { lib.get(); };
+        var a = execute(f1, 10);
+      });
+    `;
+    const result = preprocess({
+      kind: "client",
+      before_inline: angularReadsBinding,
+      after_inline: angularReadsBinding,
+      lib_before_files: { "lib.js": libBefore },
+      lib_after_files: { "lib.js": libAfter },
+      lib_kind: "file",
+      lib_referenced_by_workload: true,
+    });
+    expect(result.issue_meta?.wrapper_kind).toBe(WRAPPER_KIND.ANGULAR_CONTROLLER_WRAPPER);
+    // stmt unit (var KEY) は marker 止まり = 真の changed-stmt candidate (workload 付き) を作らない
+    expect(result.candidates.some((c) => c.candidate_excluded === "angular-wrapper-skip")).toBe(true);
+    expect(
+      result.candidates.some((c) => c.candidate_meta.is_workload_reachable === true && c.workload != null),
+    ).toBe(false);
+  });
 });
 
 describe("preprocess — server (test_case)", () => {

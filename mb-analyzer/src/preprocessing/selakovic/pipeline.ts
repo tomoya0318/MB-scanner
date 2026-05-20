@@ -166,8 +166,9 @@ function appendChangeUnitCandidates(
     candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.NO_LIB_SOURCE));
     return;
   }
-  // wrapperKind (top-level / angular-controller-wrapper) の dispatch は buildChangedFnCandidate 側に集約 (案 C')。
-  // ここで angular を先弾きせず、changed-fn ループに通して真の candidate 化する。
+  // fn unit の wrapperKind dispatch は buildChangedFnCandidate 側に集約 (案 C')。ここで angular を一律
+  // 先弾きせず changed-fn ループに通す。ただし stmt unit (changed-stmt) は top-level 前提のままなので、
+  // 下の stmt ループ内で angular を marker 化する。
 
   let cu;
   try {
@@ -201,6 +202,14 @@ function appendChangeUnitCandidates(
     candidates.push(buildChangedFnCandidate(u, libSourceAfter, f1Before));
   }
   for (const u of stmtUnits) {
+    // changed-stmt 経路 (`buildChangedStmtCandidate`) は top-level wrapper 前提 (preWorkload + f1Body を
+    // top-level で組む、angular bootstrap を持たない)。angular-controller-wrapper の stmt unit を通すと
+    // controller-scoped な preWorkload/$scope を top-level で実行する invalid candidate になるので、
+    // 従来どおり ANGULAR_WRAPPER_SKIP marker で先弾く (fn unit のみ案 C' で救済、stmt の angular 対応は scope 外)。
+    if (f1Before.wrapperKind !== "top-level") {
+      candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.ANGULAR_WRAPPER_SKIP));
+      continue;
+    }
     // 名指しできない stmt (`if`/`for` 等の制御構文 top-level、bindings=[]) は workload-reachability で
     // 判定不能なので NO_FN_UNIT marker で先弾く (CHANGE_NOT_EXERCISED は「判定したが到達不能」を意味する
     // ので、判定不能と区別する)。
