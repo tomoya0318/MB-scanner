@@ -18,7 +18,8 @@
 # 例（セットアップ不要な場合）:
 #   SETUP_COMMANDS=""
 # ──────────────────────────────────────────────────────────────────────────
-SETUP_COMMANDS="${SETUP_COMMANDS-git submodule update --init --recursive && mise run setup}"
+# submodule update は mise run setup 内に統合済 (.mise.toml [tasks.setup])。
+SETUP_COMMANDS="${SETUP_COMMANDS-mise run setup}"
 
 set -euo pipefail
 

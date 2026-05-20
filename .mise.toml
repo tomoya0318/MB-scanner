@@ -29,12 +29,19 @@ uv sync --dev
 """
 
 [tasks.setup]
-description = "Python と mb-analyzer の依存をまとめて入れる (clone / worktree 直後用)"
+description = "submodule + Python + mb-analyzer の依存をまとめて入れる (clone / worktree 直後用)"
 depends = ["python-deps"]
 run = """
+echo "Updating git submodules..."
+git submodule update --init --recursive
 echo "Installing mb-analyzer dependencies..."
 pnpm --prefix mb-analyzer install --prefer-offline
 """
+
+[tasks.setup-dataset]
+description = "Selakovic dataset の vendor deps (node_modules) を再生成。重いので equiv/preprocess 全件再走の前に 1 回 (初回 or dataset bump 後)。"
+depends = ["setup"]
+run = "bash data/selakovic-2016-issues/scripts/install-vendor-deps.sh"
 
 # =============================================================================
 # コードの品質管理

@@ -42,7 +42,7 @@ JSONから `worktree_dir` / `original_dir` / `branch` を取得する。
 .claude/skills/start-worktree/open-in-terminal.sh "<worktree_dir>" "<original_dir>"
 ```
 
-- **cmux 環境**: `open-in-cmux.sh` に委譲し、右ペインで `SETUP_COMMANDS`（`git submodule update --init --recursive && mise run setup`）実行後に Claude を起動する
+- **cmux 環境**: `open-in-cmux.sh` に委譲し、右ペインで `SETUP_COMMANDS`（`mise run setup`、submodule update は setup 内に統合済）実行後に Claude を起動する
 - **それ以外**: 新しいペインで実行すべきコマンド（`cd "<worktree>" && <setup> && claude`）を表示する（macOS ならクリップボードにもコピーする）。スキルはこの出力をそのままユーザーに見せる
 - `WORKTREE_TERMINAL=cmux|manual` を環境変数で渡すと判別を上書きできる
 - 起動後のセッションで `/start-implementation` を使って計画・実装を行う
