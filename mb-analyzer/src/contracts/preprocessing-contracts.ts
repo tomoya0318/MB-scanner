@@ -163,7 +163,7 @@ export type WrapperKind = (typeof WRAPPER_KIND)[keyof typeof WRAPPER_KIND];
  *  - `change-units-parse-fail`: `findChangeUnits` が AST parse 例外で失敗
  *  - `empty-diff`: AST diff が空 (lib に実質変更なし)
  *  - `no-fn-unit`: 変更が関数単位に切り分けられなかった (= module-wide-change 相当の changed-fn 版)
- *  - `fn-renamed-or-removed`: 変更前関数が after 側で見つからない (rename / 削除)
+ *  - `unit-renamed-or-removed`: 変更 unit (fn / stmt) が after 側で見つからない (rename / 削除 / occurrence 不一致)
  *  - `fn-non-block-body`: arrow `=> expr` 等で BlockStatement 本体が無い
  *  - `fn-param-names-mismatch`: before/after で param 名リストが一致しない
  */
@@ -177,7 +177,7 @@ export const SELAKOVIC_EXCLUSION_REASON = {
   CHANGE_UNITS_PARSE_FAIL: "change-units-parse-fail",
   EMPTY_DIFF: "empty-diff",
   NO_FN_UNIT: "no-fn-unit",
-  FN_RENAMED_OR_REMOVED: "fn-renamed-or-removed",
+  UNIT_RENAMED_OR_REMOVED: "unit-renamed-or-removed",
   FN_NON_BLOCK_BODY: "fn-non-block-body",
   FN_PARAM_NAMES_MISMATCH: "fn-param-names-mismatch",
 } as const;

@@ -50,8 +50,8 @@ const STMT_BODY_PLACEHOLDER = "$BODY$";
  * `graph` は pipeline が `buildCallGraph(beforeAst, [f1])` で作った参照グラフ。reachable fn の選別に使う。
  *
  * excluded marker を返すケース:
- *  - after-AST に対応 stmt 無し (削除 / rename / occurrence 数の前後不一致) → `FN_RENAMED_OR_REMOVED`
- *    (reason 名は fn 由来だが「after に対応するものが無い」の意味で stmt 側にも再利用、改名は別 PR)
+ *  - after-AST に対応 stmt 無し (削除 / rename / occurrence 数の前後不一致) → `UNIT_RENAMED_OR_REMOVED`
+ *    (「変更 unit が after 側に対応するものを持たない」の意味で fn / stmt 共通の reason)
  */
 export function buildChangedStmtCandidate(
   unit: StmtChangeUnit,
@@ -64,13 +64,13 @@ export function buildChangedStmtCandidate(
   try {
     afterAst = parse(libAfterSrc);
   } catch {
-    return buildExcludedChangedStmtCandidate(SELAKOVIC_EXCLUSION_REASON.FN_RENAMED_OR_REMOVED);
+    return buildExcludedChangedStmtCandidate(SELAKOVIC_EXCLUSION_REASON.UNIT_RENAMED_OR_REMOVED);
   }
 
   const afterStmt = findAfterStmtByBindingsAndOccurrence(afterAst, unit.bindings, unit.bindingsOccurrence);
   const stmtSpan = afterStmt === null ? null : nodeSpan(afterStmt);
   if (afterStmt === null || stmtSpan === null) {
-    return buildExcludedChangedStmtCandidate(SELAKOVIC_EXCLUSION_REASON.FN_RENAMED_OR_REMOVED);
+    return buildExcludedChangedStmtCandidate(SELAKOVIC_EXCLUSION_REASON.UNIT_RENAMED_OR_REMOVED);
   }
 
   // changed stmt を $BODY$ で穴あき + reachable fn 群を observer 化 を 1 パスで適用する。
@@ -248,13 +248,13 @@ if (import.meta.vitest) {
       expect(() => parse(substituted)).not.toThrow();
     });
 
-    it("after に対応 stmt 無し (rename / 削除) → FN_RENAMED_OR_REMOVED marker", () => {
+    it("after に対応 stmt 無し (rename / 削除) → UNIT_RENAMED_OR_REMOVED marker", () => {
       const f1d = extractF1(inline)!;
       const unit = stmtUnitFor(libBefore, libAfter);
       const graph = graphFor(libBefore, libAfter, f1d);
       const libAfterDeleted = `var OTHER = 'x';\nvar lib = {};\nlib.foo = function () { return OTHER; };`;
       const r = buildChangedStmtCandidate(unit, libBefore, libAfterDeleted, f1d, graph);
-      expect(r.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.FN_RENAMED_OR_REMOVED);
+      expect(r.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.UNIT_RENAMED_OR_REMOVED);
       expect(r.setup).toBeUndefined();
     });
 
