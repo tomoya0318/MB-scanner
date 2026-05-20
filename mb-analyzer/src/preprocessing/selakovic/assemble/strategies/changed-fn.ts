@@ -14,12 +14,11 @@ import {
   type SelakovicExclusionReason,
 } from "../../../../contracts/preprocessing-contracts";
 import type { FnChangeUnit } from "../../../common/change-units";
-import {
-  replaceFunctionBodyWithObserver,
-  wrapObservedWorkload,
-} from "../../../../codegen/placeholder";
+import { replaceFunctionBodyWithObserver } from "../../../../codegen/placeholder";
 import { statementsToCode } from "../../../common/setup-cleanup";
 import type { F1Decomposition } from "../../decompose/f1";
+import { assembleAngularChangedFn } from "../wrappers/angular";
+import { assembleTopLevelChangedFn } from "../wrappers/top-level";
 
 /**
  * `aspect: lib` の changed-fn candidate を組む (ADR-0023 §4 値契約、placeholder substitution model)。
@@ -27,19 +26,18 @@ import type { F1Decomposition } from "../../decompose/f1";
  * で KEEP したもの)。`libAfterSrc` は `findChangeUnits` に渡したのと同じ after lib ソース
  * (`unit.afterFn` の span がここを指す)。
  *
- * 出力する 4 値 (ADR-0023 D-δ §observation 仕様: 観測ハーネスは setup 側に inline 化):
- *  - `setup` = 穴あき lib (変更関数の body を「観測ハーネス入り `{ $BODY$ }`」で置換 =
- *    `replaceFunctionBodyWithObserver`) + preWorkload を結合した文字列。`$BODY$` を厳密に 1 個含み、
- *    equivalence-checker 側で `substituteBody(setup, slow|fast)` で差し込む。
- *  - `slow` = 変更前 body の statementsToCode 出力 (= 裸 body)。観測ハーネスは setup 側の `$BODY$` を
- *    囲う観測 IIFE が担うので、ここには載らない (= pruning が見る範囲から観測足場が消える)。
- *  - `fast` = 同じく変更後 body の裸 statementsToCode 出力。
- *  - `workload` = `wrapObservedWorkload(f1Body の statementsToCode)` (= `__OBS__ = []` 初期化 → workload 実行
- *    → `JSON.stringify(__OBS__)` を完了値で返す IIFE)。
+ * 共通処理 (hole 化 / body slice / param 検査) の後に `f1Decomposition.wrapperKind` で実行容器を dispatch し、
+ * 4 値の組み立ては `wrappers/` の各関数へ委譲する (ADR-0023 §順 2-1 案 C'):
+ *  - `top-level` → `assembleTopLevelChangedFn` (lib を setup に置き workload で f1 body を直接実行)
+ *  - `angular-controller-wrapper` → `assembleAngularChangedFn` (bootstrap を setup 側に組み workload で
+ *    `globalThis.__selakovic_f1()` を呼ぶ。詳細は当該関数の docstring)
+ *  - それ以外 (将来 server 等) → `buildExcludedChangedFnCandidate(ANGULAR_WRAPPER_SKIP)`
  *
- * sandbox 投入時は equivalence-checker が `substituteBody(setup, slow)` で `$BODY$` (= 観測 IIFE 内側)
- * に裸 body を差し込み、`declareObservationGlobal` で `let __OBS__ = [];` を setup 先頭に prepend してから
- * executor へ渡す。
+ * いずれも placeholder substitution model (ADR-0023 D-δ §observation): `setup` は穴あき lib (変更関数 body を
+ * `replaceFunctionBodyWithObserver` で「観測ハーネス入り `{ $BODY$ }`」に置換、`$BODY$` 厳密 1 個)、`slow`/`fast`
+ * は変更前/後 body の裸 statementsToCode 出力。sandbox 投入時は equivalence-checker が `substituteBody(setup, slow)`
+ * で `$BODY$` (= 観測 IIFE 内側) に裸 body を差し込み、`declareObservationGlobal` で `let __OBS__ = [];` を setup 先頭に
+ * prepend してから executor へ渡す。
  *
  * adapter_meta:
  *  - target_side = lib (変更関数は lib 側、ADR-0024)
@@ -52,16 +50,13 @@ import type { F1Decomposition } from "../../decompose/f1";
  *  - before / after の param が本質変更 (個数差・pattern type 違い・default 付き等)、または
  *    rename-only でも rename 先名と body 内 binding が衝突 → `FN_PARAM_NAMES_MISMATCH`
  *    (rename-only かつ衝突なしのケースは body を identifier-rename して candidate 化、ADR-0023 D-γ §DROP 可視化緩和)
- *  - workload (`f1`) が top-level wrapper でない → `ANGULAR_WRAPPER_SKIP` (pipeline 側で先に弾かれる前提だが防御的に判定)
+ *  - 未対応の `wrapperKind` (将来 server 等) → `ANGULAR_WRAPPER_SKIP`
  */
 export function buildChangedFnCandidate(
   unit: FnChangeUnit,
   libAfterSrc: string,
   f1Decomposition: F1Decomposition,
 ): PreprocessingCandidate {
-  if (f1Decomposition.wrapperKind !== "top-level") {
-    return buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.ANGULAR_WRAPPER_SKIP);
-  }
   const afterFn = unit.afterFn;
   if (afterFn === null) {
     return buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.UNIT_RENAMED_OR_REMOVED);
@@ -88,23 +83,46 @@ export function buildChangedFnCandidate(
       : (beforeBody.body as readonly Statement[]);
 
   const holedLib = replaceFunctionBodyWithObserver(libAfterSrc, { start: afterBody.start, end: afterBody.end });
-  const preWorkload = statementsToCode([...f1Decomposition.preWorkloadStatements]);
-  const setup = [holedLib, preWorkload].filter((s) => s.length > 0).join("\n;\n");
+  const preWorkloadCode = statementsToCode([...f1Decomposition.preWorkloadStatements]);
   const slow = statementsToCode(beforeBodyStatements);
   const fast = statementsToCode(afterBody.body as readonly Statement[]);
-  const workload = wrapObservedWorkload(statementsToCode([...f1Decomposition.f1Body.body]));
+  const f1BodyCode = statementsToCode([...f1Decomposition.f1Body.body]);
+  const enclosureNodeType = afterFn.type;
+  const beforeNodeCount = countNodes(beforeBody as unknown as Node);
+  const afterNodeCount = countNodes(afterBody as unknown as Node);
 
-  return {
-    setup,
-    slow,
-    fast,
-    workload,
-    enclosure_node_type: afterFn.type,
-    // node count は「pruning が削る対象 = 変更関数の本体」のサイズ (inline 全文サイズ ≠ embedded の値)。
-    before_node_count: countNodes(beforeBody as unknown as Node),
-    after_node_count: countNodes(afterBody as unknown as Node),
-    candidate_meta: { adapter: "selakovic", target_side: TARGET_SIDE.LIB, is_workload_reachable: true },
-  };
+  // wrapperKind dispatch (ADR-0023 §順 2-1 案 C'): 実行容器ごとに wrappers/ の組み立て関数へ委譲する。
+  // hole 化 / body slice / param 検査の共通処理はここまでで済んでいる。
+  if (f1Decomposition.wrapperKind === "top-level") {
+    return assembleTopLevelChangedFn({
+      holedLib,
+      preWorkloadCode,
+      slow,
+      fast,
+      f1BodyCode,
+      enclosureNodeType,
+      beforeNodeCount,
+      afterNodeCount,
+    });
+  }
+  if (f1Decomposition.wrapperKind === "angular-controller-wrapper" && f1Decomposition.angular !== undefined) {
+    const a = f1Decomposition.angular;
+    return assembleAngularChangedFn({
+      holedLib,
+      slow,
+      fast,
+      preWorkloadCode,
+      f1BodyCode,
+      moduleName: a.moduleName,
+      ctrlName: a.ctrlName,
+      ctrlParams: a.ctrlParams,
+      enclosureNodeType,
+      beforeNodeCount,
+      afterNodeCount,
+    });
+  }
+  // 未対応の wrapperKind (将来 server も同型で追加) は marker で痕跡を残す。
+  return buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.ANGULAR_WRAPPER_SKIP);
 }
 
 /**
@@ -135,7 +153,7 @@ if (import.meta.vitest) {
   const { findChangeUnits } = await import("../../../common/change-units");
   const { extractF1 } = await import("../../decompose/f1");
   const { parse } = await import("../../../../ast/parser");
-  const { substituteBody } = await import("../../../../codegen/placeholder");
+  const { substituteBody, declareObservationGlobal } = await import("../../../../codegen/placeholder");
   // 観点: workload が呼ぶ変更関数の fn unit から changed-fn candidate を組む (placeholder substitution model)。
   // ADR-0023 D-δ §observation 仕様: 観測ハーネスは setup 側の関数本体に inline 化、slow/fast は裸 body。
   // setup に lib 全文 (変更関数の body を「観測ハーネス入り $BODY$」で穴あき)、slow/fast に変更前/後 body を
@@ -331,17 +349,61 @@ lib.norm = function (x) {
       expect(r.setup).toBeUndefined();
     });
 
-    it("angular controller wrapper の f1 → ANGULAR_WRAPPER_SKIP marker (D-β では top-level のみ)", () => {
+    it("angular controller wrapper の f1 → 真の changed-fn candidate (案 C' dispatch、ADR-0023 §順 2-1)", () => {
       const angularInline = `
         var app = angular.module("benchApp", []);
-        app.controller("BenchCtrl", function ($scope) { lib.norm(1); });
+        app.controller("BenchCtrl", function ($scope) {
+          var f1 = function () { lib.norm(7); lib.norm(8); };
+          var a = execute(f1, 10);
+        });
       `;
       const f1d = extractF1(angularInline);
-      if (f1d && f1d.wrapperKind !== "top-level") {
-        const unit = fnUnitFor(libBefore, libAfter);
-        const r = buildChangedFnCandidate(unit, libAfter, f1d);
-        expect(r.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.ANGULAR_WRAPPER_SKIP);
-      }
+      expect(f1d?.wrapperKind).toBe("angular-controller-wrapper");
+      const unit = fnUnitFor(libBefore, libAfter);
+      const r = buildChangedFnCandidate(unit, libAfter, f1d!);
+      // marker ではなく真の candidate が出る (= verdict に乗る)
+      expect(r.candidate_excluded).toBeUndefined();
+      expect(r.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
+      expect(r.candidate_meta.is_workload_reachable).toBe(true);
+      // setup = holedLib (観測ハーネス + $BODY$ 1 個) + angular bootstrap (module/controller 再構成 + 実体化)
+      expect((r.setup!.match(/\$BODY\$/g) ?? []).length).toBe(1);
+      expect(r.setup).toContain("let __OBS_R__");
+      expect(r.setup).toContain('angular.module("benchApp", []);');
+      expect(r.setup).toContain('.controller("BenchCtrl", function ($scope) {');
+      expect(r.setup).toContain("globalThis.__selakovic_f1 = f1;");
+      expect(r.setup).toContain("__selakovic_inj.get('$controller')");
+      // slow / fast は top-level と同じ裸 body 断片
+      expect(r.slow).toContain("% 2 === 0");
+      expect(r.slow).not.toContain("__OBS_R__");
+      expect(r.fast).toContain("& 1 === 0");
+      // workload = __OBS__ reset → f1 1 回呼び出し → JSON.stringify
+      expect(r.workload).toContain("__OBS__ = [];");
+      expect(r.workload).toContain("globalThis.__selakovic_f1();");
+      expect(r.workload).toContain("return JSON.stringify(__OBS__);");
+      // sandbox 投入直前形 (substituteBody(setup, slow) + __OBS__ 宣言 prepend) が valid JS
+      expect(() => parse(declareObservationGlobal(substituteBody(r.setup!, r.slow!)))).not.toThrow();
+    });
+
+    it("angular-controller-wrapper だが angular 情報が欠落 → ANGULAR_WRAPPER_SKIP marker (dispatch の防御節)", () => {
+      const angularInline = `
+        var app = angular.module("benchApp", []);
+        app.controller("BenchCtrl", function ($scope) {
+          var f1 = function () { lib.norm(7); };
+          var a = execute(f1, 10);
+        });
+      `;
+      const f1d = extractF1(angularInline)!;
+      // 型上は optional な angular を欠落させた異常系 (decompose が壊れた場合の防御)
+      const broken: F1Decomposition = {
+        wrapperKind: f1d.wrapperKind,
+        f1Body: f1d.f1Body,
+        preWorkloadStatements: f1d.preWorkloadStatements,
+        harnessStatements: f1d.harnessStatements,
+      };
+      const unit = fnUnitFor(libBefore, libAfter);
+      const r = buildChangedFnCandidate(unit, libAfter, broken);
+      expect(r.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.ANGULAR_WRAPPER_SKIP);
+      expect(r.setup).toBeUndefined();
     });
   });
 }

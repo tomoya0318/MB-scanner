@@ -166,10 +166,8 @@ function appendChangeUnitCandidates(
     candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.NO_LIB_SOURCE));
     return;
   }
-  if (f1Before.wrapperKind !== "top-level") {
-    candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.ANGULAR_WRAPPER_SKIP));
-    return;
-  }
+  // wrapperKind (top-level / angular-controller-wrapper) の dispatch は buildChangedFnCandidate 側に集約 (案 C')。
+  // ここで angular を先弾きせず、changed-fn ループに通して真の candidate 化する。
 
   let cu;
   try {

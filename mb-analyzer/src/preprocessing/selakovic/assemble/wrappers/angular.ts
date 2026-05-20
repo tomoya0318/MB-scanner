@@ -1,3 +1,8 @@
+import {
+  TARGET_SIDE,
+  type PreprocessingCandidate,
+} from "../../../../contracts/preprocessing-contracts";
+import { wrapObservedWorkload } from "../../../../codegen/placeholder";
 import { wrapBoundaryVarsStatement } from "../recorder-hooks";
 
 /**
@@ -22,18 +27,28 @@ export interface AngularRunnableOptions {
   readonly f1BodyCode: string;
 }
 
-export function buildAngularRunnable(opts: AngularRunnableOptions): string {
+/**
+ * module/controller を再構成し `globalThis.__selakovic_f1` を定義する登録文 +
+ * injector 起動 + controller 実体化までの bootstrap 行を組み立てる
+ * (`buildAngularRunnable` の自己完結 IIFE と `assembleAngularChangedFn` の setup で共有)。
+ *
+ * 実体化 (`$controller(...)`) で controller fn が走り、preWorkload 実行・`var f1` 定義・
+ * `globalThis.__selakovic_f1` への束縛・注入 service の記録 Proxy wrap (C6) が済む。
+ * f1 の **呼び出し** は含まない (= 呼び出し側が観測戦略に応じて付け足す)。
+ */
+function buildAngularBootstrapLines(opts: {
+  readonly moduleName: string;
+  readonly ctrlName: string;
+  readonly ctrlParams: readonly string[];
+  readonly preWorkloadCode: string;
+  readonly f1BodyCode: string;
+}): readonly string[] {
   const wrappedParams = opts.ctrlParams.length > 0 ? [...opts.ctrlParams] : ["$scope"];
   const params = wrappedParams.join(", ");
   const scopeParam = wrappedParams[0] ?? "$scope";
   const moduleNameJson = JSON.stringify(opts.moduleName);
   const ctrlNameJson = JSON.stringify(opts.ctrlName);
   return [
-    "(function () {",
-    "// ---- library under test ----",
-    opts.libSource,
-    ";",
-    "// ---- bootstrap (reconstructed module/controller, measurement harness stripped) ----",
     `var __selakovic_app = angular.module(${moduleNameJson}, []);`,
     `__selakovic_app.controller(${ctrlNameJson}, function (${params}) {`,
     opts.preWorkloadCode,
@@ -47,6 +62,17 @@ export function buildAngularRunnable(opts: AngularRunnableOptions): string {
     `var __selakovic_inj = angular.injector(['ng', ${moduleNameJson}]);`,
     "var __selakovic_root = __selakovic_inj.get('$rootScope').$new();",
     `__selakovic_inj.get('$controller')(${ctrlNameJson}, { $scope: __selakovic_root });`,
+  ];
+}
+
+export function buildAngularRunnable(opts: AngularRunnableOptions): string {
+  return [
+    "(function () {",
+    "// ---- library under test ----",
+    opts.libSource,
+    ";",
+    "// ---- bootstrap (reconstructed module/controller, measurement harness stripped) ----",
+    ...buildAngularBootstrapLines(opts),
     "// ---- run f1 once + capture observables ----",
     "var __selakovic_ret = globalThis.__selakovic_f1();",
     "var __selakovic_scopeState = {};",
@@ -56,9 +82,67 @@ export function buildAngularRunnable(opts: AngularRunnableOptions): string {
   ].join("\n");
 }
 
+/**
+ * Angular controller-wrapper の changed-fn candidate を組む (placeholder substitution model、ADR-0023 §4 値契約、
+ * 案 C' = spike 順 2-0)。`buildChangedFnCandidate` (`strategies/changed-fn.ts`) の wrapperKind dispatch から
+ * 呼ばれる。hole 化 / body slice / param 検査の共通処理は呼び出し側で済み、ここでは「Angular controller
+ * 実行容器にどう組むか」だけを担う (wrappers レイヤの責務)。
+ *
+ * top-level changed-fn (`assembleTopLevelChangedFn`) との違いは「変更関数を走らせるのに Angular の
+ * module/controller bootstrap が要る」点だけ。bootstrap を **setup (状態構築) と workload (観測実行) に分割**
+ * して placeholder model を満たす:
+ *  - `setup` = `holedLib` (変更関数 body を観測ハーネス入り `{ $BODY$ }` で置換済、`$BODY$` 1 個) +
+ *    bootstrap (module/controller 登録 + injector 起動 + 実体化 = `globalThis.__selakovic_f1` を定義)。
+ *    実体化は f1 を **呼ばない** ので、preWorkload / 実体化中に変更関数が呼ばれた観測値は workload 先頭の
+ *    `__OBS__=[]` reset で破棄され、純粋に f1 呼び出しの観測だけが完了値に乗る (top-level とセマンティクス整合)。
+ *  - `slow` / `fast` = 変更前 / 後 body の裸断片 (top-level と同一)。
+ *  - `workload` = `wrapObservedWorkload("globalThis.__selakovic_f1();")` (= `__OBS__=[]` reset → f1 1 回呼び出し
+ *    → `JSON.stringify(__OBS__)` 完了値返却)。f1 が観測ハーネス入り lib 関数を呼ぶことで `__OBS__` に push される。
+ *
+ * `angular.ctrlMethod` は controller 固定再構成では使わない (`buildAngularRunnable` と同様)。
+ */
+export interface AssembleAngularChangedFnArgs {
+  /** 変更関数 body を観測ハーネス入り `{ $BODY$ }` で置換済の lib 全文 (`$BODY$` 厳密 1 個)。 */
+  readonly holedLib: string;
+  readonly slow: string;
+  readonly fast: string;
+  readonly preWorkloadCode: string;
+  /** f1 の body のコード (外側の `{}` を含まない statement 列)。controller 内の `var f1` に埋まる。 */
+  readonly f1BodyCode: string;
+  readonly moduleName: string;
+  readonly ctrlName: string;
+  readonly ctrlParams: readonly string[];
+  readonly enclosureNodeType: string;
+  readonly beforeNodeCount: number;
+  readonly afterNodeCount: number;
+}
+
+export function assembleAngularChangedFn(args: AssembleAngularChangedFnArgs): PreprocessingCandidate {
+  const bootstrap = buildAngularBootstrapLines({
+    moduleName: args.moduleName,
+    ctrlName: args.ctrlName,
+    ctrlParams: args.ctrlParams,
+    preWorkloadCode: args.preWorkloadCode,
+    f1BodyCode: args.f1BodyCode,
+  });
+  const setup = [args.holedLib, bootstrap.join("\n")].join("\n;\n");
+  return {
+    setup,
+    slow: args.slow,
+    fast: args.fast,
+    workload: wrapObservedWorkload("globalThis.__selakovic_f1();"),
+    enclosure_node_type: args.enclosureNodeType,
+    before_node_count: args.beforeNodeCount,
+    after_node_count: args.afterNodeCount,
+    candidate_meta: { adapter: "selakovic", target_side: TARGET_SIDE.LIB, is_workload_reachable: true },
+  };
+}
+
 // 判断: ai-guide/adr/0007-in-source-testing-internal-helpers.md
 if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
+  const { parse } = await import("../../../../ast/parser");
+  const { substituteBody, declareObservationGlobal } = await import("../../../../codegen/placeholder");
 
   const base = {
     libSource: "/* lib */ var __LIB_MARKER__ = 1;",
@@ -105,6 +189,74 @@ if (import.meta.vitest) {
       expect(code).toContain('angular.module("a\\"pp", []);');
       expect(code).toContain('.controller("C\\\\tl", function');
       expect(code).toContain("__selakovic_inj = angular.injector(['ng', \"a\\\"pp\"]);");
+    });
+  });
+
+  // changed-fn (placeholder substitution model) 経路。observation は __OBS__ (戻り値観測) で、
+  // bootstrap を setup (状態構築) と workload (f1 呼び出し) に分割する (ADR-0023 §順 2-1 案 C')。
+  describe("assembleAngularChangedFn (in-source)", () => {
+    // 変更関数 body を観測ハーネス入り `{ $BODY$ }` で置換済の lib (= changed-fn.ts の holedLib 相当を手組み)。
+    const holedLib =
+      "var lib = {};\nlib.norm = function (x) { let __OBS_R__ = (function () { $BODY$ }).apply(this, arguments); __OBS__.push(0); return __OBS_R__; };";
+    const baseArgs = {
+      holedLib,
+      slow: "return x % 2 === 0;",
+      fast: "return (x & 1) === 0;",
+      preWorkloadCode: "",
+      f1BodyCode: "lib.norm(7); lib.norm(8);",
+      moduleName: "benchApp",
+      ctrlName: "BenchCtrl",
+      ctrlParams: ["$scope"] as const,
+      enclosureNodeType: "FunctionExpression",
+      beforeNodeCount: 5,
+      afterNodeCount: 5,
+    };
+
+    it("setup = holedLib + bootstrap ($BODY$ 1 個)、slow/fast は裸 body、workload は f1 呼び出し", () => {
+      const r = assembleAngularChangedFn({ ...baseArgs, ctrlParams: [...baseArgs.ctrlParams] });
+      expect(r.candidate_excluded).toBeUndefined();
+      expect(r.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
+      expect(r.candidate_meta.is_workload_reachable).toBe(true);
+      expect(r.enclosure_node_type).toBe("FunctionExpression");
+      // setup: holedLib (観測ハーネス + $BODY$ 厳密 1 個) + bootstrap (controller 内に f1 body 展開)
+      expect((r.setup!.match(/\$BODY\$/g) ?? []).length).toBe(1);
+      expect(r.setup).toContain("let __OBS_R__");
+      expect(r.setup).toContain('angular.module("benchApp", []);');
+      expect(r.setup).toContain('.controller("BenchCtrl", function ($scope) {');
+      expect(r.setup).toContain("var f1 = function () {");
+      expect(r.setup).toContain("lib.norm(7); lib.norm(8);"); // f1 body は controller 内 (= setup)
+      expect(r.setup).toContain("globalThis.__selakovic_f1 = f1;");
+      expect(r.setup).toContain("__selakovic_inj.get('$controller')(\"BenchCtrl\", { $scope: __selakovic_root });");
+      // slow / fast は裸 body 断片 (観測足場無し、top-level と同一)
+      expect(r.slow).toBe(baseArgs.slow);
+      expect(r.fast).toBe(baseArgs.fast);
+      expect(r.slow).not.toContain("__OBS_R__");
+      // workload = __OBS__ reset → f1 1 回呼び出し → JSON.stringify
+      expect(r.workload).toContain("__OBS__ = [];");
+      expect(r.workload).toContain("globalThis.__selakovic_f1();");
+      expect(r.workload).toContain("return JSON.stringify(__OBS__);");
+      expect(r.workload).not.toContain("globalThis.__OBS");
+      // sandbox 投入直前形 (substituteBody(setup, slow) + __OBS__ 宣言 prepend) が valid JS
+      expect(() => parse(declareObservationGlobal(substituteBody(r.setup!, r.slow!)))).not.toThrow();
+      expect(() => parse(declareObservationGlobal(substituteBody(r.setup!, r.fast!)))).not.toThrow();
+      // workload も単独で valid な式
+      expect(() => parse(`var _ = ${r.workload!};`)).not.toThrow();
+    });
+
+    it("$scope.$eval を含む f1 body でも setup が組め、substituteBody 後に valid JS (issue_10351 相当)", () => {
+      const r = assembleAngularChangedFn({
+        ...baseArgs,
+        ctrlParams: ["$scope"],
+        f1BodyCode: "$scope.$eval('1 + 1'); lib.norm(1);",
+      });
+      expect(r.setup).toContain("$scope.$eval('1 + 1');");
+      expect((r.setup!.match(/\$BODY\$/g) ?? []).length).toBe(1);
+      expect(() => parse(declareObservationGlobal(substituteBody(r.setup!, r.fast!)))).not.toThrow();
+    });
+
+    it("ctrlParams が空なら $scope をフォールバックに使う (buildAngularRunnable と同挙動)", () => {
+      const r = assembleAngularChangedFn({ ...baseArgs, ctrlParams: [] });
+      expect(r.setup).toContain('.controller("BenchCtrl", function ($scope) {');
     });
   });
 }
