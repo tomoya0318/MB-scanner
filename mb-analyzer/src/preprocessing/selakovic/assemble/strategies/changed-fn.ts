@@ -47,7 +47,7 @@ import type { F1Decomposition } from "../../decompose/f1";
  *
  * 次のケースは `buildExcludedChangedFnCandidate(reason)` を返す (= この unit からは真の candidate を
  * 作らない、ADR-0023 D-γ §DROP 可視化で reason を残す):
- *  - `unit.afterFn === null` (rename / 削除) → `FN_RENAMED_OR_REMOVED`
+ *  - `unit.afterFn === null` (rename / 削除) → `UNIT_RENAMED_OR_REMOVED`
  *  - `afterFn` / `beforeFn` の本体が BlockStatement でない (arrow `=> expr` 等) → `FN_NON_BLOCK_BODY`
  *  - before / after の param が本質変更 (個数差・pattern type 違い・default 付き等)、または
  *    rename-only でも rename 先名と body 内 binding が衝突 → `FN_PARAM_NAMES_MISMATCH`
@@ -64,7 +64,7 @@ export function buildChangedFnCandidate(
   }
   const afterFn = unit.afterFn;
   if (afterFn === null) {
-    return buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.FN_RENAMED_OR_REMOVED);
+    return buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.UNIT_RENAMED_OR_REMOVED);
   }
   const afterBody = functionBlockBody(afterFn);
   const beforeBody = functionBlockBody(unit.beforeFn);
@@ -112,7 +112,7 @@ export function buildChangedFnCandidate(
  * setup/slow/fast を持たず、`candidate_excluded` に reason を立てた candidate を返す。痕跡が extracted.jsonl に
  * 残り、`funnel.py` / `inspect_candidates.py` で reason 別件数を集計できる。
  * `is_workload_reachable` は excluded marker では常に `false` で固定 — `CHANGE_NOT_EXERCISED` 以外の reason
- * (例: `FN_RENAMED_OR_REMOVED`) では本来 workload 到達済の unit を含むが、「真の candidate のみ true」と
+ * (例: `UNIT_RENAMED_OR_REMOVED`) では本来 workload 到達済の unit を含むが、「真の candidate のみ true」と
  * いう規約で `build_equiv_input.py:is_small_candidate` / 集計ロジックを単純化するための便宜的扱い。
  * reason 別の意味は `candidate_excluded` 自体を参照すること。
  */
@@ -309,12 +309,12 @@ lib.norm = function (x) {
       expect(c2.setup).toBeUndefined();
     });
 
-    it("afterFn === null (rename / 削除) → FN_RENAMED_OR_REMOVED marker", () => {
+    it("afterFn === null (rename / 削除) → UNIT_RENAMED_OR_REMOVED marker", () => {
       const f1d = extractF1(inline)!;
       const baseUnit = fnUnitFor(libBefore, libAfter);
       const renamedUnit: FnChangeUnit = { ...baseUnit, afterFn: null, afterFnAncestors: [] };
       const r = buildChangedFnCandidate(renamedUnit, libAfter, f1d);
-      expect(r.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.FN_RENAMED_OR_REMOVED);
+      expect(r.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.UNIT_RENAMED_OR_REMOVED);
       expect(r.setup).toBeUndefined();
     });
 

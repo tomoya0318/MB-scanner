@@ -45,7 +45,7 @@ class TestEnums:
             "change-units-parse-fail",
             "empty-diff",
             "no-fn-unit",
-            "fn-renamed-or-removed",
+            "unit-renamed-or-removed",
             "fn-non-block-body",
             "fn-param-names-mismatch",
         }

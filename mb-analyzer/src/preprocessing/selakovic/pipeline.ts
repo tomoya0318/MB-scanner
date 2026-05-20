@@ -183,7 +183,7 @@ function appendChangeUnitCandidates(
     return;
   }
   // afterFn=null (rename / 削除) も含めて fn unit を可視化対象にする (ADR-0023 D-γ §DROP 可視化、
-  // FN_RENAMED_OR_REMOVED reason を builder 内で marker 化)。stmt unit も changed-stmt strategy で 1st-class
+  // UNIT_RENAMED_OR_REMOVED reason を builder 内で marker 化)。stmt unit も changed-stmt strategy で 1st-class
   // candidate に格上げ (no-fn-unit rescue、phase3 順 1-d): モジュール本体 / 匿名 IIFE 本体直下の変更
   // (`var VERSION = '...'` 等) を、reachable な named fn から読まれるなら workload-driven observation で
   // 等価検証に乗せる。

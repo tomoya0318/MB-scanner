@@ -111,7 +111,7 @@ class SelakovicExclusionReason(StrEnum):
     CHANGE_UNITS_PARSE_FAIL = "change-units-parse-fail"
     EMPTY_DIFF = "empty-diff"
     NO_FN_UNIT = "no-fn-unit"
-    FN_RENAMED_OR_REMOVED = "fn-renamed-or-removed"
+    UNIT_RENAMED_OR_REMOVED = "unit-renamed-or-removed"
     FN_NON_BLOCK_BODY = "fn-non-block-body"
     FN_PARAM_NAMES_MISMATCH = "fn-param-names-mismatch"
 
