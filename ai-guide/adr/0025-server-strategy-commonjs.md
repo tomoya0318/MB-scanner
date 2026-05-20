@@ -2,18 +2,18 @@
 
 - **Status**: accepted (ローカル spike で 3/3 equal 達成、go ライン 2/3 以上を満たす — chalk-27a / chalk-28 / cheerio-386b)
 - **Date**: 2026-05-18
-- **Related**: ADR-0012 (vm executor + server vm globals/`.json` require の予約), ADR-0015 (equivalence-checker 二層化 / oracle 環境非依存), ADR-0017 (SUT lib npm dep を fork lockfile-vendored で解決), ADR-0023 (placeholder substitution + 4 値契約), ADR-0024 (preprocess contract base/adapter 分離 + `environment` 派生)
+- **Related**: ADR-0012 (vm executor + server vm globals/`.json` require の予約), ADR-0015 (equivalence-checker 二層化 / oracle 環境非依存), ADR-0016 (SUT lib npm dep を fork lockfile-vendored で解決), ADR-0023 (placeholder substitution + 4 値契約), ADR-0024 (preprocess contract base/adapter 分離 + `environment` 派生)
 
 ## このADRの守備範囲
 
-このADRが決めるのは **「server レイアウト issue (= `<lib>_*.js` が CommonJS module の `module.exports`/`require` を使う形) を equivalence-checker に乗せるとき、holed lib をどう組み立て、どの executor で走らせるか」だけ**。本実装は順 3-2 で行う別 PR。本 PR は ADR draft + 3 件 spike で go/no-go を出すための spike 駆動 ADR。
+このADRが決めるのは **「server レイアウト issue (= `<lib>_*.js` が CommonJS module の `module.exports`/`require` を使う形) を equivalence-checker に乗せるとき、holed lib をどう組み立て、どの executor で走らせるか」だけ**。判断は 3 件のローカル spike で実証してから確定した (spike 駆動 ADR、§決定 参照)。本実装は順 3-2 で行う別 PR。
 
 **扱わないこと** (他 ADR の管轄):
 - 何を観測するか (return / DOM / interaction trace 等) → **ADR-0013**
 - どの環境で走らせるか (jsdom+vm 主軸 / Playwright fallback の選定根拠) → **ADR-0012** (本 ADR は ADR-0012 §「server 系 SUT 用に最小 Node グローバル」を引用するだけで再定義しない)
 - placeholder の物理形 (`$BODY$` 単一置換, 4 値契約) → **ADR-0023**
 - 派生フィールド `environment` の出力位置 → **ADR-0024** (本 ADR は server × top_level のとき `vm` を返すよう adapter 側 derivation を改修する旨を予告するだけで、契約形式は触らない)
-- npm dep 解決 (`createRequire(libBase)`, fork lockfile-vendored) → **ADR-0017**
+- npm dep 解決 (`createRequire(libBase)`, fork lockfile-vendored) → **ADR-0016**
 
 ## コンテキスト
 
@@ -34,12 +34,12 @@ ADR-0012 は「server SUT 用に最小 Node グローバル (`process` / `Buffer
 
 | 軸 | A (現状) | B (jsdom 統一) | C (採用) | D (Playwright polyfill) |
 |---|---|---|---|---|
-| 救済期待件数 (26 件中) | 0 | 0 (失敗実証済) | 期待 ≥ 15 (spike で確定) | 不明 (実装前) |
+| DROP 解消 (26 件中) | 0 | 0 (失敗実証済) | 26 件が assemble 経路に乗る (verdict 件数は本実装後の全件再走で確定) | 不明 (実装前) |
 | 実装コスト | 0 | 中 (失敗) | 中 (新 strategy + adapter env 1 分岐) | 大 (bundler 統合) |
-| dep 解決 | n/a | 不整合 | ADR-0017 既存経路に乗る | 別経路要設計 |
+| dep 解決 | n/a | 不整合 | ADR-0016 既存経路に乗る | 別経路要設計 |
 | oracle 整合 | n/a | n/a | ADR-0015 環境非依存原則を維持 (oracle は capture を見るだけ) | 同左 |
 | 拡張性 (ESM 等) | × | × | ESM は別途 ADR、本 ADR の範囲外と明示 | △ |
-| migration コスト | 0 | 中 | 中 (本 PR は spike + ADR、本実装は順 3-2 別 PR) | 大 |
+| migration コスト | 0 | 中 | 中 (本実装は順 3-2 別 PR) | 大 |
 
 ## 決定
 
@@ -60,7 +60,7 @@ ADR-0012 は「server SUT 用に最小 Node グローバル (`process` / `Buffer
 3 件すべて slow と fast の observation・postState・exception が完全一致。閾値の最上段 `accepted` に到達。
 
 実証された点:
-- CommonJS `module.exports`/`require` 構造を保ったまま `$BODY$` 置換で穴あき lib を生成し、`createRequire(libBase)` で deps (ADR-0017 lockfile-vendored) を解決して実行できる
+- CommonJS `module.exports`/`require` 構造を保ったまま `$BODY$` 置換で穴あき lib を生成し、`createRequire(libBase)` で deps (ADR-0016 lockfile-vendored) を解決して実行できる
 - ADR-0012 で予約済の Node グローバル shim (`process`/`Buffer`/`setImmediate`) で SUT の require が `ReferenceError` ゼロで通る
 - multi-file lib (cheerio) でも変更ファイル 1 つだけを穴あき版に差し替える形で成立する
 
@@ -104,12 +104,12 @@ ADR-0012 は「server SUT 用に最小 Node グローバル (`process` / `Buffer
 ## 結果 / 影響
 
 採用 (accepted) の場合に得るもの:
-- server × top_level 26 件のうち spike 推定で N 件 (= 2/3 換算で ~17 件) が verdict 到達。Phase 3 ゴール「funnel ②→③ DROP < 10」への寄与大。
+- server × top_level 26 件が assemble 経路に乗り (= DROP 解消)、equiv-input 投入まで到達する。実際に何件が verdict (equal/not_equal) に至るかは順 3-2 本実装後の全件再走でしか確定しない (spike は 3 件のみで救済件数の外挿はしない — 順 1-b で「mismatch 3 件 → +3」の楽観見積もりが実測 0 件だった前例あり)。Phase 3 ゴール「funnel ②→③ DROP < 10」への寄与が見込める。
 - vm executor (ADR-0012) が actual に preprocess 経路から呼ばれる初の事例になり、ADR-0012 §C-1 (Playwright fallback 0 発火) と並ぶ「環境別分岐の最小決定例」として後続 ADR の参照点になる。
 - contract 変更ゼロ (`environment` フィールドは ADR-0024 で既に存在、本 ADR では値域 `vm` を活性化するだけ)。
 
 諦めるもの・将来のコスト:
-- CommonJS dep 解決は ADR-0017 lockfile-vendored 前提でロックインされる。npm registry から dep が消えると spike 自体が再現不能になる (ADR-0017 のトリガーと連動)。
+- CommonJS dep 解決は ADR-0016 lockfile-vendored 前提でロックインされる。npm registry から dep が消えると spike 自体が再現不能になる (ADR-0016 のトリガーと連動)。
 - recorder Proxy の境界決定が順 3-2 に持ち越される。C6 interaction trace の oracle 結果に影響する可能性があり、順 3-2 PR でも spike 同等の事前検証が要る。
 - ESM (`import`/`export`) を使う lib は本 ADR の射程外。Selakovic 2016 dataset には ESM lib は無い前提だが、将来 dataset 拡張時は別 ADR。
 
@@ -117,9 +117,9 @@ ADR-0012 は「server SUT 用に最小 Node グローバル (`process` / `Buffer
 
 以下のいずれかが成立したら本 ADR を見直す:
 
-- spike (本 PR) で `accepted (scope 縮小)` または `rejected` になったとき → scope 拡大には新 spike が要る
+- HTTP 系 (Request) / Socket.io 系など本 spike が扱わなかったカテゴリへ救済対象を広げるとき → 本 spike は純粋計算系 (Chalk) + HTML 操作系 (Cheerio) の 3 件のみで実証したので、新カテゴリは別 spike で再検証する
 - ESM (`import`/`export`) を使う server lib が dataset に追加されたとき → 本 ADR の射程外、新 ADR を起票
-- npm registry から SUT dep が失われ ADR-0017 lockfile install が壊れたとき → ADR-0017 のトリガーと連動
+- npm registry から SUT dep が失われ ADR-0016 lockfile install が壊れたとき → ADR-0016 のトリガーと連動
 - vm executor では DOM-like API を内蔵呼出する server SUT (例: cheerio の内部で document-like API を叩く実装) が判明し、vm globals で polyfill しきれないとき → ADR-0012 fallback (Playwright) の trigger 1 と合流するか、本 ADR を superseded する
 - recorder Proxy の境界決定 (順 3-2) で C6 interaction trace が両側 N/A になることが判明したとき → 順 3-2 で oracle 設計を変えるか、本 ADR を superseded する
 
