@@ -509,13 +509,14 @@ describe("preprocess — server (test_case)", () => {
     expect(changedFn).toBeDefined();
     expect(changedFn!.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
     expect((changedFn!.setup!.match(/\$BODY\$/g) ?? []).length).toBe(1);
-    expect(changedFn!.setup).toContain("globalThis.__SUT__ = __SUT_module__.exports;");
+    expect(changedFn!.setup).toContain("globalThis.__SUT__ = __mapRequire__");
     expect(changedFn!.slow).toContain("x * 2");
     expect(changedFn!.fast).toContain("x << 1");
-    expect(changedFn!.workload).toContain("return JSON.stringify(__OBS__);");
+    // 2 チャネル観測 (戻り値 r + post-state s)
+    expect(changedFn!.workload).toContain("return JSON.stringify({ r: __OBS__, s: __walk__(__tc_i__, 0) });");
   });
 
-  it("multi-file lib (file 数 > 1) は Phase 1 では changed-fn を組まず embedded #0 のまま (後続 Phase で救済)", () => {
+  it("multi-file lib (index.js entry): 変更ファイル (impl.js) を特定して穴あけ、entry=index.js で map-require 救済 (ADR-0025、順 3-2)", () => {
     const before = `(function () { function init() { return require('./lib_before'); } function test(lib) { return lib.run(); } exports.init = init; exports.test = test; })();`;
     const after = `(function () { function init() { return require('./lib_after'); } function test(lib) { return lib.run(); } exports.init = init; exports.test = test; })();`;
     const result = preprocess({
@@ -526,8 +527,13 @@ describe("preprocess — server (test_case)", () => {
       lib_after_files: { "index.js": "module.exports = require('./impl');", "impl.js": "exports.run = function () { return 2; };" },
       lib_kind: "dir",
     });
-    // multi-file はまだ救済しない → is_workload_reachable=true な candidate は無い (embedded #0 のみ)
-    expect(result.candidates.some((c) => c.candidate_meta.is_workload_reachable)).toBe(false);
+    const changedFn = result.candidates.find((c) => c.candidate_meta.is_workload_reachable);
+    expect(changedFn).toBeDefined();
+    // 変更ファイル impl.js が穴あけ対象 (__HOLED__)、entry は index.js
+    expect(changedFn!.setup).toContain('globalThis.__HOLED__["impl.js"]');
+    expect(changedFn!.setup).toContain('globalThis.__SUT__ = __mapRequire__(\'\')("./index");');
+    expect(changedFn!.slow).toContain("return 1;");
+    expect(changedFn!.fast).toContain("return 2;");
   });
 
   it("test_case が無いと fallback (lib top-level diff)", () => {

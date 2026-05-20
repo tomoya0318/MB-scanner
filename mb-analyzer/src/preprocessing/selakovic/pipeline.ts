@@ -230,11 +230,12 @@ function appendChangeUnitCandidates(
  * server (CommonJS) layout の lib 変更を fn unit に切り分け、変更関数ごとに server-changed-fn candidate を
  * `candidates` 末尾に push する (ADR-0025、順 3-2)。client の `appendChangeUnitCandidates` の server 版だが、
  * workload は `f1` ではなく `test_case` (init/setupTest/test) なので reachability 判定は行わず、変更関数の
- * 観測ハーネス戻り値 (`__OBS__`) を positive-evidence にする。
+ * 観測ハーネス戻り値 (`r`) + init 戻り値の post-state (`s`) を positive-evidence にする。
  *
- * Phase 1 スコープ: single-file lib (`module.exports` を持つ 1 ファイル、Chalk 形) のみ。multi-file
- * (named export / index 再 export / UMD) は穴あけ対象ファイル特定 + `installRequire` 経路との整合が要るため
- * 後続 Phase で一般化する。ここでは file 数 > 1 なら何もせず embedded #0 のまま (= 従来どおり DROP、後続で救済)。
+ * single-file (Chalk 形) / multi-file (Cheerio 等の dir lib) 両対応。**ファイルごとに** before↔after を diff し、
+ * 実 fn 変更を含むファイルを特定 → そのファイルだけ穴あけ、他は after 版のまま map-require で解決する
+ * (`server-changed-fn.ts` の map-require)。entry は `index.js` があればそれ、無ければ単一ファイル。
+ * entry を決められない multi-file (index.js 無し) は救済せず embedded #0 のまま残す。
  */
 function appendServerChangeUnitCandidates(
   candidates: PreprocessingCandidate[],
@@ -242,27 +243,52 @@ function appendServerChangeUnitCandidates(
   libAfterFiles: Record<string, string>,
   testCaseAfter: string,
 ): void {
-  const afterNames = Object.keys(libAfterFiles);
-  if (afterNames.length !== 1) return; // multi-file は後続 Phase
-  const libBeforeSrc = singleLibSource(libBeforeFiles);
-  const libAfterSrc = libAfterFiles[afterNames[0]!] ?? "";
-  if (libBeforeSrc.length === 0 || libAfterSrc.length === 0) return;
+  const afterKeys = Object.keys(libAfterFiles);
+  const entryKey = afterKeys.includes("index.js")
+    ? "index.js"
+    : afterKeys.length === 1
+      ? afterKeys[0]!
+      : null;
+  if (entryKey === null) return; // entry を決められない multi-file は後続課題
 
-  let cu;
-  try {
-    cu = findChangeUnits(libBeforeSrc, libAfterSrc);
-  } catch {
-    candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.CHANGE_UNITS_PARSE_FAIL));
-    return;
+  let appended = false;
+  let parseFailed = false;
+  for (const key of afterKeys) {
+    const beforeSrc = libBeforeFiles[key];
+    const afterSrc = libAfterFiles[key];
+    if (beforeSrc === undefined || afterSrc === undefined) continue; // before/after 片側のみの file は diff 不能
+    if (beforeSrc === afterSrc) continue;
+    let cu;
+    try {
+      cu = findChangeUnits(beforeSrc, afterSrc);
+    } catch {
+      parseFailed = true;
+      continue;
+    }
+    if (cu.empty) continue; // 整形差のみ (canonicalHash で無視済)
+    const fnUnits = cu.units.filter((u): u is FnChangeUnit => u.kind === "fn");
+    const otherAfterFiles = Object.fromEntries(afterKeys.filter((k) => k !== key).map((k) => [k, libAfterFiles[k]!]));
+    for (const u of fnUnits) {
+      candidates.push(
+        buildServerChangedFnCandidate({
+          unit: u,
+          changedFileKey: key,
+          changedFileAfterSrc: afterSrc,
+          otherAfterFiles,
+          entryKey,
+          testCaseSource: testCaseAfter,
+        }),
+      );
+      appended = true;
+    }
   }
-  if (cu.empty) return; // 意味論差なし (embedded #0 が trace を残す)
-  const fnUnits = cu.units.filter((u): u is FnChangeUnit => u.kind === "fn");
-  if (fnUnits.length === 0) {
-    candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.NO_FN_UNIT));
-    return;
-  }
-  for (const u of fnUnits) {
-    candidates.push(buildServerChangedFnCandidate(u, libAfterSrc, testCaseAfter));
+  // 1 件も組めなかったときだけ marker で痕跡を残す (parse 失敗 / fn unit 不在)。
+  if (!appended) {
+    candidates.push(
+      buildExcludedChangedFnCandidate(
+        parseFailed ? SELAKOVIC_EXCLUSION_REASON.CHANGE_UNITS_PARSE_FAIL : SELAKOVIC_EXCLUSION_REASON.NO_FN_UNIT,
+      ),
+    );
   }
 }
 

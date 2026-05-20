@@ -20,36 +20,38 @@ import { buildExcludedChangedFnCandidate } from "./changed-fn";
 /**
  * server (CommonJS) layout の changed-fn candidate を組む (ADR-0025、placeholder substitution model)。
  *
- * client の `buildChangedFnCandidate` と同じ「変更関数 body を `$BODY$` 穴あけ → slow/fast に裸 body →
- * 観測ハーネスで戻り値を `__OBS__` に収集」モデルを、CommonJS `module.exports`/`require` 構造を保ったまま
- * server の `test_case_*.js` 経路に乗せる。違いは実行容器:
+ * client `buildChangedFnCandidate` と同じ「変更関数 body を `$BODY$` 穴あけ → slow/fast に裸 body」モデルを、
+ * CommonJS `module.exports`/`require` 構造を保ったまま server の `test_case_*.js` 経路に乗せる。
  *
- *  - **client**: lib を setup に top-level で並べ、workload (f1 body) が `lib.foo()` を直接叩く。
- *  - **server (本関数)**: lib は `module.exports` を持つ CommonJS module。setup で穴あき lib を
- *    `(function (module, exports, require) { <holed lib> })(...)` の CommonJS wrapper で評価し、その exports を
- *    `globalThis.__SUT__` に公開する。workload は `test_case` を同じ CommonJS wrapper で評価し、その中の
- *    相対 `require('./<lib>')` を `__SUT__` に差し替えて `init()/setupTest()/test()` を実行する。test() 自体は
- *    戻り値を持たないことが多い (chalk 等) が、変更関数 body に inline された観測ハーネスが各呼び出しの戻り値を
- *    `__OBS__` に push するので、workload の完了値 `JSON.stringify(__OBS__)` が positive-evidence (return_value
- *    oracle、ADR-0018) になる。
+ * **module 解決 (map-require)**: lib の全 after ファイルを in-memory map に持ち、相対 require を map 上で解決する
+ * 自前 require を組む。穴あけ対象ファイルだけ raw な関数リテラル (`__HOLED__`) として埋め (`$BODY$` が raw コード
+ * 位置に来るので substituteBody が壊れない)、他ファイルは JSON map (`__FILES__`) + `new Function` で評価する。
+ * lib 内部の bare require (`require('lodash')` 等) と未解決の相対 require (`./package` 等) は ambient な
+ * jsdom executor の require (= `module_base_dir` 起点 + ADR-0016 lockfile-vendored) に委譲 / graceful `{}` 返し。
+ * single-file lib (Chalk) は「ファイル 1 個・entry = 変更ファイル」の退化形として同じ経路で扱う。
  *
- * `libAfterSrc` は単一ファイル CommonJS lib の after ソース全文 (`unit.afterFn` の span がここを指す)。
- * `testCaseSource` は after 側 `test_case_*.js` の全文 (slow/fast で共通の workload なので片側で足りる)。
- *
- * dep 解決: 穴あき lib / test_case 内の bare require (`require('ansi-styles')` 等) と、lib の相対 require は
- * ambient な jsdom executor の `require` (= `module_base_dir` 起点 + ADR-0016 lockfile-vendored fallback) が解決する。
- * 本関数が差し替えるのは test_case → lib の相対 require のみ。
+ * **観測 (2 チャネル)**: workload は test() 実行後に次の 2 つを観測値として返す:
+ *  - `r`: 変更関数の戻り値列 (`__OBS__`、observer ハーネスが push)。Chalk 等「戻り値が serializable」な lib を弁別
+ *  - `s`: init() 戻り値 (= SUT オブジェクト) の post-state を **汎用 safe-walk** (循環畳み込み + 関数の own プロパティも
+ *    walk) した projection。Cheerio 等「戻り値が `this`/void で mutation する」lib を、最終状態 (class 属性等) で弁別
+ *  → 戻り値系は `r`、mutation 系は `s` が positive-evidence になる (ADR-0018、TODO #1 の recorder/oracle 境界)。
  *
  * excluded marker の条件は client `buildChangedFnCandidate` と同じ (rename/削除 / non-block body / param 本質変更)。
- *
- * NOTE (Phase 1 スコープ): single-file lib (`module.exports` を持つ 1 ファイル、Chalk 形) のみ対象。
- * multi-file (named export / index 再 export / UMD) は後続 Phase で `installRequire` 経路との整合を取って一般化する。
  */
-export function buildServerChangedFnCandidate(
-  unit: FnChangeUnit,
-  libAfterSrc: string,
-  testCaseSource: string,
-): PreprocessingCandidate {
+export function buildServerChangedFnCandidate(params: {
+  unit: FnChangeUnit;
+  /** 変更関数を含むファイルの map キー (lib dir 起点の相対パス。single-file は唯一のキー)。 */
+  changedFileKey: string;
+  /** 変更ファイルの after ソース全文 (`unit.afterFn` の span がここを指す)。 */
+  changedFileAfterSrc: string;
+  /** 変更ファイル以外の after ファイル map (キー → ソース)。 */
+  otherAfterFiles: Record<string, string>;
+  /** lib の entry ファイルの map キー (multi-file は通常 `index.js`、single-file は変更ファイルと同じ)。 */
+  entryKey: string;
+  /** after 側 `test_case_*.js` 全文 (slow/fast 共通の workload)。 */
+  testCaseSource: string;
+}): PreprocessingCandidate {
+  const { unit, changedFileKey, changedFileAfterSrc, otherAfterFiles, entryKey, testCaseSource } = params;
   const afterFn = unit.afterFn;
   if (afterFn === null) {
     return buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.UNIT_RENAMED_OR_REMOVED);
@@ -74,12 +76,15 @@ export function buildServerChangedFnCandidate(
       ? renameIdentifiersInStatements(beforeBody.body as readonly Statement[], paramDiff.nameMap)
       : (beforeBody.body as readonly Statement[]);
 
-  const holedLib = replaceFunctionBodyWithObserver(libAfterSrc, { start: afterBody.start, end: afterBody.end });
+  const holedSrc = replaceFunctionBodyWithObserver(changedFileAfterSrc, {
+    start: afterBody.start,
+    end: afterBody.end,
+  });
   const slow = statementsToCode(beforeBodyStatements);
   const fast = statementsToCode(afterBody.body as readonly Statement[]);
 
   return {
-    setup: buildServerHoledLibSetup(holedLib),
+    setup: buildMapRequireSetup(otherAfterFiles, changedFileKey, holedSrc, entryKey),
     slow,
     fast,
     workload: buildServerObservedWorkload(testCaseSource),
@@ -90,30 +95,92 @@ export function buildServerChangedFnCandidate(
   };
 }
 
-/** 穴あき CommonJS lib を `(module, exports, require)` wrapper で評価し exports を `globalThis.__SUT__` に公開する setup。 */
-function buildServerHoledLibSetup(holedLib: string): string {
+/** map キー (`lib/api/attributes.js`) を `require` spec から引くための拡張子なし形 (`./lib/api/attributes`)。 */
+function entrySpec(entryKey: string): string {
+  return `./${entryKey.replace(/\.js$/, "")}`;
+}
+
+/**
+ * map-require ランタイム + lib ロードを行う setup を組む。
+ * - `__FILES__`: 非穴あけ after ファイルの JSON map (source 文字列)。`new Function` で評価
+ * - `__HOLED__[changedFileKey]`: 穴あけ対象を raw な関数リテラルで埋め込む ($BODY$ が raw コード位置に来る)
+ * - 相対 require を map 上で解決 (`.js` / `/index.js` 補完)。未解決は graceful `{}` (= `./package` 等)、
+ *   bare は ambient `require` (ADR-0016) に委譲
+ * - entry を load して `globalThis.__SUT__` に公開
+ */
+function buildMapRequireSetup(
+  otherAfterFiles: Record<string, string>,
+  changedFileKey: string,
+  holedSrc: string,
+  entryKey: string,
+): string {
   return [
-    "var __SUT_module__ = { exports: {} };",
-    "(function (module, exports, require) {",
-    holedLib,
-    "})(__SUT_module__, __SUT_module__.exports, require);",
-    "globalThis.__SUT__ = __SUT_module__.exports;",
+    `globalThis.__FILES__ = ${JSON.stringify(otherAfterFiles)};`,
+    "globalThis.__HOLED__ = {};",
+    `globalThis.__HOLED__[${JSON.stringify(changedFileKey)}] = function (module, exports, require) {`,
+    holedSrc,
+    "};",
+    "globalThis.__CACHE__ = {};",
+    "globalThis.__norm__ = function (p) {",
+    "  var parts = p.split('/'); var out = [];",
+    "  for (var i = 0; i < parts.length; i++) { var s = parts[i];",
+    "    if (s === '' || s === '.') continue; if (s === '..') { out.pop(); continue; } out.push(s); }",
+    "  return out.join('/');",
+    "};",
+    "globalThis.__resolve__ = function (fromKey, spec) {",
+    "  var base = fromKey.indexOf('/') >= 0 ? fromKey.slice(0, fromKey.lastIndexOf('/')) : '';",
+    "  var p = __norm__(base + '/' + spec);",
+    "  var cands = [p, p + '.js', p + '/index.js'];",
+    "  for (var i = 0; i < cands.length; i++) { var c = cands[i];",
+    "    if (Object.prototype.hasOwnProperty.call(__HOLED__, c) || Object.prototype.hasOwnProperty.call(__FILES__, c)) return c; }",
+    "  return null;",
+    "};",
+    "globalThis.__mapRequire__ = function (fromKey) {",
+    "  return function (spec) {",
+    "    if (typeof spec !== 'string') return require(spec);",
+    "    if (spec.indexOf('./') !== 0 && spec.indexOf('../') !== 0) return require(spec);",
+    "    var key = __resolve__(fromKey, spec);",
+    "    if (key === null) return {};",
+    "    if (Object.prototype.hasOwnProperty.call(__CACHE__, key)) return __CACHE__[key].exports;",
+    "    var mod = { exports: {} }; __CACHE__[key] = mod;",
+    "    var fn = Object.prototype.hasOwnProperty.call(__HOLED__, key) ? __HOLED__[key] : new Function('module', 'exports', 'require', __FILES__[key]);",
+    "    fn(mod, mod.exports, __mapRequire__(key));",
+    "    return mod.exports;",
+    "  };",
+    "};",
+    `globalThis.__SUT__ = __mapRequire__('')(${JSON.stringify(entrySpec(entryKey))});`,
   ].join("\n");
 }
 
 /**
- * test_case を CommonJS wrapper で評価し、相対 `require('./<lib>')` を `globalThis.__SUT__` (= 穴あき lib の
- * exports) に差し替えて init()/setupTest()/test() を実行する workload。完了値は `JSON.stringify(__OBS__)`。
- *
- * `__OBS__` は setup 側に inline された観測ハーネスが変更関数の戻り値を push する配列 (`declareObservationGlobal`
- * で宣言済)。先頭で `__OBS__ = []` リセットし、workload 中の呼び出し由来の観測だけを完了値に乗せる。
- *
- * single-file 前提: 相対 require (`./` / `../`) はすべて lib への参照とみなして `__SUT__` を返す。
+ * test_case を CommonJS wrapper で評価し、相対 `require('./<lib>')` を `__SUT__` に差し替えて
+ * init()/setupTest()/test() を実行する workload。完了値は 2 チャネル観測の JSON:
+ *  - `r`: 変更関数の戻り値列 (`__OBS__`)
+ *  - `s`: init() 戻り値の post-state を汎用 safe-walk した projection
  */
 function buildServerObservedWorkload(testCaseSource: string): string {
   return [
     "(function () {",
     "__OBS__ = [];",
+    // 汎用 safe-walk: 循環畳み込み / 深さ・ノード budget / 関数も own プロパティを持てば walk (cheerio 等の
+    // 関数オブジェクト state を捕捉)。lib 非依存。戻り値は JSON 化可能な構造。
+    "var __seen__ = new WeakSet(); var __cnt__ = { n: 0 };",
+    "var __walk__ = function (v, depth) {",
+    "  if (__cnt__.n++ > 100000) return '<<budget>>';",
+    "  if (v === null) return null;",
+    "  var t = typeof v;",
+    "  if (t === 'number' || t === 'boolean' || t === 'string') return v;",
+    "  if (t === 'undefined') return undefined;",
+    "  var isFnWithProps = (t === 'function' && Object.keys(v).length > 0);",
+    "  if (t !== 'object' && !isFnWithProps) return undefined;",
+    "  if (__seen__.has(v)) return '<<circ>>';",
+    "  if (depth > 12) return '<<depth>>';",
+    "  __seen__.add(v);",
+    "  if (Array.isArray(v)) { var arr = []; for (var i = 0; i < v.length; i++) arr.push(__walk__(v[i], depth + 1)); return arr; }",
+    "  var out = {}; var ks = Object.keys(v);",
+    "  for (var j = 0; j < ks.length; j++) { var w = __walk__(v[ks[j]], depth + 1); if (w !== undefined) out[ks[j]] = w; }",
+    "  return out;",
+    "};",
     "var __tc_module__ = { exports: {} };",
     "var __tc_require__ = function (spec) {",
     "  if (typeof spec === 'string' && (spec.indexOf('./') === 0 || spec.indexOf('../') === 0)) return globalThis.__SUT__;",
@@ -126,7 +193,7 @@ function buildServerObservedWorkload(testCaseSource: string): string {
     "var __tc_i__ = (typeof __tc_exp__.init === 'function') ? __tc_exp__.init() : undefined;",
     "var __tc_s__ = (typeof __tc_exp__.setupTest === 'function') ? __tc_exp__.setupTest(__tc_i__) : undefined;",
     "if (typeof __tc_exp__.test === 'function') __tc_exp__.test(__tc_i__, __tc_s__);",
-    "return JSON.stringify(__OBS__);",
+    "return JSON.stringify({ r: __OBS__, s: __walk__(__tc_i__, 0) });",
     "})()",
   ].join("\n");
 }
@@ -137,10 +204,10 @@ if (import.meta.vitest) {
   const { findChangeUnits } = await import("../../../common/change-units");
   const { parse } = await import("../../../../ast/parser");
   const { substituteBody, declareObservationGlobal } = await import("../../../../codegen/placeholder");
-  // 観点: single-file CommonJS lib の変更関数 (named-FE 含む) を holed lib + test_case workload で 4 値契約に組む。
-  // setup = CommonJS wrapper で穴あき lib を評価し __SUT__ に公開 ($BODY$ 1 個 + 観測ハーネス)。
-  // slow/fast = 変更前/後 body の裸断片。workload = test_case を評価し相対 require を __SUT__ に差し替え observation を返す。
-  // rename/削除・arrow body・param 本質変更は excluded marker。
+  // 観点: single-file / multi-file CommonJS lib の変更関数を map-require + 2 チャネル観測 workload で 4 値契約に組む。
+  // setup = map-require ランタイム ($BODY$ 1 個 + 観測ハーネス入り穴あきファイル + __SUT__ ロード)。
+  // slow/fast = 変更前/後 body 裸断片。workload = test_case を __SUT__ に繋ぎ post-state(s) + 戻り値(r) を返す。
+  // rename/削除・param 本質変更は excluded marker。
 
   const libBefore = `var lib = module.exports;\nlib.run = function () { return wrap(function self() { return 1; }); };`;
   const libAfter = `var lib = module.exports;\nlib.run = function () { return wrap(function self() { return 2; }); };`;
@@ -154,45 +221,71 @@ if (import.meta.vitest) {
   };
 
   describe("buildServerChangedFnCandidate (in-source)", () => {
-    it("named-FE の変更 → CommonJS wrapper の穴あき lib setup / 裸 body slow·fast / test_case workload", () => {
+    it("single-file: map-require setup ($BODY$ 1 個 + __SUT__) / 裸 body slow·fast / 2 チャネル観測 workload", () => {
       const unit = fnUnitFor(libBefore, libAfter, "self");
-      const c = buildServerChangedFnCandidate(unit, libAfter, testCase);
+      const c = buildServerChangedFnCandidate({
+        unit,
+        changedFileKey: "lib.js",
+        changedFileAfterSrc: libAfter,
+        otherAfterFiles: {},
+        entryKey: "lib.js",
+        testCaseSource: testCase,
+      });
 
       expect(c.candidate_excluded).toBeUndefined();
       expect(c.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
       expect(c.candidate_meta.is_workload_reachable).toBe(true);
       expect(c.enclosure_node_type).toBe("FunctionExpression");
 
-      // setup: CommonJS wrapper + 穴あき lib (観測ハーネス + $BODY$ 1 個) + __SUT__ 公開
-      expect(c.setup).toContain("var __SUT_module__ = { exports: {} };");
-      expect(c.setup).toContain("})(__SUT_module__, __SUT_module__.exports, require);");
-      expect(c.setup).toContain("globalThis.__SUT__ = __SUT_module__.exports;");
-      expect(c.setup).toContain("var lib = module.exports;");
+      // setup: map-require + 穴あきファイル ($BODY$ 1 個 + 観測ハーネス) + entry ロード
+      expect(c.setup).toContain('globalThis.__HOLED__["lib.js"] = function (module, exports, require) {');
+      expect(c.setup).toContain('globalThis.__SUT__ = __mapRequire__(\'\')("./lib");');
       expect((c.setup!.match(/\$BODY\$/g) ?? []).length).toBe(1);
       expect(c.setup).toContain("let __OBS_R__");
-      expect(c.setup).toContain("__OBS__.push");
 
-      // slow/fast: 変更前/後 self body の裸断片 (観測ハーネス無し)
+      // slow/fast: 裸 body
       expect(c.slow).toContain("return 1;");
       expect(c.slow).not.toContain("__OBS_R__");
       expect(c.fast).toContain("return 2;");
 
-      // workload: __OBS__ reset → test_case 評価 (相対 require 差し替え) → init/setupTest/test → stringify
-      expect(c.workload).toContain("__OBS__ = [];");
+      // workload: __SUT__ 差し替え + 2 チャネル (r/s) + safe-walk
       expect(c.workload).toContain("return globalThis.__SUT__;");
       expect(c.workload).toContain("exports.test = function () { return require('./lib_after.js').run(); };");
-      expect(c.workload).toContain("__tc_exp__.test(__tc_i__, __tc_s__)");
-      expect(c.workload).toContain("return JSON.stringify(__OBS__);");
+      expect(c.workload).toContain("return JSON.stringify({ r: __OBS__, s: __walk__(__tc_i__, 0) });");
 
-      // sandbox 投入直前形 (substituteBody(setup, slow) + __OBS__ 宣言) が valid JS
+      // sandbox 投入直前形が valid JS
       expect(() => parse(declareObservationGlobal(substituteBody(c.setup!, c.slow!)))).not.toThrow();
       expect(() => parse(`var _ = ${c.workload!};`)).not.toThrow();
+    });
+
+    it("multi-file: 変更ファイルは __HOLED__、他ファイルは __FILES__ JSON map、entry を別指定", () => {
+      const unit = fnUnitFor(libBefore, libAfter, "self");
+      const c = buildServerChangedFnCandidate({
+        unit,
+        changedFileKey: "lib/impl.js",
+        changedFileAfterSrc: libAfter,
+        otherAfterFiles: { "index.js": "module.exports = require('./lib/impl');" },
+        entryKey: "index.js",
+        testCaseSource: testCase,
+      });
+      expect(c.candidate_excluded).toBeUndefined();
+      expect(c.setup).toContain('globalThis.__HOLED__["lib/impl.js"]');
+      expect(c.setup).toContain('"index.js":"module.exports = require(\'./lib/impl\');"');
+      expect(c.setup).toContain('globalThis.__SUT__ = __mapRequire__(\'\')("./index");');
+      expect((c.setup!.match(/\$BODY\$/g) ?? []).length).toBe(1);
     });
 
     it("afterFn === null (rename / 削除) → UNIT_RENAMED_OR_REMOVED marker", () => {
       const base = fnUnitFor(libBefore, libAfter, "self");
       const renamed: FnChangeUnit = { ...base, afterFn: null, afterFnAncestors: [] };
-      const c = buildServerChangedFnCandidate(renamed, libAfter, testCase);
+      const c = buildServerChangedFnCandidate({
+        unit: renamed,
+        changedFileKey: "lib.js",
+        changedFileAfterSrc: libAfter,
+        otherAfterFiles: {},
+        entryKey: "lib.js",
+        testCaseSource: testCase,
+      });
       expect(c.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.UNIT_RENAMED_OR_REMOVED);
       expect(c.setup).toBeUndefined();
     });
@@ -201,7 +294,14 @@ if (import.meta.vitest) {
       const before = `var lib = module.exports;\nlib.run = function () { return wrap(function self(x) { return x + 1; }); };`;
       const after = `var lib = module.exports;\nlib.run = function () { return wrap(function self(x, y) { return x + y; }); };`;
       const unit = fnUnitFor(before, after, "self");
-      const c = buildServerChangedFnCandidate(unit, after, testCase);
+      const c = buildServerChangedFnCandidate({
+        unit,
+        changedFileKey: "lib.js",
+        changedFileAfterSrc: after,
+        otherAfterFiles: {},
+        entryKey: "lib.js",
+        testCaseSource: testCase,
+      });
       expect(c.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.FN_PARAM_NAMES_MISMATCH);
       expect(c.setup).toBeUndefined();
     });
