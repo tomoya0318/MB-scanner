@@ -17,6 +17,7 @@ import { findChangeUnits, type FnChangeUnit, type StmtChangeUnit } from "../comm
 import { buildCallGraph, isAnyBindingReachedByWorkload, isReachedByAnyWorkload } from "../common/reachability";
 import { buildChangedFnCandidate, buildExcludedChangedFnCandidate } from "./assemble/strategies/changed-fn";
 import { buildChangedStmtCandidate } from "./assemble/strategies/changed-stmt";
+import { buildServerChangedFnCandidate } from "./assemble/strategies/server-changed-fn";
 import { extractFromScripts, extractFromServerFiles, type FallbackResult } from "./assemble/strategies/fallback";
 import {
   buildClientBodyCandidate,
@@ -225,6 +226,46 @@ function appendChangeUnitCandidates(
   }
 }
 
+/**
+ * server (CommonJS) layout の lib 変更を fn unit に切り分け、変更関数ごとに server-changed-fn candidate を
+ * `candidates` 末尾に push する (ADR-0025、順 3-2)。client の `appendChangeUnitCandidates` の server 版だが、
+ * workload は `f1` ではなく `test_case` (init/setupTest/test) なので reachability 判定は行わず、変更関数の
+ * 観測ハーネス戻り値 (`__OBS__`) を positive-evidence にする。
+ *
+ * Phase 1 スコープ: single-file lib (`module.exports` を持つ 1 ファイル、Chalk 形) のみ。multi-file
+ * (named export / index 再 export / UMD) は穴あけ対象ファイル特定 + `installRequire` 経路との整合が要るため
+ * 後続 Phase で一般化する。ここでは file 数 > 1 なら何もせず embedded #0 のまま (= 従来どおり DROP、後続で救済)。
+ */
+function appendServerChangeUnitCandidates(
+  candidates: PreprocessingCandidate[],
+  libBeforeFiles: Record<string, string>,
+  libAfterFiles: Record<string, string>,
+  testCaseAfter: string,
+): void {
+  const afterNames = Object.keys(libAfterFiles);
+  if (afterNames.length !== 1) return; // multi-file は後続 Phase
+  const libBeforeSrc = singleLibSource(libBeforeFiles);
+  const libAfterSrc = libAfterFiles[afterNames[0]!] ?? "";
+  if (libBeforeSrc.length === 0 || libAfterSrc.length === 0) return;
+
+  let cu;
+  try {
+    cu = findChangeUnits(libBeforeSrc, libAfterSrc);
+  } catch {
+    candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.CHANGE_UNITS_PARSE_FAIL));
+    return;
+  }
+  if (cu.empty) return; // 意味論差なし (embedded #0 が trace を残す)
+  const fnUnits = cu.units.filter((u): u is FnChangeUnit => u.kind === "fn");
+  if (fnUnits.length === 0) {
+    candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.NO_FN_UNIT));
+    return;
+  }
+  for (const u of fnUnits) {
+    candidates.push(buildServerChangedFnCandidate(u, libAfterSrc, testCaseAfter));
+  }
+}
+
 function preprocessServer(input: Extract<SelakovicPreprocessInput, { kind: "server" }>): PreprocessingIssueResult {
   const fallback = (): PreprocessingIssueResult => {
     const fb = extractFromServerFiles(input.lib_before_files, input.lib_after_files);
@@ -242,8 +283,8 @@ function preprocessServer(input: Extract<SelakovicPreprocessInput, { kind: "serv
   const aspect = routeAspect(libHasRealChange, bodyHasRealChange);
   if (aspect === ASPECT.FALLBACK) return fallback();
 
-  // server は作用点に関わらず 1 candidate (ADR-0014 のケース IV-B は暫定 1 candidate 扱い)。
-  // target_side は aspect から派生 (lib→lib, workload→workload, lib+workload→both)。
+  // embedded #0: test_case 全文を runnable に包んだ candidate (is_workload_reachable=false)。
+  // target_side は aspect から派生 (lib→lib, workload→workload, lib+workload→both)。等価検証本体の trace。
   const beforeNodeCount = safeCount(input.before_test_case);
   const afterNodeCount = safeCount(input.after_test_case);
   const targetSide = aspectToServerTargetSide(aspect);
@@ -257,6 +298,12 @@ function preprocessServer(input: Extract<SelakovicPreprocessInput, { kind: "serv
       candidate_meta: { adapter: "selakovic", target_side: targetSide, is_workload_reachable: false },
     },
   ];
+  // lib 側に real change があれば、CommonJS-respecting changed-fn candidate を append する (ADR-0025、順 3-2)。
+  // 変更関数 body だけ `$BODY$` 穴あけ → vm/jsdom executor で観測ハーネス経由 equiv に乗せ、is_workload_reachable=true
+  // にして build_equiv_input の small-candidate フィルタを通す (= DROP 解消)。Phase 1 は single-file lib (Chalk 形) のみ。
+  if (libHasRealChange) {
+    appendServerChangeUnitCandidates(candidates, input.lib_before_files, input.lib_after_files, input.after_test_case);
+  }
   return {
     candidates,
     candidate_count: candidates.length,

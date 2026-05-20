@@ -484,7 +484,7 @@ describe("preprocess — server (test_case)", () => {
     expect(c.slow).toContain("exports.test");
   });
 
-  it("作用点 lib: lib 変化・test() body 不変 → aspect=lib, target_side=lib, init() の require が _before↔_after で切替", () => {
+  it("作用点 lib: lib 変化・test() body 不変 → embedded #0 (require 切替) + server-changed-fn candidate を append (ADR-0025、順 3-2)", () => {
     const before = `(function () { function init() { return require('./mylib_before'); } function test(lib) { return lib.compute(3); } exports.init = init; exports.test = test; })();`;
     const after = `(function () { function init() { return require('./mylib_after'); } function test(lib) { return lib.compute(3); } exports.init = init; exports.test = test; })();`;
     const result = preprocess({
@@ -495,15 +495,39 @@ describe("preprocess — server (test_case)", () => {
       lib_after_files: { "mylib.js": "module.exports = { compute: function (x) {\n  return x << 1;\n} };" },
       lib_kind: "file",
     });
-    expect(result.candidate_count).toBe(1);
-    const c = result.candidates[0]!;
     expect(result.issue_meta?.layout).toBe(LAYOUT_KIND.SERVER);
     expect(result.issue_meta?.aspect).toBe(ASPECT.LIB);
-    expect(c.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
-    expect(c.slow).toContain("require('./mylib_before')");
-    expect(c.fast).toContain("require('./mylib_after')");
-    expect(c.slow).toContain("lib.compute(3)");
-    expect(c.fast).toContain("lib.compute(3)");
+    // embedded #0: 従来どおり test_case 全文 runnable (is_workload_reachable=false、require が _before↔_after で切替)
+    const embedded = result.candidates[0]!;
+    expect(embedded.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
+    expect(embedded.candidate_meta.is_workload_reachable).toBe(false);
+    expect(embedded.slow).toContain("require('./mylib_before')");
+    expect(embedded.fast).toContain("require('./mylib_after')");
+    expect(embedded.slow).toContain("lib.compute(3)");
+    // #1: 変更関数 compute の server-changed-fn candidate (is_workload_reachable=true で small-candidate フィルタを通る)
+    const changedFn = result.candidates.find((c) => c.candidate_meta.is_workload_reachable);
+    expect(changedFn).toBeDefined();
+    expect(changedFn!.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
+    expect((changedFn!.setup!.match(/\$BODY\$/g) ?? []).length).toBe(1);
+    expect(changedFn!.setup).toContain("globalThis.__SUT__ = __SUT_module__.exports;");
+    expect(changedFn!.slow).toContain("x * 2");
+    expect(changedFn!.fast).toContain("x << 1");
+    expect(changedFn!.workload).toContain("return JSON.stringify(__OBS__);");
+  });
+
+  it("multi-file lib (file 数 > 1) は Phase 1 では changed-fn を組まず embedded #0 のまま (後続 Phase で救済)", () => {
+    const before = `(function () { function init() { return require('./lib_before'); } function test(lib) { return lib.run(); } exports.init = init; exports.test = test; })();`;
+    const after = `(function () { function init() { return require('./lib_after'); } function test(lib) { return lib.run(); } exports.init = init; exports.test = test; })();`;
+    const result = preprocess({
+      kind: "server",
+      before_test_case: before,
+      after_test_case: after,
+      lib_before_files: { "index.js": "module.exports = require('./impl');", "impl.js": "exports.run = function () { return 1; };" },
+      lib_after_files: { "index.js": "module.exports = require('./impl');", "impl.js": "exports.run = function () { return 2; };" },
+      lib_kind: "dir",
+    });
+    // multi-file はまだ救済しない → is_workload_reachable=true な candidate は無い (embedded #0 のみ)
+    expect(result.candidates.some((c) => c.candidate_meta.is_workload_reachable)).toBe(false);
   });
 
   it("test_case が無いと fallback (lib top-level diff)", () => {

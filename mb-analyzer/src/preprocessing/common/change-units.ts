@@ -85,6 +85,15 @@ export function functionBindingName(chain: readonly Node[], fn: Node): string | 
     }
     return keyName; // 親オブジェクトの帰属が不明: 末端キー名だけ (over-approx 寄り)
   }
+  // 親ベースで命名できなかった named FunctionExpression (`defineProps(function self() {...})` のように
+  // callback 引数として渡される名前付き関数式) は、自身の `id.name` を最後の手段として採用する。
+  // これにより変更ノードが内側の named 関数式に局所化されているとき (server CommonJS lib に多い)、
+  // 外側の getter / IIFE まで遡らず最寄りの named 関数で unit を切れる。
+  // 順序は最後 — `var f = function g(){}` / `o.f = function g(){}` は従来どおり親ベース ("f" / "o.f") を優先する。
+  if (f.type === "FunctionExpression") {
+    const id = (fn as unknown as { id?: { name?: string } }).id;
+    if (id?.name) return id.name;
+  }
   return null;
 }
 
@@ -359,6 +368,22 @@ if (import.meta.vitest) {
       const u = findChangeUnits(before, after).units.find((x): x is FnChangeUnit => x.kind === "fn" && x.name === "o.foo");
       expect(u).toBeDefined();
       expect(u!.afterFn).not.toBeNull();
+    });
+
+    it("親ベースで命名できない named FunctionExpression の中の変更 → その id 名で fn unit (server CommonJS パターン)", () => {
+      // chalk_*.js の `defineProps(function self() { var str = ...; })` を模した形。
+      // self は callback 引数なので親ベース命名は付かず、従来は外側の named fn まで遡っていた。
+      // named-FE fallback で self 自身に anchor する。
+      const before = wrap("function init() { var obj = wrap(function self() { var str = a(); return str; }); }");
+      const after = wrap("function init() { var obj = wrap(function self() { var str = b(); return str; }); }");
+      expect(fnUnitNames(before, after)).toEqual(["self"]);
+    });
+
+    it("named FunctionExpression でも parent ベース命名が付くなら従来優先 (var f = function g(){} → f)", () => {
+      const before = wrap("var f = function g() { return 1; };");
+      const after = wrap("var f = function g() { return 2; };");
+      // id 名 g ではなく VariableDeclarator 由来の f が採られる (named-FE は最後の手段)
+      expect(fnUnitNames(before, after)).toEqual(["f"]);
     });
   });
 }
