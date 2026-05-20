@@ -33,9 +33,12 @@ const PLACEHOLDER = "$BODY$";
  * 観測ハーネス string (= setup 側の関数本体に inline 化される観測 IIFE)。内部に `$BODY$` を 1 個含み、
  * `replaceFunctionBodyWithObserver` が `replaceFunctionBody` の出力する `{ $BODY$ }` の内側に差し込む。
  *
- *  - 関数式 `(function () { $BODY$ }).call(this)` で囲い、戻り値を `__OBS_R__` に一時保持。これで:
+ *  - 関数式 `(function () { $BODY$ }).apply(this, arguments)` で囲い、戻り値を `__OBS_R__` に一時保持。これで:
  *    - `$BODY$` に差し込まれる裸 body の `return` 文がラッパの外側 (= 元の関数) に脱出しない
  *    - 関数式は新しいスコープを作るので、裸 body 内の `var` 宣言や `this` の扱いは元のセマンティクスを維持
+ *    - `this` は `.apply(this, ...)` で、`arguments` は第 2 引数で内側 IIFE に転送する。これがないと内側 IIFE が
+ *      自前の空 `arguments` を持ち、`arguments` を使う元関数 (Ember の `extend` / `computed` 等を多数含む) が壊れる
+ *      (full-observation で reachable fn を一括計装する changed-stmt 経路では必須、実 Ember で setup-failure を確認)
  *    - 結果として元 body 内に同名 `__OBS_R__` の宣言が出現してもスコープが分離して衝突しない
  *  - 戻り値は `JSON.stringify` して `__OBS__` 配列の末尾に push。serialize 不能 (循環参照 / 環境固有オブジェクト等)
  *    は catch して `"<unserializable>"` を push (= 観測が落ちないことを保証)
@@ -44,7 +47,7 @@ const PLACEHOLDER = "$BODY$";
  *  - `__OBS__` は `declareObservationGlobal` で setup 最先頭に宣言済の前提
  */
 const OBSERVER_HARNESS = [
-  `let __OBS_R__ = (function () { ${PLACEHOLDER} }).call(this);`,
+  `let __OBS_R__ = (function () { ${PLACEHOLDER} }).apply(this, arguments);`,
   `__OBS__.push((function () { try { return JSON.stringify(__OBS_R__); } catch (e) { return "<unserializable>"; } })());`,
   `return __OBS_R__;`,
 ].join("\n");
@@ -83,7 +86,7 @@ export function replaceFunctionBody(
  * `source` のうち、指定された関数本体の AST span を「観測ハーネス入り `{ $BODY$ }`」で置換した文字列を返す
  * (ADR-0023 D-δ §observation 仕様)。
  *
- *  - 観測ハーネス (`OBSERVER_HARNESS`) は `let __OBS_R__ = (function () { $BODY$ }).call(this); __OBS__.push(...); return __OBS_R__;` の形
+ *  - 観測ハーネス (`OBSERVER_HARNESS`) は `let __OBS_R__ = (function () { $BODY$ }).apply(this, arguments); __OBS__.push(...); return __OBS_R__;` の形
  *    で、観測 IIFE を **setup 側の関数本体に inline 化** する。これにより slow/fast には観測足場が乗らず、
  *    裸 body (= statementsToCode の出力) のまま `substituteBody` で `$BODY$` に差し込まれる。
  *  - 結果として pruning が見る slow/fast から観測 IIFE が消え、抽出 pattern が「変更関数の等価性の核」だけになる。
@@ -107,6 +110,45 @@ export function replaceFunctionBodyWithObserver(
   fnBodySpan: { start: number; end: number },
 ): string {
   return source.slice(0, fnBodySpan.start) + `{ ${OBSERVER_HARNESS} }` + source.slice(fnBodySpan.end);
+}
+
+/**
+ * `bodyWithBraces` (= `{ ... }` を含む関数本体の原文) を、元の中身を保持したまま観測ラッパで包んだ
+ * 文字列を返す (changed-stmt 経路用、no-fn-unit rescue)。
+ *
+ * `replaceFunctionBodyWithObserver` との違い:
+ *  - あちら: 関数本体を「観測ハーネス入り `{ $BODY$ }`」で置換 = **元 body を捨てて** `$BODY$` を残し、
+ *    `substituteBody` で slow/fast の body 断片を差し込む (= changed-fn: 変更関数の本体が比較対象)
+ *  - こちら: 元 body を **保持したまま** 観測 IIFE の内側に inline する (= `$BODY$` を残さない)。
+ *    changed-stmt は変更箇所が関数の外 (stmt) にあり、reachable な named fn は「観測のためだけに計装する
+ *    (本体は変えない)」ので、`$BODY$` 穴は changed stmt 側に 1 個だけ残し、fn 群は本体保持で観測化する。
+ *
+ * `OBSERVER_HARNESS` を `substituteBody` で再利用するので観測ハーネスの形は changed-fn と完全一致。
+ */
+export function wrapBodyWithObserver(bodyWithBraces: string): string {
+  const inner = bodyWithBraces.trim().replace(/^\{/, "").replace(/\}$/, "");
+  return `{ ${substituteBody(OBSERVER_HARNESS, inner)} }`;
+}
+
+/** `source` の指定 span を `replacement` で置換する 1 件の編集。`start`/`end` は AST span (UTF-16 offset)。 */
+export interface SpanEdit {
+  readonly start: number;
+  readonly end: number;
+  readonly replacement: string;
+}
+
+/**
+ * `source` に複数の span 編集をまとめて適用する。span は **互いに重ならない** 前提
+ * (overlap があれば呼び出し側で除外する)。position 降順で適用するので、各 replacement の長さが元 span と
+ * 違っても残りの編集位置 (= より前方の span) は元 offset のまま有効。
+ */
+export function applySpanEdits(source: string, edits: readonly SpanEdit[]): string {
+  const sorted = [...edits].sort((a, b) => b.start - a.start);
+  let result = source;
+  for (const e of sorted) {
+    result = result.slice(0, e.start) + e.replacement + result.slice(e.end);
+  }
+  return result;
 }
 
 /**
@@ -197,7 +239,7 @@ if (import.meta.vitest) {
       const out = replaceFunctionBodyWithObserver(src, fnBodySpanOf(src));
       // 観測ハーネス 3 行が含まれる
       expect(out).toContain("let __OBS_R__ = (function () {");
-      expect(out).toContain("}).call(this);");
+      expect(out).toContain("}).apply(this, arguments);");
       expect(out).toContain("__OBS__.push");
       expect(out).toContain("return __OBS_R__;");
       // 単独参照 (globalThis. プレフィックス無し)
@@ -277,6 +319,46 @@ if (import.meta.vitest) {
     });
     it("setup に $BODY$ が 2 個以上なら throw (個数固定の構造強制)", () => {
       expect(() => substituteBody("var f = $BODY$; var g = $BODY$;", "x")).toThrow(/exactly 1 \$BODY\$/);
+    });
+  });
+
+  describe("wrapBodyWithObserver (in-source)", () => {
+    it("元 body を保持したまま観測ラッパで包む ($BODY$ は残らない)", () => {
+      const out = wrapBodyWithObserver("{ return x + 1; }");
+      // 元 body が内側に inline されている
+      expect(out).toContain("return x + 1;");
+      // 観測ハーネス
+      expect(out).toContain("let __OBS_R__ = (function () {");
+      expect(out).toContain("__OBS__.push");
+      expect(out).toContain("return __OBS_R__;");
+      // $BODY$ プレースホルダは残らない (substituteBody で埋め済み)
+      expect(out).not.toContain("$BODY$");
+      // 関数本体として valid (function () <out> の形で parse できる)
+      expect(() => parse(`var f = function () ${out};`)).not.toThrow();
+    });
+
+    it("差し込んだ body 内の return は観測 IIFE に吸収される (= 観測ラッパの return __OBS_R__ も併存)", () => {
+      const out = wrapBodyWithObserver("{ return 42; }");
+      expect(out).toContain("return 42;");
+      expect(out).toContain("return __OBS_R__;");
+      const declared = declareObservationGlobal(`var f = function () ${out};\nf();`);
+      expect(() => parse(declared)).not.toThrow();
+    });
+  });
+
+  describe("applySpanEdits (in-source)", () => {
+    it("複数 span を position 降順で適用、各 replacement 長が違っても前方 offset は保持される", () => {
+      const src = "AAAA BBBB CCCC";
+      // A (0..4) → "x"、C (10..14) → "yyyyyy" (長さ違い)。B は不変。
+      const out = applySpanEdits(src, [
+        { start: 0, end: 4, replacement: "x" },
+        { start: 10, end: 14, replacement: "yyyyyy" },
+      ]);
+      expect(out).toBe("x BBBB yyyyyy");
+    });
+
+    it("編集ゼロなら原文のまま", () => {
+      expect(applySpanEdits("abc", [])).toBe("abc");
     });
   });
 }

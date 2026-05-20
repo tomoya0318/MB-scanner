@@ -156,7 +156,7 @@ export type WrapperKind = (typeof WRAPPER_KIND)[keyof typeof WRAPPER_KIND];
  *  - `layout-unknown`: client / server のどちらでもないディレクトリ構造
  *  - `change-not-exercised`: lib の変更を (推移的にも) exercise する workload (`f1` / `test()`) が無い
  *
- * changed-fn 経路 (ADR-0023 D-γ §DROP 可視化) で `appendChangedFnCandidates` の早期 return / builder
+ * changed-fn / changed-stmt 経路 (ADR-0023 D-γ §DROP 可視化) で `appendChangeUnitCandidates` の早期 return / builder
  * 内部 null を marker として残すための reason 値:
  *  - `no-lib-source`: lib_before / lib_after の片方が空 (aspect=workload-only 等)
  *  - `angular-wrapper-skip`: f1 wrapperKind が top-level でない (D-β の制約、D-γ で対応検討)
