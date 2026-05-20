@@ -81,9 +81,10 @@ B の落とし穴: 「binding 位置を skip」だけだと、`var` hoisting で
 
 以下の条件のいずれかが成立したらこの ADR を見直す:
 
-- 本 collision guard で `fn-param-names-mismatch` の救済件数が Phase 3 救済目標 (3 件) を割る
+- ~~本 collision guard で `fn-param-names-mismatch` の救済件数が Phase 3 救済目標 (3 件) を割る~~ → **2026-05-20 に発火済 (§実測 参照)。ただし原因は collision guard ではなく「構文的 rename-only ≠ semantic 等価」という前提自体**
 - raw-stmt / angular 経路など他 strategy でも identifier rewrite が要るようになり、scope-aware rename の必要性が複数経路で立つ
 - `@babel/traverse` を他用途で導入する判断が下り、`Scope` API が手の届く範囲に入る
+- 「構文的 rename-only」candidate を equiv に投入したとき error/not_equal 率が高いことが全件計測で確認され、AST レベルでの追加保守化 (body diff サイズ閾値での marker デモート等) が要ると判断された場合
 
 トリガー発火時は新しい ADR を起票し、本 ADR は `superseded by ADR-NNNN` に書き換える。
 
@@ -95,3 +96,13 @@ scope-aware rename を採るときの参考実装:
 - 自前で書く場合は `function` / `block` / `catch` / `with` / `class static block` をスコープ境界として scope stack を持ち、各スコープで `var` (function scope) と `let/const/class` (block scope) を区別して binding を declare、reference 側は inner-most な declare を引く
 
 `var` hoisting の不採用根拠 (= B 案の落とし穴) の詳細例は `tmp/0001_param-name-relax/plan.md` §レビュー観点 (Copilot review への応答) を参照。
+
+## 実測 (2026-05-20, PR #22)
+
+ローカル subset (jQuery issue_200 + Underscore issue_68) + 全件 (97 issue) preprocess で検証:
+
+- **collision guard の副作用ゼロ**: 全件で reason 別件数を baseline と diff したところ、`fn-param-names-mismatch` が 3→2、`candidate-kept` が 142→143 になっただけで、`angular-wrapper-skip` (25) / `change-not-exercised` (13) / `no-fn-unit` (4) は不変。catch/class/rename 元名の検出追加が他 184 candidate を false-negative にしていないことを確認
+- **当初の救済見立ては誤りだった**: baseline の `fn-param-names-mismatch` 3 件のうち、構文的 rename-only は 1 件 (`cloneCopyEvent`) のみ。残り 2 件 (`clone` / `_.indexOf`) は param 個数差 = 本質変更で、`classifyParamDiff` が正しく `structural-diff` 判定 (= marker 維持)
+- **救済された 1 件も equiv で error verdict**: `cloneCopyEvent` は param 名 rename と同時に param の型/意味が変わっており (before: jQuery コレクション `ret.each(...)` / after: DOM ノード `dest.nodeType`)、rename 後の slow を実行すると `dest.each is not a function` で setup-failure。**真の救済 (equal verdict) = 0 件**
+
+この実測が示すのは、本 ADR の collision guard 設計は意図通り動作する一方、**「構文的 rename-only」を candidate 化するだけでは救済にならない** ということ。param の型/意味変更を伴う rename は dynamic typing 下では AST レベルで検出できず、equiv 実行で初めて error/not_equal として現れる。順 1-b 単独の救済貢献はほぼゼロと評価し直し、本質変更を含む変更関数は raw-stmt 経路 (順 1-d) 等で扱う (roadmap §順 1-b 実測結果 参照)。
