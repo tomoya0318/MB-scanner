@@ -387,6 +387,79 @@ describe("preprocess — client / Angular controller-wrapper", () => {
     expect(c.slow).not.toContain("execute");
     expect(c.slow).not.toContain("jStat");
   });
+
+  it("作用点 lib: controller 内 f1 が変更 lib 関数を呼ぶ → angular changed-fn candidate に救済 (案 C'、ADR-0023 §順 2-1)", () => {
+    const libBefore = "var slice = [].slice;\nvar lib = {};\nlib.norm = function (x) { return slice.call([x]).length % 2 === 0; };";
+    const libAfter = "var slice = [].slice;\nvar lib = {};\nlib.norm = function (x) { return slice.call([x]).length & 1 === 0; };";
+    const angularCallsLib = `
+      var app = angular.module("benchApp", []);
+      app.controller("BenchCtrl", function ($scope) {
+        var f1 = function () { for (var i = 0; i < 3; i++) lib.norm(i); };
+        var a = execute(f1, 10);
+      });
+    `;
+    const result = preprocess({
+      kind: "client",
+      before_inline: angularCallsLib,
+      after_inline: angularCallsLib,
+      lib_before_files: { "lib.js": libBefore },
+      lib_after_files: { "lib.js": libAfter },
+      lib_kind: "file",
+      lib_referenced_by_workload: true,
+    });
+    expect(result.issue_meta?.aspect).toBe(ASPECT.LIB);
+    expect(result.issue_meta?.wrapper_kind).toBe(WRAPPER_KIND.ANGULAR_CONTROLLER_WRAPPER);
+    // 旧挙動では angular は ANGULAR_WRAPPER_SKIP marker で DROP。本実装で changed-fn (workload_reachable=true) に救済。
+    const cf = result.candidates.find((c) => c.candidate_meta.is_workload_reachable === true);
+    expect(cf).toBeDefined();
+    expect(cf!.candidate_excluded).toBeUndefined();
+    expect(cf!.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
+    // setup = holedLib (観測ハーネス + $BODY$ 1 個) + angular bootstrap (module/controller 再構成 + 実体化)
+    expect((cf!.setup!.match(/\$BODY\$/g) ?? []).length).toBe(1);
+    expect(cf!.setup).toContain("let __OBS_R__");
+    expect(cf!.setup).toContain('angular.module("benchApp", []);');
+    expect(cf!.setup).toContain('.controller("BenchCtrl", function ($scope) {');
+    expect(cf!.setup).toContain("globalThis.__selakovic_f1 = f1;");
+    expect(cf!.setup).toContain("__selakovic_inj.get('$controller')");
+    // slow / fast は裸 body 断片、workload は f1 1 回呼び出し
+    expect(cf!.slow).toContain("% 2 === 0");
+    expect(cf!.fast).toContain("& 1 === 0");
+    expect(cf!.workload).toContain("__OBS__ = [];");
+    expect(cf!.workload).toContain("globalThis.__selakovic_f1();");
+    expect(cf!.workload).toContain("return JSON.stringify(__OBS__);");
+    // ANGULAR_WRAPPER_SKIP marker はもう出ない
+    expect(result.candidates.some((c) => c.candidate_excluded === "angular-wrapper-skip")).toBe(false);
+  });
+
+  it("作用点 lib: controller 内 f1 が読む module-level binding の差 (stmt unit) → changed-stmt は top-level 前提なので angular は marker 止まり (Copilot #2 回帰防止)", () => {
+    // changed-stmt 経路 (no-fn-unit rescue) は top-level wrapper 前提。angular の stmt unit を通すと
+    // controller-scoped preWorkload/$scope を top-level で実行する invalid candidate になるため、
+    // pipeline が ANGULAR_WRAPPER_SKIP marker で先弾くことを担保する。
+    const libBefore = "var KEY = 'foo';\nvar lib = {};\nlib.get = function () { return KEY; };";
+    const libAfter = "var KEY = 'bar';\nvar lib = {};\nlib.get = function () { return KEY; };";
+    const angularReadsBinding = `
+      var app = angular.module("benchApp", []);
+      app.controller("BenchCtrl", function ($scope) {
+        var f1 = function () { lib.get(); };
+        var a = execute(f1, 10);
+      });
+    `;
+    const result = preprocess({
+      kind: "client",
+      before_inline: angularReadsBinding,
+      after_inline: angularReadsBinding,
+      lib_before_files: { "lib.js": libBefore },
+      lib_after_files: { "lib.js": libAfter },
+      lib_kind: "file",
+      lib_referenced_by_workload: true,
+    });
+    expect(result.issue_meta?.wrapper_kind).toBe(WRAPPER_KIND.ANGULAR_CONTROLLER_WRAPPER);
+    // stmt unit (var KEY) は marker 止まり = 真の changed-stmt candidate (workload 付き) を作らない
+    expect(result.candidates.some((c) => c.candidate_excluded === "angular-wrapper-skip")).toBe(true);
+    expect(
+      result.candidates.some((c) => c.candidate_meta.is_workload_reachable === true && c.workload != null),
+    ).toBe(false);
+  });
 });
 
 describe("preprocess — server (test_case)", () => {

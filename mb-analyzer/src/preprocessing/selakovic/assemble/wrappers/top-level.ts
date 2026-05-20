@@ -3,6 +3,7 @@ import {
   type PreprocessingCandidate,
   type TargetSide,
 } from "../../../../contracts/preprocessing-contracts";
+import { wrapObservedWorkload } from "../../../../codegen/placeholder";
 import { statementsToCode } from "../../../common/setup-cleanup";
 import type { F1Decomposition } from "../../decompose/f1";
 import { buildAngularRunnable } from "./angular";
@@ -138,4 +139,42 @@ function f1BodyRaw(f1: F1Decomposition): string {
  */
 function f1BodyWrapped(f1: F1Decomposition): string {
   return `(function () {\n${f1BodyRaw(f1)}\n})()`;
+}
+
+/**
+ * top-level f1 の changed-fn candidate を組む (placeholder substitution model、ADR-0023 §4 値契約)。
+ * `buildChangedFnCandidate` (`strategies/changed-fn.ts`) の wrapperKind dispatch から呼ばれる。
+ * hole 化 / body slice / param 検査の共通処理は呼び出し側で済み、ここでは「top-level の実行容器に
+ * どう組むか」だけを担う (wrappers レイヤの責務)。
+ *
+ *  - `setup` = `holedLib` (変更関数 body を観測ハーネス入り `{ $BODY$ }` で置換済、`$BODY$` 1 個) +
+ *    `preWorkloadCode` を `\n;\n` 結合。
+ *  - `slow` / `fast` = 変更前 / 後 body の裸 statementsToCode 出力 (= 観測足場無し)。
+ *  - `workload` = `wrapObservedWorkload(f1BodyCode)` (= `__OBS__=[]` reset → f1 body 実行 →
+ *    `JSON.stringify(__OBS__)` 完了値返却)。
+ */
+export interface AssembleTopLevelChangedFnArgs {
+  readonly holedLib: string;
+  readonly preWorkloadCode: string;
+  readonly slow: string;
+  readonly fast: string;
+  readonly f1BodyCode: string;
+  readonly enclosureNodeType: string;
+  readonly beforeNodeCount: number;
+  readonly afterNodeCount: number;
+}
+
+export function assembleTopLevelChangedFn(args: AssembleTopLevelChangedFnArgs): PreprocessingCandidate {
+  const setup = [args.holedLib, args.preWorkloadCode].filter((s) => s.length > 0).join("\n;\n");
+  return {
+    setup,
+    slow: args.slow,
+    fast: args.fast,
+    workload: wrapObservedWorkload(args.f1BodyCode),
+    enclosure_node_type: args.enclosureNodeType,
+    // node count は「pruning が削る対象 = 変更関数の本体」のサイズ (inline 全文サイズ ≠ embedded の値)。
+    before_node_count: args.beforeNodeCount,
+    after_node_count: args.afterNodeCount,
+    candidate_meta: { adapter: "selakovic", target_side: TARGET_SIDE.LIB, is_workload_reachable: true },
+  };
 }
