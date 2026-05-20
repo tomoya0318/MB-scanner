@@ -110,6 +110,45 @@ export function replaceFunctionBodyWithObserver(
 }
 
 /**
+ * `bodyWithBraces` (= `{ ... }` を含む関数本体の原文) を、元の中身を保持したまま観測ラッパで包んだ
+ * 文字列を返す (changed-stmt 経路用、no-fn-unit rescue)。
+ *
+ * `replaceFunctionBodyWithObserver` との違い:
+ *  - あちら: 関数本体を「観測ハーネス入り `{ $BODY$ }`」で置換 = **元 body を捨てて** `$BODY$` を残し、
+ *    `substituteBody` で slow/fast の body 断片を差し込む (= changed-fn: 変更関数の本体が比較対象)
+ *  - こちら: 元 body を **保持したまま** 観測 IIFE の内側に inline する (= `$BODY$` を残さない)。
+ *    changed-stmt は変更箇所が関数の外 (stmt) にあり、reachable な named fn は「観測のためだけに計装する
+ *    (本体は変えない)」ので、`$BODY$` 穴は changed stmt 側に 1 個だけ残し、fn 群は本体保持で観測化する。
+ *
+ * `OBSERVER_HARNESS` を `substituteBody` で再利用するので観測ハーネスの形は changed-fn と完全一致。
+ */
+export function wrapBodyWithObserver(bodyWithBraces: string): string {
+  const inner = bodyWithBraces.trim().replace(/^\{/, "").replace(/\}$/, "");
+  return `{ ${substituteBody(OBSERVER_HARNESS, inner)} }`;
+}
+
+/** `source` の指定 span を `replacement` で置換する 1 件の編集。`start`/`end` は AST span (UTF-16 offset)。 */
+export interface SpanEdit {
+  readonly start: number;
+  readonly end: number;
+  readonly replacement: string;
+}
+
+/**
+ * `source` に複数の span 編集をまとめて適用する。span は **互いに重ならない** 前提
+ * (overlap があれば呼び出し側で除外する)。position 降順で適用するので、各 replacement の長さが元 span と
+ * 違っても残りの編集位置 (= より前方の span) は元 offset のまま有効。
+ */
+export function applySpanEdits(source: string, edits: readonly SpanEdit[]): string {
+  const sorted = [...edits].sort((a, b) => b.start - a.start);
+  let result = source;
+  for (const e of sorted) {
+    result = result.slice(0, e.start) + e.replacement + result.slice(e.end);
+  }
+  return result;
+}
+
+/**
  * workload (= 観測対象の関数を呼び出す statement 列) を、完了値として観測配列 `__OBS__` の serialize 結果を返す
  * 関数式呼び出しでラップする。
  *
@@ -277,6 +316,46 @@ if (import.meta.vitest) {
     });
     it("setup に $BODY$ が 2 個以上なら throw (個数固定の構造強制)", () => {
       expect(() => substituteBody("var f = $BODY$; var g = $BODY$;", "x")).toThrow(/exactly 1 \$BODY\$/);
+    });
+  });
+
+  describe("wrapBodyWithObserver (in-source)", () => {
+    it("元 body を保持したまま観測ラッパで包む ($BODY$ は残らない)", () => {
+      const out = wrapBodyWithObserver("{ return x + 1; }");
+      // 元 body が内側に inline されている
+      expect(out).toContain("return x + 1;");
+      // 観測ハーネス
+      expect(out).toContain("let __OBS_R__ = (function () {");
+      expect(out).toContain("__OBS__.push");
+      expect(out).toContain("return __OBS_R__;");
+      // $BODY$ プレースホルダは残らない (substituteBody で埋め済み)
+      expect(out).not.toContain("$BODY$");
+      // 関数本体として valid (function () <out> の形で parse できる)
+      expect(() => parse(`var f = function () ${out};`)).not.toThrow();
+    });
+
+    it("差し込んだ body 内の return は観測 IIFE に吸収される (= 観測ラッパの return __OBS_R__ も併存)", () => {
+      const out = wrapBodyWithObserver("{ return 42; }");
+      expect(out).toContain("return 42;");
+      expect(out).toContain("return __OBS_R__;");
+      const declared = declareObservationGlobal(`var f = function () ${out};\nf();`);
+      expect(() => parse(declared)).not.toThrow();
+    });
+  });
+
+  describe("applySpanEdits (in-source)", () => {
+    it("複数 span を position 降順で適用、各 replacement 長が違っても前方 offset は保持される", () => {
+      const src = "AAAA BBBB CCCC";
+      // A (0..4) → "x"、C (10..14) → "yyyyyy" (長さ違い)。B は不変。
+      const out = applySpanEdits(src, [
+        { start: 0, end: 4, replacement: "x" },
+        { start: 10, end: 14, replacement: "yyyyyy" },
+      ]);
+      expect(out).toBe("x BBBB yyyyyy");
+    });
+
+    it("編集ゼロなら原文のまま", () => {
+      expect(applySpanEdits("abc", [])).toBe("abc");
     });
   });
 }

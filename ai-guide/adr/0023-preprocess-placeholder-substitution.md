@@ -120,7 +120,11 @@ await executeSandboxed({ setup: fastSetup, workload, timeout_ms });
 - bootstrap-invocation 中も body は元の場所で走るが、`workload` IIFE 先頭の `__OBS__ = []` reset で bootstrap 中の観測値は捨て、純粋な workload 観測だけを残す (= v1 の bootstrap ガードが不要)
 - 観測 hook を外置きしないので、変更関数の **外側からの参照名** (lib IIFE 内ローカル名 / 外部エイリアス / AMD モジュール内ローカル名 等) のいずれであっても観測が成立する
 - **観測ハーネスは setup 側に inline 化** (D-δ §observation 仕様): pruning 入力 (slow/fast) から観測足場を除き、抽出 pattern を「変更関数の等価性の核」だけに絞る。slow/fast が裸 body になっても、`substituteBody(setup, slow=裸body)` で `$BODY$` (= 観測 IIFE 内側) に差し込まれた最終実行コードは D-β/D-γ と同形
-- **stmt unit (no-fn-unit rescue、順 1-d) は workload-driven の退化形**: 変更対象が関数本体でなく文 (`var VERSION='...'` / `Ember.X = ...;` 等) の場合、observer hook を inline 化する関数本体が存在しないため、setup の hole は裸 `$BODY$` で stmt 全体を置換するのみ (`{ $BODY$ }` の brace なし)、slow/fast も裸 stmt のまま。観測差は workload IIFE の `__OBS__` 完了値だけで取り、reachability で「変更 stmt の binding を読む reachable な named fn がある」と判定済の前提で運用する (`assemble/strategies/changed-stmt.ts`、`workload` 側に依存しない変更は equal verdict として正しく落ちる)
+- **stmt unit (no-fn-unit rescue、順 1-d) は full-observation 形**: 変更対象が関数本体でなく文 (`var VERSION='...'` / `Ember.X = ...;` 等) の場合、changed-fn のように「変更関数 1 個を `$BODY$` 入り observer で置換」できない (変更が関数の外にある)。代わりに `assemble/strategies/changed-stmt.ts` が:
+  - changed stmt 全体を裸 `$BODY$` で置換 (`{ $BODY$ }` の brace なし、slow/fast の stmt がここに差し込まれる)
+  - **workload から到達可能な named fn 群の本体を、元 body を保持したまま observer ラッパで計装** (`wrapBodyWithObserver`、`$BODY$` は使わず元 body を観測 IIFE 内側に inline)。これで workload 実行時に reachable fn が呼ばれるたび戻り値が `__OBS__` に push され、stmt の変更が fn 戻り値に伝播すれば observer 差として観測される
+  - over-observation (変更に依存しない fn も計装) は両側で同じ値を push するので false not_equal を生まない。「変更が workload に伝播しないなら equal verdict」は正しい結果
+  - before↔after の stmt 対応は binding 名 + occurrence 番号 (`StmtChangeUnit.bindingsOccurrence`) で一意化 (同名 binding 複数でも誤マッチ回避)
 
 旧契約 (= `workload` フィールドなし、placeholder model でない candidate_kind) は **後方互換**: そのまま既存 executor の (setup, workload) に直接渡る (= 旧 candidate_kind では slow/fast の本体そのものが workload 引数に直接入る)。placeholder 経路との差は呼び出し側 (`changed-fn.ts`) で setup を `substituteBody(setup, slow/fast)` に展開するかどうかだけで、executor 側は無改修。
 

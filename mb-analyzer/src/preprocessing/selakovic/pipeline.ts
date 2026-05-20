@@ -214,7 +214,7 @@ function appendChangeUnitCandidates(
       candidates.push(buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED));
       continue;
     }
-    candidates.push(buildChangedStmtCandidate(u, libSourceBefore, libSourceAfter, f1Before));
+    candidates.push(buildChangedStmtCandidate(u, libSourceBefore, libSourceAfter, f1Before, graph));
   }
 }
 

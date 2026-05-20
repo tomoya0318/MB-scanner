@@ -155,6 +155,12 @@ export interface StmtChangeUnit {
   readonly stmt: Node;
   /** この文が定義する binding / property 名。 */
   readonly bindings: readonly string[];
+  /**
+   * 「before-AST の block 直下の文のうち、`bindings` と sorted-equal な文の中でこの文が何番目か」(0-based)。
+   * after-AST 側で対応する文を引くとき、binding 名だけだと同名 (`var X = 1; ... X = 2;` 等) で誤マッチするので、
+   * occurrence 番号で一意化する (changed-stmt strategy が `findAfterStmtByBindingsAndOccurrence` で利用)。
+   */
+  readonly bindingsOccurrence: number;
   /** 人間可読の短い説明 (ログ用)。 */
   readonly desc: string;
   /** この文に局所化された変更ノード (before-AST)。 */
@@ -221,6 +227,8 @@ export function findChangeUnits(libBeforeSrc: string, libAfterSrc: string): Chan
     unanchored++;
   });
 
+  const occurrenceOf = computeStmtOccurrences(beforeAst);
+
   const units: ChangeUnit[] = [];
   for (const [name, u] of fnUnits) {
     const after = afterByName.get(name) ?? null;
@@ -239,12 +247,36 @@ export function findChangeUnits(libBeforeSrc: string, libAfterSrc: string): Chan
       kind: "stmt",
       stmt: u.stmt,
       bindings: statementBindings(u.stmt),
+      bindingsOccurrence: occurrenceOf.get(u.stmt) ?? 0,
       desc: tryGenerateNode(u.stmt).split("\n")[0]!.slice(0, 80),
       changedNodes: u.changed,
     });
   }
 
   return { beforeAst, afterAst, units, unanchored, empty: false };
+}
+
+/**
+ * `ast` の block 直下 (Program / BlockStatement) の文を document 順に走査し、各文に
+ * 「同じ sorted-bindings を持つ文の中で何番目か」(0-based) を割り当てた Map を返す。
+ * changed-stmt strategy が after-AST 側で同じ走査・filter (`findAfterStmtByBindingsAndOccurrence`) を使い、
+ * occurrence 番号で before↔after の文を一意対応させる ([[change-units]] の StmtChangeUnit.bindingsOccurrence)。
+ */
+function computeStmtOccurrences(ast: File): Map<Node, number> {
+  const result = new Map<Node, number>();
+  const counts = new Map<string, number>();
+  walkNodes(ast, ({ node, ancestors }) => {
+    const parent = ancestors[ancestors.length - 1];
+    const parentType = nodeType(parent);
+    if (parentType !== "Program" && parentType !== "BlockStatement") return;
+    const bindings = statementBindings(node);
+    if (bindings.length === 0) return;
+    const key = [...bindings].sort().join("|");
+    const k = counts.get(key) ?? 0;
+    result.set(node, k);
+    counts.set(key, k + 1);
+  });
+  return result;
 }
 
 // 判断: ai-guide/adr/0007-in-source-testing-internal-helpers.md
@@ -299,7 +331,20 @@ if (import.meta.vitest) {
       const stmts = r.units.filter((u): u is StmtChangeUnit => u.kind === "stmt");
       expect(stmts.length).toBe(1);
       expect(stmts[0]!.bindings).toContain("VERSION");
+      expect(stmts[0]!.bindingsOccurrence).toBe(0); // 単独宣言なので 0 番目
       expect(r.units.some((u) => u.kind === "fn")).toBe(false);
+    });
+
+    it("同名 binding が複数: 変更された方の occurrence 番号が付く (Copilot #2 対策)", () => {
+      // var X が 2 回宣言され、2 回目 (occurrence=1) だけ変更されるケース。
+      const before = wrap("var X = 1; function noop() {} var X = 'a'; function foo() { return X; }");
+      const after = wrap("var X = 1; function noop() {} var X = 'b'; function foo() { return X; }");
+      const r = findChangeUnits(before, after);
+      const stmts = r.units.filter((u): u is StmtChangeUnit => u.kind === "stmt");
+      expect(stmts.length).toBe(1);
+      expect(stmts[0]!.bindings).toEqual(["X"]);
+      // before の「2 回目の var X」が変更対象 → occurrence=1
+      expect(stmts[0]!.bindingsOccurrence).toBe(1);
     });
 
     it("X.f = function(){} 形 / { f: function(){} } 形の命名", () => {
