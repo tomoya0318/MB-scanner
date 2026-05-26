@@ -102,7 +102,7 @@ ADR-0012 は「server SUT 用に最小 Node グローバル (`process` / `Buffer
 - **ADR-0023 `$BODY$` 置換規約**: 1. の新 strategy 内で setup string 中の `$BODY$` を slow/fast 各 1 回置換する。既存 `changed-fn.ts` と同じ規約を踏襲し、helper は `ast/inspect.ts` の汎用群を再利用 (ADR-0024 §AST helper 集約と整合)。
 - **ADR-0014 case-split**: server changed-fn でも lib 側変更関数 × workload で複数 candidate を組む点は client changed-fn と同じ枠組み。independent split は client 側と同じ判定で良い。
 - **観測モデル (Revised、順 3-2 で確定)**: 変更関数の戻り値だけでは mutation 系 lib (Cheerio の `removeClass` は `this` を返す等) で観測が空虚になり false-equal を生む。workload は 2 チャネルを返す: `r` = 変更関数の戻り値列 (observer ハーネス)、`s` = `init()` 戻り値の **汎用 safe-walk** (循環畳み込み + 関数 own プロパティも walk) による post-state projection。戻り値系 (Chalk) は `r`、mutation 系 (Cheerio) は `s` が positive-evidence になる。lib 固有 projection は不要。recorder Proxy (C6) には依存しない。
-- **multi-file (Revised、順 3-2 で確定)**: in-memory map-require。穴あけ対象ファイルのみ raw な関数リテラル (`$BODY$` を raw コード位置に置く)、他は JSON map + `new Function`。相対 require は map 上で解決、未解決は graceful `{}`、bare は ambient require に委譲。entry は `index.js` / package.json `main` / 単一ファイルで判定。
+- **multi-file (Revised、順 3-2 で確定)**: in-memory map-require。穴あけ対象ファイルのみ raw な関数リテラル (`$BODY$` を raw コード位置に置く)、他は JSON map + `new Function`。相対 require は map 上で解決、未解決は graceful `{}`、bare は ambient require に委譲。entry は `index.js` があればそれ、無ければ単一ファイルで判定 (両方無い multi-file = `index.js` 無しの dir は entry 不明で救済しない。package.json `main` 対応は未実装、必要になれば別途)。
 - **空観測 → inconclusive (Revised、順 3-2 で確定、ADR-0018 厳密化)**: `r` も `s` も空なら workload は `undefined` を返し return_value oracle が N/A。ハーネス足場 global (`__` 接頭辞) は argument_mutation の snapshot から除外。「同じ空を観測 = equal」の false-equal を防ぐ。
 
 ## 結果 / 影響

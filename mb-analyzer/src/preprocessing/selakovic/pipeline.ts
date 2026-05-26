@@ -325,8 +325,8 @@ function preprocessServer(input: Extract<SelakovicPreprocessInput, { kind: "serv
     },
   ];
   // lib 側に real change があれば、CommonJS-respecting changed-fn candidate を append する (ADR-0025、順 3-2)。
-  // 変更関数 body だけ `$BODY$` 穴あけ → vm/jsdom executor で観測ハーネス経由 equiv に乗せ、is_workload_reachable=true
-  // にして build_equiv_input の small-candidate フィルタを通す (= DROP 解消)。Phase 1 は single-file lib (Chalk 形) のみ。
+  // 変更関数 body だけ `$BODY$` 穴あけ → jsdom executor で観測ハーネス経由 equiv に乗せ、is_workload_reachable=true
+  // にして build_equiv_input の small-candidate フィルタを通す (= DROP 解消)。single-file / multi-file 両対応。
   if (libHasRealChange) {
     appendServerChangeUnitCandidates(candidates, input.lib_before_files, input.lib_after_files, input.after_test_case);
   }
