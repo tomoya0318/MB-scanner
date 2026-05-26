@@ -513,7 +513,7 @@ describe("preprocess — server (test_case)", () => {
     expect(changedFn!.slow).toContain("x * 2");
     expect(changedFn!.fast).toContain("x << 1");
     // 2 チャネル観測 (戻り値 r + post-state s)
-    expect(changedFn!.workload).toContain("return JSON.stringify({ r: __OBS__, s: __walk__(__tc_i__, 0) });");
+    expect(changedFn!.workload).toContain("return JSON.stringify({ r: __OBS__, s: __s__ });");
   });
 
   it("multi-file lib (index.js entry): 変更ファイル (impl.js) を特定して穴あけ、entry=index.js で map-require 救済 (ADR-0025、順 3-2)", () => {

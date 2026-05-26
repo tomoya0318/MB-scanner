@@ -152,3 +152,32 @@ describe("server-changed-fn × cheerio-386b (integration, multi-file + post-stat
     expect(result.verdict).toBe("not_equal");
   });
 });
+
+describe("空観測 → inconclusive (ADR-0018 positive-evidence 厳密化、Fix A/B)", () => {
+  it("変更関数が workload で呼ばれず init 戻り値も無い (r 空 + s 空) → equal でなく inconclusive", async () => {
+    // 変更関数 onlyState は test_case から呼ばれない (test は無関係な計算をするだけ)。
+    // init も観測可能な状態を返さない → r=[], s=空 → 空観測 → undefined return → return_value N/A。
+    const libBefore = `var lib = module.exports;\nlib.onlyState = function () { return 1; };\nlib.unused = function () { return wrap(function self() { return 1; }); };`;
+    const libAfter = `var lib = module.exports;\nlib.onlyState = function () { return 1; };\nlib.unused = function () { return wrap(function self() { return 2; }); };`;
+    const testCase = `exports.test = function () { return 1 + 1; };`; // lib を一切呼ばない
+    const cu = findChangeUnits(libBefore, libAfter);
+    const unit = cu.units.filter((u): u is FnChangeUnit => u.kind === "fn" && u.afterFn !== null)[0]!;
+    const candidate = buildServerChangedFnCandidate({
+      unit,
+      changedFileKey: "lib.js",
+      changedFileAfterSrc: libAfter,
+      otherAfterFiles: {},
+      entryKey: "lib.js",
+      testCaseSource: testCase,
+    });
+    const result = await checkEquivalence({
+      setup: candidate.setup!,
+      slow: candidate.slow!,
+      fast: candidate.fast!,
+      workload: candidate.workload!,
+      environment: "jsdom",
+      timeout_ms: 10_000,
+    });
+    expect(result.verdict).toBe("inconclusive");
+  });
+});

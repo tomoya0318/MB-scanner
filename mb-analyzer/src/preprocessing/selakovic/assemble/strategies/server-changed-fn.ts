@@ -193,7 +193,13 @@ function buildServerObservedWorkload(testCaseSource: string): string {
     "var __tc_i__ = (typeof __tc_exp__.init === 'function') ? __tc_exp__.init() : undefined;",
     "var __tc_s__ = (typeof __tc_exp__.setupTest === 'function') ? __tc_exp__.setupTest(__tc_i__) : undefined;",
     "if (typeof __tc_exp__.test === 'function') __tc_exp__.test(__tc_i__, __tc_s__);",
-    "return JSON.stringify({ r: __OBS__, s: __walk__(__tc_i__, 0) });",
+    // 観測が空 (変更関数が一度も呼ばれず戻り値ゼロ、かつ post-state も空) なら undefined を返す。
+    // → return_value oracle が両側 return_is_undefined で N/A → positive evidence 無し → inconclusive (ADR-0018)。
+    // 「同じ空を観測した = equal」という false-equal を防ぐ。
+    "var __s__ = __walk__(__tc_i__, 0);",
+    "var __sEmpty__ = (__s__ === undefined || __s__ === null || (typeof __s__ === 'object' && Object.keys(__s__).length === 0));",
+    "if (__OBS__.length === 0 && __sEmpty__) return undefined;",
+    "return JSON.stringify({ r: __OBS__, s: __s__ });",
     "})()",
   ].join("\n");
 }
@@ -251,7 +257,9 @@ if (import.meta.vitest) {
       // workload: __SUT__ 差し替え + 2 チャネル (r/s) + safe-walk
       expect(c.workload).toContain("return globalThis.__SUT__;");
       expect(c.workload).toContain("exports.test = function () { return require('./lib_after.js').run(); };");
-      expect(c.workload).toContain("return JSON.stringify({ r: __OBS__, s: __walk__(__tc_i__, 0) });");
+      // 2 チャネル観測 + 空観測ガード (r も s も空なら undefined → return_value N/A → inconclusive)
+      expect(c.workload).toContain("if (__OBS__.length === 0 && __sEmpty__) return undefined;");
+      expect(c.workload).toContain("return JSON.stringify({ r: __OBS__, s: __s__ });");
 
       // sandbox 投入直前形が valid JS
       expect(() => parse(declareObservationGlobal(substituteBody(c.setup!, c.slow!)))).not.toThrow();
