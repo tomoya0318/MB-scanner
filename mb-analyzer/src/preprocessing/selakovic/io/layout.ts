@@ -48,8 +48,12 @@ export function detectLayout(issueDir: string): DetectedLayout {
   // server-multi-file: <lib>_before/ ディレクトリ
   const beforeDir = findLibEntry(issueDir, "_before", "directory");
   const afterDir = findLibEntry(issueDir, "_after", "directory");
-  if (beforeDir !== null && afterDir !== null) {
-    // ディレクトリ形式が見つかれば優先 (Mocha / Chalk など serverIssues の典型)
+  // dir 形式を SERVER として優先するのは **HTML を持たない純 server** (Mocha / Chalk 等) のみ。
+  // clientServerIssues (Backbone / Moment / NodeLruCache) は dir も持つが v_*.html + 単一ファイル形式も持ち、
+  // CDN dep が client vendoring (`<lib>Issues/package.json` の jquery / underscore) で宣言済 =
+  // **client 経路で処理する設計**。ここで dir 優先で SERVER に倒すと HTML と client vendoring を両方捨て、
+  // server CommonJS 経路で entry 不明 / param 不一致になり DROP する。HTML があれば下の client 判定に委ねる。
+  if (!hasHtml && beforeDir !== null && afterDir !== null) {
     return {
       kind: LAYOUT_KIND.SERVER,
       serverDirs: { beforeDir, afterDir },
@@ -148,11 +152,28 @@ if (import.meta.vitest) {
       expect(layout.serverFiles).toBeUndefined();
     });
 
-    it("server: <lib>_before/ ディレクトリが test_case_*.js より優先される", () => {
+    it("server: <lib>_before/ ディレクトリが test_case_*.js より優先される (HTML 無し = 純 server)", () => {
       const d = mkIssue(["test_case_before.js", "test_case_after.js", "cheerio_before/index.js", "cheerio_after/index.js"]);
       const layout = detectLayout(d);
       expect(layout.kind).toBe(LAYOUT_KIND.SERVER);
       expect(layout.serverDirs?.beforeDir).toMatch(/cheerio_before$/);
+    });
+
+    it("clientServerIssue: v_*.html + dir + 単一ファイルが同居 → CLIENT 優先、lib は単一ファイル (HTML が <script src> する形)", () => {
+      // Moment / Backbone 等: dir (moment_before/) も持つが v_html + moment_before.js もあり、
+      // HTML は単一ファイルを load する。dir 優先で SERVER に倒さず CLIENT に乗せ、lib は単一ファイルを採る。
+      const d = mkIssue([
+        "v_before.html", "v_after.html",
+        "moment_before.js", "moment_after.js",
+        "moment_before/moment.js", "moment_after/moment.js",
+        "test_case_before.js", "test_case_after.js",
+      ]);
+      const layout = detectLayout(d);
+      expect(layout.kind).toBe(LAYOUT_KIND.CLIENT);
+      // server dir には倒さない (serverDirs を持たない)
+      expect(layout.serverDirs).toBeUndefined();
+      // lib は単一ファイル (HTML の <script src="moment_before.js"> に対応)
+      expect(layout.serverFiles?.beforeFile).toMatch(/moment_before\.js$/);
     });
   });
 }
