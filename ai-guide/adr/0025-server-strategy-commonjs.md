@@ -1,6 +1,6 @@
 # ADR-0025: server SUT を CommonJS-respecting holed lib + node:vm 直 eval で扱う
 
-- **Status**: accepted (ローカル spike で 3/3 equal 達成、go ライン 2/3 以上を満たす — chalk-27a / chalk-28 / cheerio-386b)
+- **Status**: accepted (ローカル spike で 3/3 equal 達成、go ライン 2/3 以上を満たす — chalk-27a / chalk-28 / cheerio-386b)。**Revised 2026-05 (順 3-2 本実装)**: executor を vm→jsdom に修正、観測モデル (2 チャネル) / multi-file (map-require) / 空観測→inconclusive を確定、clientServerIssues を射程外に明確化 (§決定 / §設計の骨子 / §射程 参照)。
 - **Date**: 2026-05-18
 - **Related**: ADR-0012 (vm executor + server vm globals/`.json` require の予約), ADR-0015 (equivalence-checker 二層化 / oracle 環境非依存), ADR-0016 (SUT lib npm dep を fork lockfile-vendored で解決), ADR-0023 (placeholder substitution + 4 値契約), ADR-0024 (preprocess contract base/adapter 分離 + `environment` 派生)
 
@@ -27,7 +27,7 @@ ADR-0012 は「server SUT 用に最小 Node グローバル (`process` / `Buffer
 
 - **A. 現状維持 (server を全件 DROP のまま諦める)**: 実装ゼロ。verdict 到達 issue 43→43 のまま、threats に「server 26 件は構造的限界で観測不能」と書く。
 - **B. server も jsdom + browser-style 連結に統一**: 既に Phase 2a/2b で失敗実証済 (v1-notes §153)。`module.exports` 構造を壊さず連結する方法が無い。
-- **C. CommonJS-respecting holed lib + `node:vm` 直 eval (採用案)**: 新 strategy `assemble/strategies/server-changed-fn.ts` を追加し、`module.exports` 構造を保ったまま変更関数 body だけ `$BODY$` で穴あく。executor は ADR-0012 で予約済の vm executor (Node グローバル注入済) に server changed-fn を乗せる。`derive_environment` を `layout === "server" && wrapper_kind === "top_level"` のとき `vm` を返すよう adapter 側で改修。
+- **C. CommonJS-respecting holed lib + `node:vm` 直 eval (採用案)**: 新 strategy `assemble/strategies/server-changed-fn.ts` を追加し、`module.exports` 構造を保ったまま変更関数 body だけ `$BODY$` で穴あく。executor は **jsdom executor** に乗せる。CommonJS `require` 解決 (createRequire + ADR-0016 lockfile fallback) と Node グローバル shim は jsdom executor 側に実装済で、`vm.ts` は pruning 用に `require`/`process` を遮断しているため (= 初版は ADR-0012 の「vm に Node グローバル注入」予約に基づき vm を想定したが、本実装時に require 機構が jsdom 側にあると判明し jsdom に変更)。`derive_environment` は `jsdom` のまま変更しない。DROP の真因は環境でなく組み立て (`preprocessServer` が `is_workload_reachable=false` 固定) なので、holed lib を `is_workload_reachable=true` candidate に組めば jsdom 経路で成立する。
 - **D. Playwright 上で Node polyfill (browserify バンドル等)**: 実装コスト過大、ADR-0012 §トリガーが想定する fallback 用途と乖離。却下。
 
 ### 評価
@@ -46,6 +46,8 @@ ADR-0012 は「server SUT 用に最小 Node グローバル (`process` / `Buffer
 **C (CommonJS-respecting holed lib + node:vm 直 eval)** を採用する。
 
 ローカル spike で 3/3 件 equal 達成。go ライン 2/3 以上を満たしたため `accepted` に確定。
+
+**Revised (順 3-2 本実装)**: 採用案 C の方向 (CommonJS-respecting holed lib) は維持。ただし executor は **vm でなく jsdom** に修正した — 初版は ADR-0012 の予約に基づき vm を想定したが、本実装で require/Node グローバル機構が jsdom executor 側にあり vm.ts は require を遮断していると判明したため。タイトルの「node:vm 直 eval」は spike 時の手法を指す歴史的表記。
 
 ### spike 結果サマリ
 
@@ -91,27 +93,39 @@ ADR-0012 は「server SUT 用に最小 Node グローバル (`process` / `Buffer
 |---|---|---|---|
 | 1 | 新規 | `mb-analyzer/src/preprocessing/selakovic/assemble/strategies/server-changed-fn.ts` | 新 strategy。`module.exports.xxx = function (...) { $BODY$ }` 形で holed lib を組み立てる builder。既存 `strategies/changed-fn.ts` (browser-style 連結) と並列に置き、IIFE 連結ではなく CommonJS 構造を保持する。 |
 | 2 | 既存改修 | `mb-analyzer/src/preprocessing/selakovic/pipeline.ts` の `preprocessServer()` (line 200-242 周辺) | 現状: server は 1 candidate 固定で `setup: ""`, `slow/fast = buildServerRunnable(test_case)` のみ組み立てる (= changed-fn 経路に乗らない)。改修後: lib 側に real change があるとき `findChangeUnits` + 新 strategy で changed-fn candidate を追加する分岐を入れる。`buildServerRunnable` を捨てるのではなく、aspect = workload-only の場合は従来通り維持。 |
-| 3 | 既存改修 | adapter 側 `environment` 派生箇所 (= ADR-0024 で `equivalence-checker/oracle-routing.ts` 起点。具体的に Python 側 `mb_scanner/use_cases/equivalence_verification.py` か TS 側 `build_equiv_input` 同等) | `layout === "server" && wrapper_kind === "top_level"` のとき `environment: "vm"` を返す 1 分岐を追加。ADR-0024 末尾「現状は常に jsdom」を覆す。 |
-| 4 | (触らない) | `mb-analyzer/src/equivalence-checker/common/sandbox/executors/vm.ts` | ADR-0012 §「server 系 SUT 用に最小 Node グローバル + `.json` require」で既に実装済 (Phase 2b)。順 3-2 では 3. の env 分岐で初めて preprocess 経路から呼ばれる。コード追加なし。 |
+| 3 | (改修不要) | adapter 側 `environment` 派生 (`build_equiv_input.py:derive_environment`) | **変更なし** (Revised)。jsdom 経路で成立するため `derive_environment` は `jsdom` のまま (初版の「vm に派生」は撤回)。 |
+| 4 | (触らない) | `mb-analyzer/src/equivalence-checker/common/sandbox/executors/jsdom.ts` | (Revised) require 解決 (`installRequire`) + Node グローバル (`installServerGlobals`) + recorder + DOM が実装済。server changed-fn はこの jsdom executor で走る。`vm.ts` は使わない (require 遮断、pruning 専用)。 |
 | 5 | (触らない) | `mb-analyzer/src/contracts/preprocessing-contracts.ts` 等 contract 群 | `environment` フィールドは ADR-0024 で既に存在。本 ADR は値域 `vm` を活性化するだけで型・形は変えない。paired-change なし。 |
 
 ### 整合性メモ
 
 - **ADR-0023 `$BODY$` 置換規約**: 1. の新 strategy 内で setup string 中の `$BODY$` を slow/fast 各 1 回置換する。既存 `changed-fn.ts` と同じ規約を踏襲し、helper は `ast/inspect.ts` の汎用群を再利用 (ADR-0024 §AST helper 集約と整合)。
 - **ADR-0014 case-split**: server changed-fn でも lib 側変更関数 × workload で複数 candidate を組む点は client changed-fn と同じ枠組み。independent split は client 側と同じ判定で良い。
-- **recorder Proxy の境界** (C6 interaction trace): 本 ADR では未確定。`module.exports` 全体を Proxy で包むか、`init()` の戻り値だけを包むかは順 3-2 で詰める。`assemble/recorder-hooks.ts` (現状は server で `init`/`setupTest` 戻り値を包む構造) の境界判断に新 ADR が要るかもしれない (= §トリガーに該当条項あり)。
+- **観測モデル (Revised、順 3-2 で確定)**: 変更関数の戻り値だけでは mutation 系 lib (Cheerio の `removeClass` は `this` を返す等) で観測が空虚になり false-equal を生む。workload は 2 チャネルを返す: `r` = 変更関数の戻り値列 (observer ハーネス)、`s` = `init()` 戻り値の **汎用 safe-walk** (循環畳み込み + 関数 own プロパティも walk) による post-state projection。戻り値系 (Chalk) は `r`、mutation 系 (Cheerio) は `s` が positive-evidence になる。lib 固有 projection は不要。recorder Proxy (C6) には依存しない。
+- **multi-file (Revised、順 3-2 で確定)**: in-memory map-require。穴あけ対象ファイルのみ raw な関数リテラル (`$BODY$` を raw コード位置に置く)、他は JSON map + `new Function`。相対 require は map 上で解決、未解決は graceful `{}`、bare は ambient require に委譲。entry は `index.js` / package.json `main` / 単一ファイルで判定。
+- **空観測 → inconclusive (Revised、順 3-2 で確定、ADR-0018 厳密化)**: `r` も `s` も空なら workload は `undefined` を返し return_value oracle が N/A。ハーネス足場 global (`__` 接頭辞) は argument_mutation の snapshot から除外。「同じ空を観測 = equal」の false-equal を防ぐ。
 
 ## 結果 / 影響
 
 採用 (accepted) の場合に得るもの:
 - server × top_level 26 件が assemble 経路に乗り (= DROP 解消)、equiv-input 投入まで到達する。実際に何件が verdict (equal/not_equal) に至るかは順 3-2 本実装後の全件再走でしか確定しない (spike は 3 件のみで救済件数の外挿はしない — 順 1-b で「mismatch 3 件 → +3」の楽観見積もりが実測 0 件だった前例あり)。Phase 3 ゴール「funnel ②→③ DROP < 10」への寄与が見込める。
-- vm executor (ADR-0012) が actual に preprocess 経路から呼ばれる初の事例になり、ADR-0012 §C-1 (Playwright fallback 0 発火) と並ぶ「環境別分岐の最小決定例」として後続 ADR の参照点になる。
-- contract 変更ゼロ (`environment` フィールドは ADR-0024 で既に存在、本 ADR では値域 `vm` を活性化するだけ)。
+- (Revised) server changed-fn が **jsdom executor** で走る (vm.ts は require 遮断のため使わない)。preprocess 経路から jsdom の require/Node グローバル shim を呼ぶ初の server-changed-fn 事例。
+- contract 変更ゼロ (`environment` フィールドは ADR-0024 で既に存在、本 ADR では `jsdom` のまま値域追加もしない)。
 
 諦めるもの・将来のコスト:
 - CommonJS dep 解決は ADR-0016 lockfile-vendored 前提でロックインされる。npm registry から dep が消えると spike 自体が再現不能になる (ADR-0016 のトリガーと連動)。
-- recorder Proxy の境界決定が順 3-2 に持ち越される。C6 interaction trace の oracle 結果に影響する可能性があり、順 3-2 PR でも spike 同等の事前検証が要る。
+- (Revised) 観測モデルは「変更関数の戻り値 + init 戻り値の post-state」の 2 チャネルで確定 (§設計の骨子)。挙動でなく内部表現を観測してしまう over-observation の限界が残る (§既知の限界)。
 - ESM (`import`/`export`) を使う lib は本 ADR の射程外。Selakovic 2016 dataset には ESM lib は無い前提だが、将来 dataset 拡張時は別 ADR。
+
+## 射程 (順 3-2 本実装で確定)
+
+本 ADR が扱うのは **v_*.html を持たない純 `serverIssues`** (Chalk / Cheerio / Mocha / Request / Socket.io)。
+`clientServerIssues` (Backbone / Moment / NodeLruCache、v_html + 単一ファイル + client vendoring `<lib>Issues/package.json` を持つ UMD lib) は **client 経路で処理する** (本 ADR の射程外)。`detectLayout` を「HTML があれば dir 形式より client を優先」に修正し client 経路へ回す (初版 §決定 が触れた「clientServer は vm 必須か jsdom か未確定」はこれで解消)。
+
+### 計測結果 (server-subset = serverIssues + clientServerIssues 45 issue、baseline は server×top_level 0/26 reached)
+- 純 server 17 件: equal 11 (Chalk×3 + Cheerio×7 + Request×1)。
+- clientServerIssues 9 件: client 経路で equal 4 + not_equal 2 到達。
+- 注: プロジェクト指標の分母は全カテゴリ 97。本数値は server 系の部分像で、達成ラインは全カテゴリ通し再走で別途確定。
 
 ## トリガー (再検討の条件)
 
@@ -121,7 +135,18 @@ ADR-0012 は「server SUT 用に最小 Node グローバル (`process` / `Buffer
 - ESM (`import`/`export`) を使う server lib が dataset に追加されたとき → 本 ADR の射程外、新 ADR を起票
 - npm registry から SUT dep が失われ ADR-0016 lockfile install が壊れたとき → ADR-0016 のトリガーと連動
 - vm executor では DOM-like API を内蔵呼出する server SUT (例: cheerio の内部で document-like API を叩く実装) が判明し、vm globals で polyfill しきれないとき → ADR-0012 fallback (Playwright) の trigger 1 と合流するか、本 ADR を superseded する
-- recorder Proxy の境界決定 (順 3-2) で C6 interaction trace が両側 N/A になることが判明したとき → 順 3-2 で oracle 設計を変えるか、本 ADR を superseded する
+- vm executor を server changed-fn に使いたくなったとき (isolation 厳密化等) → require/Node グローバル/recorder を vm.ts に移植する必要があり、別 ADR。現状は jsdom 経路で十分。
+
+(初版の「recorder Proxy の境界決定で C6 が両側 N/A」トリガーは、観測モデルを return-value + post-state の 2 チャネルに確定したことで解消済。)
+
+### 既知の限界 (順 3-2 全件再走で確定。深追いせず限界として記述)
+
+- **representation-changing 最適化の false not_equal (over-observation)**: Backbone の callbacks `array→linked-list` 等、挙動保存だが内部表現を変える最適化で、post-state/argument_mutation が内部フィールド (`_events`/`_callbacks`) を観測し not_equal になる。under-observation (false equal) の双対で汎用解は無い。Selakovic は全て最適化なので not_equal は内部表現差の疑いとして扱う。
+- **param-signature 変更** (`fn-param-names-mismatch`): 引数が変わる変更は body 差し替えモデルが成立せず救済不能 (Cheerio 385, Backbone 1766/2768)。
+- **stmt 変更** (`no-fn-unit`): 関数に紐づかないモジュール本体の変更は server 版 changed-stmt 未実装で救済不能 (Mocha 763)。
+- **古い Node API 依存**: socket.io 0.8 の `process.EventEmitter` 等、現行 Node で削除された API に依存する SUT は load 不能 (573/689)。shim 連打はしない。
+- **timeout / async-network**: 重い load (Moment 1885 timeout)、実 HTTP async (Request) は同期 oracle の射程外。
+- **dep vendoring 欠落**: SUT が require する npm dep が fork の vendor 宣言に無いと load crash (Cheerio 新版 `lodash` / Mocha `debug` 等)。fork `<lib>Issues/package.json` への追加で解消 (ADR-0016)。
 
 トリガー発火時は新 ADR を起票し、本 ADR は `superseded by ADR-NNNN` に書き換える。
 
