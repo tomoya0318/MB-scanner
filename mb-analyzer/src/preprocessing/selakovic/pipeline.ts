@@ -17,6 +17,7 @@ import { findChangeUnits, type FnChangeUnit, type StmtChangeUnit } from "../comm
 import { buildCallGraph, isAnyBindingReachedByWorkload, isReachedByAnyWorkload } from "../common/reachability";
 import { buildChangedFnCandidate, buildExcludedChangedFnCandidate } from "./assemble/strategies/changed-fn";
 import { buildChangedStmtCandidate } from "./assemble/strategies/changed-stmt";
+import { buildServerChangedFnCandidate } from "./assemble/strategies/server-changed-fn";
 import { extractFromScripts, extractFromServerFiles, type FallbackResult } from "./assemble/strategies/fallback";
 import {
   buildClientBodyCandidate,
@@ -225,6 +226,72 @@ function appendChangeUnitCandidates(
   }
 }
 
+/**
+ * server (CommonJS) layout の lib 変更を fn unit に切り分け、変更関数ごとに server-changed-fn candidate を
+ * `candidates` 末尾に push する (ADR-0025、順 3-2)。client の `appendChangeUnitCandidates` の server 版だが、
+ * workload は `f1` ではなく `test_case` (init/setupTest/test) なので reachability 判定は行わず、変更関数の
+ * 観測ハーネス戻り値 (`r`) + init 戻り値の post-state (`s`) を positive-evidence にする。
+ *
+ * single-file (Chalk 形) / multi-file (Cheerio 等の dir lib) 両対応。**ファイルごとに** before↔after を diff し、
+ * 実 fn 変更を含むファイルを特定 → そのファイルだけ穴あけ、他は after 版のまま map-require で解決する
+ * (`server-changed-fn.ts` の map-require)。entry は `index.js` があればそれ、無ければ単一ファイル。
+ * entry を決められない multi-file (index.js 無し) は救済せず embedded #0 のまま残す。
+ */
+function appendServerChangeUnitCandidates(
+  candidates: PreprocessingCandidate[],
+  libBeforeFiles: Record<string, string>,
+  libAfterFiles: Record<string, string>,
+  testCaseAfter: string,
+): void {
+  const afterKeys = Object.keys(libAfterFiles);
+  const entryKey = afterKeys.includes("index.js")
+    ? "index.js"
+    : afterKeys.length === 1
+      ? afterKeys[0]!
+      : null;
+  if (entryKey === null) return; // entry を決められない multi-file は後続課題
+
+  let appended = false;
+  let parseFailed = false;
+  for (const key of afterKeys) {
+    const beforeSrc = libBeforeFiles[key];
+    const afterSrc = libAfterFiles[key];
+    if (beforeSrc === undefined || afterSrc === undefined) continue; // before/after 片側のみの file は diff 不能
+    if (beforeSrc === afterSrc) continue;
+    let cu;
+    try {
+      cu = findChangeUnits(beforeSrc, afterSrc);
+    } catch {
+      parseFailed = true;
+      continue;
+    }
+    if (cu.empty) continue; // 整形差のみ (canonicalHash で無視済)
+    const fnUnits = cu.units.filter((u): u is FnChangeUnit => u.kind === "fn");
+    const otherAfterFiles = Object.fromEntries(afterKeys.filter((k) => k !== key).map((k) => [k, libAfterFiles[k]!]));
+    for (const u of fnUnits) {
+      candidates.push(
+        buildServerChangedFnCandidate({
+          unit: u,
+          changedFileKey: key,
+          changedFileAfterSrc: afterSrc,
+          otherAfterFiles,
+          entryKey,
+          testCaseSource: testCaseAfter,
+        }),
+      );
+      appended = true;
+    }
+  }
+  // 1 件も組めなかったときだけ marker で痕跡を残す (parse 失敗 / fn unit 不在)。
+  if (!appended) {
+    candidates.push(
+      buildExcludedChangedFnCandidate(
+        parseFailed ? SELAKOVIC_EXCLUSION_REASON.CHANGE_UNITS_PARSE_FAIL : SELAKOVIC_EXCLUSION_REASON.NO_FN_UNIT,
+      ),
+    );
+  }
+}
+
 function preprocessServer(input: Extract<SelakovicPreprocessInput, { kind: "server" }>): PreprocessingIssueResult {
   const fallback = (): PreprocessingIssueResult => {
     const fb = extractFromServerFiles(input.lib_before_files, input.lib_after_files);
@@ -242,8 +309,8 @@ function preprocessServer(input: Extract<SelakovicPreprocessInput, { kind: "serv
   const aspect = routeAspect(libHasRealChange, bodyHasRealChange);
   if (aspect === ASPECT.FALLBACK) return fallback();
 
-  // server は作用点に関わらず 1 candidate (ADR-0014 のケース IV-B は暫定 1 candidate 扱い)。
-  // target_side は aspect から派生 (lib→lib, workload→workload, lib+workload→both)。
+  // embedded #0: test_case 全文を runnable に包んだ candidate (is_workload_reachable=false)。
+  // target_side は aspect から派生 (lib→lib, workload→workload, lib+workload→both)。等価検証本体の trace。
   const beforeNodeCount = safeCount(input.before_test_case);
   const afterNodeCount = safeCount(input.after_test_case);
   const targetSide = aspectToServerTargetSide(aspect);
@@ -257,6 +324,12 @@ function preprocessServer(input: Extract<SelakovicPreprocessInput, { kind: "serv
       candidate_meta: { adapter: "selakovic", target_side: targetSide, is_workload_reachable: false },
     },
   ];
+  // lib 側に real change があれば、CommonJS-respecting changed-fn candidate を append する (ADR-0025、順 3-2)。
+  // 変更関数 body だけ `$BODY$` 穴あけ → jsdom executor で観測ハーネス経由 equiv に乗せ、is_workload_reachable=true
+  // にして build_equiv_input の small-candidate フィルタを通す (= DROP 解消)。single-file / multi-file 両対応。
+  if (libHasRealChange) {
+    appendServerChangeUnitCandidates(candidates, input.lib_before_files, input.lib_after_files, input.after_test_case);
+  }
   return {
     candidates,
     candidate_count: candidates.length,

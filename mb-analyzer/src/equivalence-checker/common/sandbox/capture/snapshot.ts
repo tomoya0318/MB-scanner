@@ -75,8 +75,21 @@ export function normalizeSetup(setup: string): string {
 }
 
 /**
+ * サンドボックス内部のハーネス足場 (観測配列・map-require の module map・記録 Proxy 等) は
+ * 二重アンダースコア接頭辞 `__` で命名する規約 (architecture/mb-analyzer.md §Magic 識別子の命名規則)。
+ * これらは SUT のオブジェクトではないので argument_mutation oracle の観測対象から除外する
+ * (= setup が作った `__OBS__` / `__SUT__` / `__FILES__` 等を「両側一致 = positive evidence」と誤認しない、ADR-0018)。
+ */
+function isHarnessGlobal(key: string): boolean {
+  return key.startsWith("__");
+}
+
+/**
  * setup 実行後の context から「setup が新規に定義した key」を拾い、object/array のものを
  * pre-snapshot する。`baselineKeys` は setup 実行前に存在した key の集合。
+ *
+ * `setupKeys` は new_globals 除外 (= workload 由来 global の判定基準) に使うのでハーネス足場も含めた完全集合。
+ * 一方 `trackedKeys` (argument_mutation の観測対象) からはハーネス足場 (`__` 接頭辞) を除く。
  */
 export function snapshotSetupState(
   ctxRecord: Record<string, unknown>,
@@ -86,6 +99,7 @@ export function snapshotSetupState(
   const trackedKeys: string[] = [];
   const preSnapshots = new Map<string, string>();
   for (const key of setupKeys) {
+    if (isHarnessGlobal(key)) continue;
     const val = ctxRecord[key];
     if (val !== null && typeof val === "object") {
       trackedKeys.push(key);
