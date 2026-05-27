@@ -20,6 +20,8 @@ import { WHITELIST_CATEGORIES } from "./rules/whitelist";
  *      データから `rules/blacklist.ts` で自動導出 (ADR 0005)
  *   4. SubtreeSet.has: fast に同型が存在する「共通ノード」に絞る
  *      (研究計画 §第 1 段階 で「差分ノードは必須扱い」とするため)
+ *   5. リテラルの差分内保護 (ADR-0028): リテラルは「親も共通ノード」の時だけ候補にする。
+ *      hash 値衝突で差分内 load-bearing リテラルが共通誤判定されるのを防ぐ
  *
  * 結果は `end - start` の降順でソート。サイズが大きい候補を先に試す方が、成功
  * 時に一度に縮む量が大きく、全体の試行回数が減る経験則。
@@ -67,6 +69,41 @@ export function enumerateCandidates(
   return candidates;
 }
 
+/**
+ * 差分サブツリー内のリテラルを保護する型集合 (ADR-0028)。
+ *
+ * リテラルは subtree hash が値で衝突しやすく (`substr(0,2)` の `0` が無関係な `charAt(0)` の `0` と衝突)、
+ * 差分ノード内の load-bearing なリテラルが「共通ノード」と誤判定され wildcard 化されていた。
+ * 一方 `for(i<100000)` のループ回数のような incidental なリテラルは共通サブツリー内にあり wildcard が正しい。
+ * → リテラルは「親も共通ノード」の時だけ候補にすることで両者を弁別する (`isCandidate` 末尾)。
+ */
+const LITERAL_TYPES = new Set<string>([
+  "NumericLiteral",
+  "StringLiteral",
+  "BooleanLiteral",
+  "NullLiteral",
+  "BigIntLiteral",
+  "RegExpLiteral",
+]);
+
+/**
+ * 「1 つの定数を表す葉的ノード」か判定する (ADR-0028)。
+ *
+ * リテラル本体に加え、符号・ビット反転・論理否定などの単項式で中身が (再帰的に) リテラルの
+ * もの (`-1` / `~0` / `!0` / `void 0` 等) も含める。Babel は `-1` を
+ * `UnaryExpression(-, NumericLiteral(1))` に分解する (リテラル本体は常に非負の絶対値) ため、
+ * 符号付き数値リテラルを拾うには UnaryExpression を見る必要がある。保護すべきか否かを分けるのは
+ * operator の種類ではなく argument がリテラルか (= 定数を表すか) なので operator は問わない。
+ *
+ * 注: `const N = 2; key.substr(0, N)` のように変数束縛された定数は構文上 `Identifier` であり
+ *     本判定では拾えない (値の出自解析が別途必要)。ADR-0028 の既知の限界③を参照。
+ */
+function isLiteralNode(node: Node): boolean {
+  if (LITERAL_TYPES.has(node.type)) return true;
+  if (node.type === "UnaryExpression") return isLiteralNode(node.argument);
+  return false;
+}
+
 function isCandidate(
   node: Node,
   parent: Node,
@@ -86,7 +123,17 @@ function isCandidate(
     if (rule.value.includes(parentValue)) return false;
   }
 
-  if (diff !== undefined && !diff.has(node)) return false;
+  if (diff !== undefined) {
+    // 段4: fast に同型が無い差分ノードは必須扱いで候補から外す。
+    if (!diff.has(node)) return false;
+    // 段5: 差分サブツリー内のリテラル保護 (ADR-0028)。リテラル (符号付き数値等の単項式リテラルを含む) は
+    // 親も共通ノードの時のみ候補にする (差分内の load-bearing リテラルが hash 衝突で wildcard 化されるのを防ぐ)。
+    // ここに来た時点で node は共通ノード (段4 通過済み)。
+    // TODO(ADR-0028 既知の限界④): diff は fast から 1 回構築され不変なため、prune ループ中に親が
+    //   wildcard 化されると ($P < 100000 等) incidental な harness 定数が過保護に skeleton 固定されうる。
+    //   発生は候補の wildcard 順序に依存し dataset 次第。実害が出たら親判定を初期 slow 基準にする等を検討。
+    if (isLiteralNode(node) && !diff.has(parent)) return false;
+  }
 
   return true;
 }
@@ -226,6 +273,43 @@ if (import.meta.vitest) {
 
       expect(isCandidate(id, parent, "expression", emptyBlacklist, diffReject)).toBe(false);
       expect(isCandidate(id, parent, "expression", emptyBlacklist, undefined)).toBe(true);
+    });
+  });
+
+  describe("isCandidate (in-source) — 差分内リテラル保護 (ADR-0028)", () => {
+    // diff.has(x) = 「x と同型サブツリーが fast に存在 = 共通ノード」。渡したノードだけを
+    // 共通とみなすスタブで、node / parent の共通性を独立に出し分ける。
+    const diffWith = (...common: Node[]): SubtreeSet =>
+      ({ has: (n: Node) => common.includes(n) }) as unknown as SubtreeSet;
+
+    it("共通リテラルでも親が差分ノードなら除外する (load-bearing リテラルを skeleton に残す)", () => {
+      // node は hash 衝突等で共通判定されるが、文脈 (親 = substr(0,2) 側) は差分。
+      const lit = stubNode("NumericLiteral");
+      const parent = stubNode("CallExpression");
+      expect(isCandidate(lit, parent, "arguments", emptyBlacklist, diffWith(lit))).toBe(false);
+    });
+
+    it("共通リテラルで親も共通なら候補に残る (incidental な harness 定数 100000 は一般化維持)", () => {
+      // 親 (i < 100000 の共通 harness) も共通なので段5 は発火せず wildcard 候補のまま。
+      const lit = stubNode("NumericLiteral");
+      const parent = stubNode("BinaryExpression");
+      expect(isCandidate(lit, parent, "right", emptyBlacklist, diffWith(lit, parent))).toBe(true);
+    });
+
+    it("非リテラル (Identifier) は親が差分でも段5 を発火させず候補に残る", () => {
+      const id = stubNode("Identifier", { name: "key" });
+      const parent = stubNode("CallExpression");
+      expect(isCandidate(id, parent, "arguments", emptyBlacklist, diffWith(id))).toBe(true);
+    });
+
+    it("負リテラル -1 (UnaryExpression(-, NumericLiteral)) も親が差分なら除外する", () => {
+      // 例: slice(-1) の -1。Babel は符号を UnaryExpression に分解するので isLiteralNode で再帰判定。
+      const neg = stubNode("UnaryExpression", {
+        operator: "-",
+        argument: stubNode("NumericLiteral"),
+      });
+      const parent = stubNode("CallExpression");
+      expect(isCandidate(neg, parent, "arguments", emptyBlacklist, diffWith(neg))).toBe(false);
     });
   });
 
