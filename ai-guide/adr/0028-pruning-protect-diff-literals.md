@@ -44,9 +44,10 @@ spike 実測 (50 pruned candidate, `MB_PRUNE_PROTECT_DIFF_LITERALS=1`):
 
 ## 決定
 
-**B (差分サブツリー内のリテラルのみ保護)** を採用する。`isCandidate` で、ノード型がリテラル
-(Numeric/String/Boolean/Null/BigInt/RegExp Literal) の場合に限り「親も共通ノード (`diff.has(parent)`)」を
-追加条件とする。
+**B (差分サブツリー内のリテラルのみ保護)** を採用する。`isCandidate` で、ノードがリテラル
+(Numeric/String/Boolean/Null/BigInt/RegExp Literal)、または符号・ビット反転等の単項式で中身が
+(再帰的に) リテラルのもの (`-1` / `~0` 等。Babel は `-1` を `UnaryExpression(-, NumericLiteral)` に
+分解する) の場合に限り「親も共通ノード (`diff.has(parent)`)」を追加条件とする (`isLiteralNode`)。
 
 主要な根拠:
 - load-bearing リテラル (差分内) の保護と incidental リテラル (共通 harness 内) の一般化を、構造的文脈
@@ -81,6 +82,19 @@ before↔after の差分 (tree-diff/wrap 系) でしか救えない):
    最適化本体 (fast 側のみに存在) を表現できない。pruning のバグではなく「slow 側からパターンを抽出する」
    アプローチの構造的限界。
 
+3. **変数束縛された定数 (`const N = 2; key.substr(0, N)`)**: 値が `const`/引数等で別途束縛された定数は
+   構文上 `Identifier` でありリテラルではないため、本ルール (構文的リテラル保護) では拾えない。その
+   `Identifier` が hash 衝突で共通誤判定されれば wildcard 化される (リテラル `0` が `charAt(0)` と衝突した
+   のと同じ問題が `Identifier` で再現)。値の出自を辿る定数伝播 (def-use 解析) が別途必要で、subtree-hash の
+   差分フィルタとは別レイヤー。本 ADR のリテラル保護 (構文的な葉のみ) では捉えられない。
+
+4. **prune ループ中の親変化による incidental リテラル過保護**: `diff` は fast から 1 回構築され不変だが、
+   slow は prune が進むと wildcard 化される。共通リテラルの親が先に wildcard 化される (例: `i < 100000`
+   の `i` が `$P` 化 → `$P < 100000`) と、変化後の親は fast 非含有 = 差分扱いになり、本来 incidental な
+   harness 定数 (`100000`) が段5 で過保護に skeleton 固定されうる。発生は候補の wildcard 順序 (サイズ降順)
+   に依存し dataset 次第。下記トリガー③の具体機構。実害が出たら親判定を初期 slow 基準にする等を検討
+   (選択肢 C 寄りで重いため現時点では受容)。
+
 ## トリガー (再検討の条件)
 
 以下のいずれかが成立したらこの ADR を見直す:
@@ -98,6 +112,7 @@ before↔after の差分 (tree-diff/wrap 系) でしか救えない):
 - 実装は `candidates.ts` の `isCandidate` に既定で組み込み済み (試験フラグ
   `MB_PRUNE_PROTECT_DIFF_LITERALS` は撤去)。環境変数なしの通常 `prune-batch` で本ルールが効く
   (issue_5457 で `substr(0, 2)` が骨格保持を確認)。canonical な `prune-results.jsonl` も本ルール適用済。
-- 検証スクリプト・実測ログは `research/research/pruning/code/` (spike_literal_impact, compare_litfix,
-  match_regex, match_ast) を参照。
-</content>
+- 継続再走する検証スクリプト (形検出・funnel) は `research/research/pruning/code/` (pattern_map,
+  match_regex, match_ast, stage_funnel) を参照。本体変更前の静的見積り (`spike_literal_impact`) と
+  フラグ ON/OFF の一回比較 (`compare_litfix`) は再走不能になったため `tmp/spike-archive/` に退避済み
+  (実測ログは `notes/spike-literal-impact.md` に保存)。
