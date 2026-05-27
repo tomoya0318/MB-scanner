@@ -20,6 +20,8 @@ import { WHITELIST_CATEGORIES } from "./rules/whitelist";
  *      データから `rules/blacklist.ts` で自動導出 (ADR 0005)
  *   4. SubtreeSet.has: fast に同型が存在する「共通ノード」に絞る
  *      (研究計画 §第 1 段階 で「差分ノードは必須扱い」とするため)
+ *   5. リテラルの差分内保護 (ADR-0028): リテラルは「親も共通ノード」の時だけ候補にする。
+ *      hash 値衝突で差分内 load-bearing リテラルが共通誤判定されるのを防ぐ
  *
  * 結果は `end - start` の降順でソート。サイズが大きい候補を先に試す方が、成功
  * 時に一度に縮む量が大きく、全体の試行回数が減る経験則。
@@ -67,6 +69,23 @@ export function enumerateCandidates(
   return candidates;
 }
 
+/**
+ * 差分サブツリー内のリテラルを保護する型集合 (ADR-0028)。
+ *
+ * リテラルは subtree hash が値で衝突しやすく (`substr(0,2)` の `0` が無関係な `charAt(0)` の `0` と衝突)、
+ * 差分ノード内の load-bearing なリテラルが「共通ノード」と誤判定され wildcard 化されていた。
+ * 一方 `for(i<100000)` のループ回数のような incidental なリテラルは共通サブツリー内にあり wildcard が正しい。
+ * → リテラルは「親も共通ノード」の時だけ候補にすることで両者を弁別する (`isCandidate` 末尾)。
+ */
+const LITERAL_TYPES = new Set<string>([
+  "NumericLiteral",
+  "StringLiteral",
+  "BooleanLiteral",
+  "NullLiteral",
+  "BigIntLiteral",
+  "RegExpLiteral",
+]);
+
 function isCandidate(
   node: Node,
   parent: Node,
@@ -87,6 +106,12 @@ function isCandidate(
   }
 
   if (diff !== undefined && !diff.has(node)) return false;
+
+  // 差分サブツリー内のリテラル保護 (ADR-0028): リテラルは親も共通ノードの時のみ候補にする。
+  // (差分ノード内の load-bearing なリテラルが hash 衝突で wildcard 化されるのを防ぐ)
+  if (diff !== undefined && LITERAL_TYPES.has(node.type) && !diff.has(parent)) {
+    return false;
+  }
 
   return true;
 }
