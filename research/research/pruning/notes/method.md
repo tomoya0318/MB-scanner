@@ -63,4 +63,3 @@ loose を 3 系統 OR にする理由:
 - P4 (`.html('')`) と P7 (`toString.call`) は pruned `pattern_code` が無く、形検証は不可
   (段階分析で落ちどころを示す)
 - 入力 jsonl は再走で上書きされうる。本結果は `17bb101` 時点のスナップショット
-</content>

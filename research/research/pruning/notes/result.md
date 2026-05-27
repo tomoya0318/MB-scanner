@@ -102,4 +102,3 @@ before↔after の差分=wrap 系でしか取れない)。
 - `code/pattern_map.py` (10 パターン定義 + issue 対応)
 - `code/stage_funnel.py` (段階分析)
 - `code/match_regex.py` / `code/match_ast.mjs` (2 バックエンド) + `shape-targets.json` / `ast-match.json`
-</content>

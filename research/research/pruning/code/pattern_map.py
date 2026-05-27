@@ -72,7 +72,9 @@ PATTERNS: dict[int, dict] = {
     6: {
         "name": "split(x).join(y) → replace(/x/g,y)",
         "before_shape": "split(...).join(...) チェーン",
-        "regex": [r"\.split\s*\([^;]*?\)\s*\.join\s*\("],
+        # [^;)] で split() の閉じ括弧をまたがないよう制限 (無関係な `split(..), x).join` 誤検出を抑制)。
+        # nested 括弧の split 引数は取りこぼすが、厳密な構造判定は AST backend (match_ast.mjs) に委ねる。
+        "regex": [r"\.split\s*\([^;)]*\)\s*\.join\s*\("],
         "issues": ["clientServerIssues/UnderscoreIssues/issue_39"],
     },
     7: {
@@ -106,7 +108,8 @@ PATTERNS: dict[int, dict] = {
 
 
 def load_jsonl(path: str) -> list[dict]:
-    return [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+    with open(path, encoding="utf-8") as f:
+        return [json.loads(l) for l in f if l.strip()]
 
 
 def issue_to_pattern() -> dict[str, int]:

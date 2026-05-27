@@ -35,7 +35,11 @@ function toAst(code) {
   }
 }
 
-const prop = (n) => (n?.property && (n.property.name ?? n.property.value)) || null;
+const prop = (n) => {
+  const p = n?.property;
+  if (!p) return null;
+  return p.name ?? p.value ?? null; // 計算プロパティの 0 / "" を || で潰さないよう ?? で扱う
+};
 
 // パターン番号 → AST マッチャ (1つでも該当ノードがあれば true)
 const MATCHERS = {
@@ -55,9 +59,13 @@ const MATCHERS = {
   6: (ast) => hasNode(ast, (n) =>
     n.type === "CallExpression" && prop(n.callee) === "join" &&
     n.callee.object?.type === "CallExpression" && prop(n.callee.object.callee) === "split"),
-  7: (ast) => hasNode(ast, (n) =>
-    (n.type === "CallExpression" && prop(n.callee) === "call" && prop(n.callee.object) === "toString") ||
-    (n.type === "StringLiteral" && /^\[object\s+\w+\]$/.test(n.value))),
+  7: (ast) => hasNode(ast, (n) => {
+    if (n.type === "StringLiteral") return /^\[object\s+\w+\]$/.test(n.value);
+    if (n.type !== "CallExpression" || prop(n.callee) !== "call") return false;
+    const obj = n.callee.object;
+    // X.prototype.toString.call(...) (prop で toString) と bare toString.call(...) (Identifier) の両形を拾う
+    return prop(obj) === "toString" || (obj?.type === "Identifier" && obj.name === "toString");
+  }),
   8: (ast) => hasNode(ast, (n) =>
     n.type === "BinaryExpression" && n.operator === "%" &&
     n.right.type === "NumericLiteral" && n.right.value === 2),

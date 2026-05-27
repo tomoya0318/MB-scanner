@@ -24,7 +24,8 @@ def reconstruct(rec: dict) -> str:
 
 
 def detect(text: str, regexes: list[str]) -> bool:
-    return any(re.search(r, text, re.I) for r in regexes)
+    # JS は識別子が case-sensitive (String != string)。before-shape 検出も大小区別する。
+    return any(re.search(r, text) for r in regexes)
 
 
 def main():

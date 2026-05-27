@@ -70,7 +70,12 @@ litfix 結果を pipeline の canonical `preprocess_workload_reachability/code/p
 (issue_5457 で `substr(0, 2)` が骨格保持を確認済)。canonical `prune-results.jsonl` と整合し、再現性の
 暫定状態は解消。
 
+**検証スクリプトの退避 (2026-05-27)**: `spike_literal_impact.mjs` (本体未変更前提の静的見積り) と
+`compare_litfix.mjs` (フラグ ON/OFF の一回比較) は、フラグ撤去・canonical 昇格により再走できなくなった
+(baseline を生成する経路が無い) ため `tmp/spike-archive/` に退避し research からは外した。結論は本 notes
+に保存済み。継続再走する形検出・funnel 系 (`pattern_map` / `match_regex` / `match_ast` / `stage_funnel`)
+は research に残置。
+
 ### 未反映の下流分析
 `tmp/0048_full-rerun-17bb101/` の wrap 分析・形検出マトリクスは**旧 baseline の prune-results** に基づく。
 新 canonical では strict 検出率が上がる見込み (差分内リテラルが skeleton に出る) だが未再計算。必要なら再走。
-</content>
