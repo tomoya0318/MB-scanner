@@ -12,12 +12,6 @@ from mb_scanner.domain.entities.equivalence import (
     OracleVerdict,
     Verdict,
 )
-from mb_scanner.domain.entities.extraction import (
-    CodeExtractionItem,
-    CodeExtractionJobResult,
-    CodeExtractionMetadata,
-    CodeExtractionOutput,
-)
 from mb_scanner.domain.entities.project import Project, Topic
 from mb_scanner.domain.entities.pruning import (
     Placeholder,
@@ -26,15 +20,10 @@ from mb_scanner.domain.entities.pruning import (
     PruningResult,
     PruningVerdict,
 )
-from mb_scanner.domain.entities.sarif import SarifFinding, SarifReport
 from mb_scanner.domain.entities.summary import QuerySummary
 
 __all__ = [
     "BenchmarkEntry",
-    "CodeExtractionItem",
-    "CodeExtractionJobResult",
-    "CodeExtractionMetadata",
-    "CodeExtractionOutput",
     "EquivalenceCheckResult",
     "EquivalenceInput",
     "EquivalenceResult",
@@ -49,8 +38,6 @@ __all__ = [
     "PruningResult",
     "PruningVerdict",
     "QuerySummary",
-    "SarifFinding",
-    "SarifReport",
     "StrategyResult",
     "Topic",
     "Verdict",

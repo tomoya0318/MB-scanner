@@ -13,7 +13,6 @@ dependencies = [
     "sqlalchemy",
     "pydantic>=2.11.7",
     "PyGithub",
-    "joblib>=1.4.2",
     "matplotlib>=3.9.0",
     "numpy>=1.26.0",
     "scipy>=1.11.0",

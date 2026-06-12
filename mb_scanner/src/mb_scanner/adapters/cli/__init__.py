@@ -3,7 +3,6 @@
 from typer import Typer
 
 from mb_scanner.adapters.cli.benchmark import benchmark_app
-from mb_scanner.adapters.cli.codeql import codeql_app
 from mb_scanner.adapters.cli.count_lines import count_lines_app
 from mb_scanner.adapters.cli.equivalence import equivalence_app
 from mb_scanner.adapters.cli.github import github_app
@@ -18,7 +17,6 @@ app = Typer(help="MB-Scanner CLI - GitHub リポジトリ検索と保存ツー�
 app.registered_commands.extend(search_app.registered_commands)
 app.registered_groups.extend(search_app.registered_groups)
 
-app.add_typer(codeql_app, name="codeql")
 app.add_typer(github_app, name="github")
 
 app.registered_commands.extend(count_lines_app.registered_commands)
