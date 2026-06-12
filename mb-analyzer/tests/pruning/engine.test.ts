@@ -25,7 +25,7 @@ describe("prune — trivially-reducible", () => {
     expect(result.iterations ?? 0).toBeGreaterThan(0);
     // 少なくとも 1 つ placeholder が記録される
     expect(result.placeholders?.length ?? 0).toBeGreaterThan(0);
-    // node_count_pruned は before 以下 (prune で構造は減るか同じ)
+    // pruning 後のノード数は開始時点以下 (prune で構造は減るか同じ)
     expect(result.node_count_pruned).toBeLessThanOrEqual(result.node_count_initial ?? 0);
   }, 20_000);
 });
