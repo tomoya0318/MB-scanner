@@ -27,33 +27,10 @@ class Settings(BaseSettings):
     data_dir: Path | None = None  # 例: MB_SCANNER_DATA_DIR=/path/to/data
     db_file: Path | None = None  # 例: MB_SCANNER_DB_FILE=/path/to/data/app.db
 
-    # GitHub API
-    github_token: str | None = Field(default=None, validation_alias="GITHUB_TOKEN")  # GitHub API Token
-    github_search_default_language: str = Field(
-        default="JavaScript",
-        description="GitHub検索で使用するデフォルト言語",
-    )
-    github_search_default_min_stars: int = Field(
-        default=100,
-        ge=0,
-        description="GitHub検索で使用するデフォルトの最小スター数",
-    )
-    github_search_default_max_days_since_commit: int = Field(
-        default=365,
-        ge=1,
-        description="GitHub検索で使用するデフォルトの最終コミット経過日数",
-    )
-
     # ログ設定
     log_level: str = "INFO"  # 例: MB_SCANNER_LOG_LEVEL=DEBUG
     log_file: Path | None = None  # 例: MB_SCANNER_LOG_FILE=/path/to/logs/app.log
     log_to_console: bool = True  # 例: MB_SCANNER_LOG_TO_CONSOLE=false
-
-    # リポジトリクローン設定（利用者は cli/github.py のみ）
-    codeql_clone_base_dir: Path | None = Field(
-        default=None,
-        description="リポジトリクローン先のベースディレクトリ",
-    )
 
     # 可視化関連設定
     total_projects_count: int = Field(
@@ -109,13 +86,6 @@ class Settings(BaseSettings):
     def database_url(self) -> str:
         """SQLAlchemy用のデータベースURLを返す"""
         return f"sqlite:///{self.effective_db_file.resolve()}"
-
-    @property
-    def effective_codeql_clone_dir(self) -> Path:
-        """リポジトリクローン先ディレクトリを返す（data/repositories）"""
-        path = self.codeql_clone_base_dir or self.effective_data_dir / "repositories"
-        path.mkdir(parents=True, exist_ok=True)
-        return path
 
     @property
     def effective_benchmark_dir(self) -> Path:
