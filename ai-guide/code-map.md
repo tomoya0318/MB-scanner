@@ -49,7 +49,7 @@ ai-guide 全体での位置づけと他軸との住み分けは [`doc-strategy/i
 
 #### slow / fast 軸 ← データセット起源
 
-Selakovic 2016 dataset の **before/after パッチペア** に対応します。1 トリプル = **(setup, slow=before, fast=after)** を同一 setup 上で別 sandbox 実行し、**検証したい意味論的差異はこの軸で現れる**のが研究目的上の要請です。
+Selakovic 2016 dataset の **before/after パッチペア** に対応します。1 candidate = **(setup, slow=before, fast=after, workload)** の 4 値契約 (ADR-0023)。`workload` は changed-fn 経路のみ non-null (= SUT を exercise する観測駆動コード)、client embedded / fallback / server の旧経路では `workload` は `null` で `slow`/`fast` 自体が完結 runnable。比較軸は **slow vs fast** で、同一 setup・同一 workload 上で別 sandbox 実行し、**検証したい意味論的差異はこの軸で現れる**のが研究目的上の要請です。
 
 #### pre / post 軸 ← Oracle 2 の実装技法
 
@@ -232,7 +232,9 @@ if (slow.exception !== null || fast.exception !== null) {
 - **外側ループ (`prune`)**: AST が変わるたびに SubtreeSet と候補リストを再計算する。1 パスで 1 ノードが prune できれば AST を更新して次パスへ。
 - **内側ループ (`tryPruneCandidates`)**: 現在の候補を size 降順で順に試し、**最初に成功した 1 候補で return**。残った候補は次パスで再列挙される。
 
-`prune(input, deps)` の `deps.checkEquivalence` は `pruning/selakovic/pruner.ts` が `equivalence-checker` の `checkEquivalence` を `environment`/`module_base_dir`/`mount_html`/`aspect`/`candidate_kind`/`enclosure_type` 込みで bind して渡す (`common/` 側は実行環境を知らない)。
+`prune(input, deps)` の `deps.checkEquivalence` は `pruning/selakovic/pruner.ts` の `buildEquivContext` が `equivalence-checker` の `checkEquivalence` を `environment`/`module_base_dir`/`mount_html` 込みで bind して渡す (`common/` 側は実行環境を知らない。oracle 選択 hint `aspect`/`candidate_kind`/`enclosure_type` は ADR-0024 で廃止)。
+
+> **TODO (ADR-0023 D-β 配線残り)**: `PruningInput.workload?` / `EquivalenceInput.workload` は先行追加済だが、`buildEquivContext` が **`workload` を転送していない** (現状は上記 3 フィールドのみ)。このため pruning の毎 iteration 等価検証は `(setup, slow, fast)` だけで走り、changed-fn candidate も workload 抜きの legacy 経路 (slow/fast を直接実行) で検証される。`buildEquivContext` に `workload` 転送を足して配線する。詳細は [`open-questions.md` §実装](open-questions.md)。
 
 ```
 PruningInput (slow, fast, setup, timeout_ms, max_iterations, [environment, module_base_dir, ...])
@@ -406,7 +408,7 @@ L1 blacklist は `@babel/types` の `NODE_FIELDS[parent][key].validate` introspe
 
 ## Selakovic 前処理器
 
-実装は `mb-analyzer/src/preprocessing/` (TS 抽出ロジック) + `mb_scanner/{domain,use_cases,adapters}/preprocessing/` (Python ラッパー)。Selakovic 2016 dataset の 1 issue を `(setup, slow, fast)` candidate に変換するパイプラインの最前段。設計判断は ADR-0010 (enclosure 3 段) / ADR-0011 (Tier 1/Tier 2 二層化) / ADR-0014 (A+B の candidate 分割)、`(setup,slow,fast)` への対応表は [`datasets/selakovic-2016-issues.md`](datasets/selakovic-2016-issues.md)。
+実装は `mb-analyzer/src/preprocessing/` (TS 抽出ロジック) + `mb_scanner/{domain,use_cases,adapters}/preprocessing/` (Python ラッパー)。Selakovic 2016 dataset の 1 issue を `(setup, slow, fast, workload)` candidate (4 値契約, ADR-0023; `workload` は changed-fn 経路のみ non-null) に変換するパイプラインの最前段。設計判断は ADR-0010 (enclosure 3 段) / ADR-0011 (Tier 1/Tier 2 二層化) / ADR-0014 (A+B の candidate 分割)、`(setup,slow,fast,workload)` への対応表は [`datasets/selakovic-2016-issues.md`](datasets/selakovic-2016-issues.md)。
 
 **論文非依存性のスコープ** (ADR-0011 §補足): 主軸 (pruning など) は Selakovic 論文 §6 (10 パターン) / §7 (5 種 precondition) に依存しない。preprocess / 等価検証は dataset 依存 OK で、`f1` / `init`/`setupTest`/`test` / `execute(f1,n)` / `mark` / `<lib>_*.js` の物理規約 (HTML 80/80・test_case 45/45 で実物検証済) を積極利用してよい (`tmp/dataset-conventions.md` §5)。本前処理器を Tier 1 (`preprocessing/common/` = dataset 非依存 AST primitive) と Tier 2 (`preprocessing/selakovic/` = Selakovic adapter) に分けるのは、その依存の境界をコード構造で明文化するため。
 
@@ -438,7 +440,7 @@ TS 側 (mb-analyzer/src/)                    Python 側 (mb_scanner/)
 │   route/ (段2 作用点ルート)  │
 │     aspect / lib-diff /      │
 │     case-split (ADR-0014)    │
-│   assemble/ (setup/slow/fast)│
+│ assemble/(setup/slow/fast/wl)│
 │     angular / client /       │
 │     server / fallback        │
 │   pipeline (段1·段2 統括) /  │
@@ -467,7 +469,7 @@ TS 側 (mb-analyzer/src/)                    Python 側 (mb_scanner/)
 
 - ① の差分 (`route/lib-diff.ts`: 行ベース multiset 差分で license/version/整形 noise を除いて実コード行が残るか + 近傍の関数名を近似) と ② の差分 (`route/aspect.ts` の `statementsChanged` = Tier 1 `findChangedNodes` の AST diff が空でないか) で作用点を **A** (lib のみ) / **B** (body のみ) / **A+B** (両方) / **fallback** (どちらも実質差なし / 規約外フォーマット) に振り分ける。
 - A → candidate 1 個 (lib varies / body fixed@before)。B → candidate 1 個 (body varies / lib fixed@before)。A+B → ADR-0014 の identifier 交差判定 (`route/case-split.ts` の `isIndependent`: body の参照 identifier ∩ lib 変更関数名が空なら independent) で 2 candidate (`candidate_kind: lib` / `body`) に分割、交差ありなら co-evolution の疑いで 1 candidate。
-- candidate の `(setup, slow, fast)` は `assemble/` が **strategy (組み立て方) × wrapper (包み方)** で構築する。現構成: `assemble/strategies/{changed-fn, changed-stmt, fallback, server-changed-fn}.ts` + `assemble/wrappers/{angular, top-level, server}.ts` (順2-1 で wrapper を分離、順3-2 で server-changed-fn を追加)。Angular controller-wrapper は `wrappers/angular.ts` が「lib を load → module/controller を再構成 (ハーネス除去済) → controller を実体化 → `f1()` を 1 回実行 → 観測値を return」する自己完結 IIFE を作る (Phase 1.0 スパイクで AngularJS 950KB の jsdom load+bootstrap を実証)。top-level f1 の client candidate は `wrappers/top-level.ts` が `(function(){ <f1 body> })()` で包む。
+- candidate の `(setup, slow, fast, workload)` (4 値契約, ADR-0023; 上図 `wl` = workload) は `assemble/` が **strategy (組み立て方) × wrapper (包み方)** で構築する。現構成: `assemble/strategies/{changed-fn, changed-stmt, fallback, server-changed-fn}.ts` + `assemble/wrappers/{angular, top-level, server}.ts` (順2-1 で wrapper を分離、順3-2 で server-changed-fn を追加)。**changed-fn 経路**は setup=穴あき lib(+bootstrap)・slow/fast=変更前後の裸 body・workload=観測駆動 (`wrapObservedWorkload` で `f1()` を包み `JSON.stringify(__OBS__)` を返す) の 4 値、**client embedded / fallback / server の旧経路**は `workload` を持たず slow/fast が自己完結 runnable。Angular controller-wrapper は `wrappers/angular.ts` が「lib を load → module/controller を再構成 (ハーネス除去済) → controller を実体化 → `f1()` を 1 回実行 → 観測値を return」する自己完結 IIFE を作る (Phase 1.0 スパイクで AngularJS 950KB の jsdom load+bootstrap を実証)。top-level f1 の client candidate は `wrappers/top-level.ts` が `(function(){ <f1 body> })()` で包む。
 - **server-changed-fn (`strategies/server-changed-fn.ts`、ADR-0025 / 順3-2)**: `layout=server` の変更関数が browser-style $BODY$ 連結と整合せず drop していた問題を、CommonJS 構造を保ったまま変更関数 body だけ `$BODY$` 穴あけする holed lib で救済する。multi-file は in-memory map-require、観測は 2 チャネル (戻り値 `r` + init 戻り値の post-state `s`)。実行は ADR-0024 で予約した `environment: 'vm'` の node:vm executor。これにより server×top_level の reached が 0/26 → 14/3 に改善。
 - `environment` hint (ADR-0012): server / Angular wrapper / lib を含む candidate は `jsdom` (= `require` 解決 / DOM が要る)、Phase 2a では client candidate もすべて `jsdom` (inline `<script>` が `document`/`window` を参照しうるため)。後段 (verify スクリプト / Python orchestrator) が `EquivalenceInput.environment` + `module_base_dir` (= issue ディレクトリ) に渡し、jsdom executor が相対 `require` を解決する。
 
@@ -577,9 +579,11 @@ candidate i に対する setup:
 2. 各 candidate を独立した最適化単位として扱える (Selakovic 論文では PR 単位の最適化として記述されているが、本前処理器ではより細かい変換単位で抽出する)
 3. `var hoisting` や副作用順序を含めた実行コンテキストが現実的に再現される
 
-#### changed-fn (v2 placeholder substitution、ADR-0023) の setup 構成
+#### changed-fn (v2 placeholder substitution、ADR-0023) の 4 値構成 (setup / slow / fast / workload)
 
-`changed-fn` candidate_kind の `setup` は **2 つの要素を順序固定で連結** したものとして定義される。両要素とも optional (空ならスキップ):
+`changed-fn` candidate は 4 値契約 (ADR-0023 D-β)。`slow`/`fast` は変更前/後の**裸 body** statement 列、`workload` は **別フィールド**で SUT を exercise する観測駆動 (`wrapObservedWorkload` 出力 = `f1()` 呼び出し → `JSON.stringify(__OBS__)` 返却)。検証器は `setup` を executor.setup、`workload` を executor.workload として**別々に**渡す (`workload` は setup に含まれない)。以下は `setup` フィールドの構成。
+
+`setup` は **2 つの要素を順序固定で連結** したものとして定義される。両要素とも optional (空ならスキップ):
 
 | 要素 | 内容 | optional になりうるケース |
 |------|------|------------------------|
