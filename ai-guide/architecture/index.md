@@ -6,7 +6,7 @@
 
 ## プロジェクト概要
 
-MB-Scanner は、GitHub 上の多数の JavaScript リポジトリに対して CodeQL クエリを体系的に実行し、さらに等価性検証器・Pruning・同値分割テストなどの AST ベース静的解析を組み合わせるバッチプラットフォームです。定量・定性的なデータセットを構築し、クエリの有効性を実世界のコードベースで検証することを目的としています。
+MB-Scanner は、マイクロベンチマーク由来のパフォーマンスパターンを導出する研究実装です。Selakovic dataset の前処理 → 等価性検証器 (vm + 4 オラクル) → Pruning → 核抽出 → 条件抽出・同値分割テスト → ts-eslint ルール生成、というパイプラインを Python (オーケストレータ) + TypeScript (解析本体) で構成します。旧 GitHub 検索 / CodeQL バッチプラットフォームは [MB-scanner-legacy](https://github.com/tomoya0318/MB-scanner-legacy) へ切り出して凍結済み (2026-06)。
 
 ## 構成
 
@@ -32,7 +32,7 @@ MB-Scanner は、GitHub 上の多数の JavaScript リポジトリに対して C
 
 ### 役割分担
 
-- **Python 側 (`mb_scanner/`)**: GitHub 検索、SQLite 永続化、CodeQL CLI 連携、並列バッチ実行 (`ThreadPoolExecutor`)、CLI エントリポイント
+- **Python 側 (`mb_scanner/`)**: 並列バッチ実行 (`ThreadPoolExecutor`)、JSONL 入出力、CLI エントリポイント
 - **TypeScript 側 (`mb-analyzer/`)**: AST 解析とサンドボックス実行を担う薄い CLI。Python 側から `dist/cli.js` を subprocess 起動して stdin/stdout の JSON で呼び出される
 
 ---
@@ -96,7 +96,7 @@ MB-Scanner は、GitHub 上の多数の JavaScript リポジトリに対して C
 | 機能の性質 | 実装先 |
 |---|---|
 | AST 解析、サンドボックス実行、ts-eslint ルール、ESTree 操作 | **TS (`mb-analyzer/`)** |
-| GitHub API 連携、DB 永続化、並列実行、CLI エントリ | **Python (`mb_scanner/`)** |
+| 並列実行、JSONL 入出力、CLI エントリ | **Python (`mb_scanner/`)** |
 | バッチのオーケストレーション、結果集約、ユーザー向け出力 | **Python** |
 | 新しい oracle、sandbox の安定化処理 | **TS** |
 | 両方にまたがる場合 | **TS に解析ロジック → Python が subprocess 呼び出し** のパターンを維持 |

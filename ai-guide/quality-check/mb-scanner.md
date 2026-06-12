@@ -7,7 +7,6 @@ Python 側コードベース `mb_scanner/` のテスト詳細。共通原則は 
 ## フレームワーク
 
 - **テストランナー**: `pytest`
-- **DB テスト**: インメモリ SQLite (`sqlite:///:memory:`) を使用し、テストの独立性と速度を確保する
 - **フィクスチャスコープ**: 原則として `function` スコープで隔離し、テスト間の依存を排除する
 
 ---
@@ -22,14 +21,12 @@ tests/
 ├── use_cases/                # Use Case のテスト
 ├── adapters/
 │   ├── cli/                  # CLI コマンドのテスト
-│   ├── repositories/         # Repository 実装のテスト
 │   └── gateways/             # Gateway 実装のテスト
-│       ├── github/
-│       ├── codeql/
-│       ├── equivalence/      # TS 側との subprocess integration test
-│       ├── visualization/
-│       └── code_counter/
-└── infrastructure/           # DB接続・設定のテスト
+│       ├── equivalence/      # TS 側との subprocess integration test (Selakovic fixture 回帰含む)
+│       ├── preprocessing/selakovic/
+│       └── pruning/
+├── fixtures/selakovic/       # 等価性検証の Selakovic 10 パターン fixture
+└── infrastructure/           # 設定のテスト
 ```
 
 - **関数名**: `test_` プレフィックス + 条件 + 期待結果（例: `test_save_project_new`、`test_execute_raises_on_duplicate`）
@@ -38,20 +35,17 @@ tests/
 
 ---
 
-## フィクスチャ (conftest.py)
+## フィクスチャ
 
-共通のセットアップ処理は `tests/conftest.py` に集約されています。
-
-- `test_db`: エンジン作成・テーブル作成・セッション生成・クリーンアップを一括管理する
-- **原則**: Arrange フェーズを簡潔に保つため、共通化できるものはフィクスチャ化すること
+- 現在 `tests/conftest.py` は無い (旧 DB 用 conftest は legacy へ随伴)
+- **原則**: Arrange フェーズを簡潔に保つため、複数ファイルで共通化できるセットアップが生じたら conftest.py に集約すること
 
 ---
 
 ## カバレッジ基準
 
 - **Use Cases 層**: `mb_scanner/use_cases/` 配下の public メソッドは **100% テスト**
-- **Repository 層**: `mb_scanner/adapters/repositories/` の CRUD 操作は **100% テスト**
-- **Gateway 層**: `mb_scanner/adapters/gateways/` は外部 API 呼び出し部をモックした上で、エラーハンドリング分岐も含めてテスト
+- **Gateway 層**: `mb_scanner/adapters/gateways/` は subprocess 呼び出し部をモックした上で、エラーハンドリング分岐も含めてテスト
 - **ケース網羅**: 各メソッドに対し、正常系・異常系・境界系を確認（詳細は [`index.md`](index.md) 共通原則）
 - **エッジケース**: 文字列処理や配列操作ではパターンの違いを網羅
   - 例: JSON フォーマット処理 → プリミティブ配列、オブジェクト配列、ネスト配列の各ケース
@@ -72,13 +66,11 @@ mise run test-cov
 
 ### モックすべき対象
 
-- **Gateway 層**: `mb_scanner/adapters/gateways/` 配下のクラス（GitHub、CodeQL、visualization 等）
-- **外部 API 通信**: 実際に HTTP リクエストを送信してはならない
-- **外部コマンド実行**: `subprocess` による CodeQL / git / `node dist/cli.js` の実行
+- **Gateway 層**: `mb_scanner/adapters/gateways/` 配下のクラス（equivalence / preprocessing / pruning の NodeRunner gateway）
+- **外部コマンド実行**: `subprocess` による `node dist/cli.js` の実行（integration マーク付きテストのみ実 Node を起動する）
 
 ### モックしてはいけない対象
 
-- **Database**: `sqlite:///:memory:` を使用し、SQLAlchemy のセッション自体はモックしない（クエリの整合性を確認するため）
 - **Pydantic Models**: ドメインエンティティは実体を使用する
 - **Protocol / ポート**: 抽象境界なのでモックで差し替える（**これは対象に含まれる**）
 
@@ -88,13 +80,12 @@ mise run test-cov
 - **DI**: Use Case のテストでは、コンストラクタで受け取る Protocol をモックに置き換える
 
 ```python
-def test_search_and_store(mocker):
-    mock_gateway = mocker.Mock(spec=GitHubGateway)
-    mock_gateway.search_repositories.return_value = [...]
-    mock_repo = mocker.Mock(spec=ProjectRepository)
-    use_case = SearchAndStoreUseCase(gateway=mock_gateway, repository=mock_repo)
-    use_case.execute(...)
-    mock_gateway.search_repositories.assert_called_once()
+def test_equivalence_verification(mocker):
+    mock_checker = mocker.Mock(spec=EquivalenceCheckerPort)
+    mock_checker.check.return_value = EquivalenceCheckResult(...)
+    use_case = EquivalenceVerificationUseCase(checker=mock_checker)
+    use_case.verify(...)
+    mock_checker.check.assert_called_once()
 ```
 
 ---

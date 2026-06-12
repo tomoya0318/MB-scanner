@@ -32,9 +32,9 @@
 
 | モックすべき対象 | モックしてはいけない対象 |
 |---|---|
-| 外部 API 通信（GitHub、HTTP 全般） | DB（Python: インメモリ SQLite、TS: 該当なし） |
-| 外部コマンド実行（`subprocess`、`node dist/cli.js`） | ドメインモデル（Pydantic / shared/{equivalence,pruning}-contracts.ts） |
-| ファイルシステムへの実 I/O（Gateway 層で抽象化済みのもの） | 純粋ロジック関数 |
+| 外部 API 通信（HTTP 全般） | ドメインモデル（Pydantic / shared/{equivalence,pruning}-contracts.ts） |
+| 外部コマンド実行（`subprocess`、`node dist/cli.js`） | 純粋ロジック関数 |
+| ファイルシステムへの実 I/O（Gateway 層で抽象化済みのもの） | |
 
 内部ロジックをモックするとテストが実装の写像になり仕様検証として機能しなくなる。必ず**ポート（Python Protocol / TS 型境界）単位**でモックすること。
 

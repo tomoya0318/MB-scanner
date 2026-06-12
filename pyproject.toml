@@ -17,8 +17,6 @@ dev = [
     "pytest-cov>=6.0.0",
     "ruff>=0.12.9",
     "pyright>=1.1.390",
-    "joblib-stubs>=1.5.3.0.20251223",
-    "scipy-stubs>=1.17.0.2",
     "import-linter>=2.11",
     "mb-scanner",
     "research",
@@ -81,10 +79,8 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "**/__init__.py" = ["F401"]  # 未使用import (re-exportの場合)
-"mb_scanner/src/mb_scanner/domain/entities/sarif.py" = ["N815"]  # SARIF標準フォーマットのcamelCaseを維持
 "mb_scanner/src/mb_scanner/adapters/cli/**/*.py" = ["B008"]  # typer.Optionをデフォルト引数で使用 (Typerの正しい使い方)
 "mb_scanner/src/mb_scanner/domain/ports/**/*.py" = ["D102"]  # Protocolメソッドはクラスdocstringで代替
-"mb_scanner/src/mb_scanner/adapters/repositories/**/*.py" = ["D102"]  # Protocol実装のメソッドはインターフェース定義を参照
 "tests/**/*.py" = ["D101", "D102", "D103"]  # テストのクラス/メソッド/関数の docstring 強制は過剰
 
 [tool.ruff.lint.isort]
@@ -143,7 +139,6 @@ exclude = [
     ".venv",
     "**/__pycache__",
     "mb-analyzer",            # TypeScript 側の node_modules 等を対象外に
-    "mb-analyzer-legacy",     # 旧 TypeScript 側
     "**/node_modules",
     "tmp",                    # 作業 dir (研究の試行錯誤スクリプト、過去 0001-0021 含む)
 ]

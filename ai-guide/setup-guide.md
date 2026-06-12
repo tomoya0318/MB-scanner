@@ -7,7 +7,7 @@
 | **uv** | 高速パッケージ管理 | `uv sync`, `uv add`, `uv run` |
 | **mise** | タスクランナー + ツール管理 | `mise run fix`, `mise run typecheck` |
 | **Python** | ランタイム | 3.13+ |
-| **CodeQL** | 解析エンジン | `codeql database create` |
+| **Node.js / pnpm** | mb-analyzer (TS 側) のビルド・実行 | `mise run build-analyzer` |
 
 ## 重要なルール
 
@@ -19,12 +19,12 @@
 
 ## 初回セットアップ / 環境リセット
 
-1. `.env` ファイルが存在するか確認し、なければ `.env.sample` からコピーして作成する。
+1. `.env` ファイルが存在するか確認し、なければ `.env.sample` からコピーして作成する（任意。デフォルトのままなら不要）。
    ```bash
    cp .env.sample .env
    ```
-2. `.env` を開き、`GITHUB_TOKEN`（scope: `public_repo`）を設定する。
-3. `uv sync` を実行して依存関係をインストールする。
+2. `uv sync` を実行して依存関係をインストールする。
+3. `mise run build-analyzer` で TS 側 CLI バンドル (`mb-analyzer/dist/cli.js`) を生成する。
 
 ## アプリケーション実行
 
@@ -35,5 +35,5 @@ uv run mbs <subcommand>   # mbs はエイリアス
 ## トラブルシューティング
 
 - **ImportError**: `uv run` を先頭につけてコマンドを実行する。
-- **DBエラー**: `rm mb_scanner.db` でローカルDBを削除し、`uv run mbs migrate` で再作成する。
 - **CLIコマンドが認識されない**: `uv pip install -e .` で編集可能モードで再インストールする。
+- **mb-analyzer 関連のエラー (`dist/cli.js` が無い)**: `mise run build-analyzer` を実行する。

@@ -73,13 +73,6 @@ echo "Running type check with Pyright..."
 uv run pyright
 """
 
-[tasks.typecheck-ts]
-description = "[DEPRECATED] 旧 mb-analyzer-legacy (pnpm workspace) の TypeScript 型チェックを実行する"
-run = """
-echo "[DEPRECATED] Running TypeScript type check on mb-analyzer-legacy..."
-pnpm --prefix mb-analyzer-legacy -r run typecheck
-"""
-
 [tasks.typecheck-analyzer]
 description = "mb-analyzer (新 TypeScript 実装) の型チェックを実行する"
 run = """
@@ -105,13 +98,6 @@ run = "uv run pytest tests/"
 [tasks.test-cov]
 description = "カバレッジ付きでテストを実行する"
 run = "uv run pytest tests/ --cov=mb_scanner --cov-report=term-missing"
-
-[tasks.test-analyzer-ts]
-description = "[DEPRECATED] 旧 mb-analyzer-legacy の TypeScript テスト (vitest) を実行する"
-run = """
-echo "[DEPRECATED] Running TypeScript tests on mb-analyzer-legacy..."
-pnpm --prefix mb-analyzer-legacy run test
-"""
 
 [tasks.test-analyzer]
 description = "mb-analyzer (新 TypeScript 実装) の vitest を実行する"
@@ -152,13 +138,6 @@ run = ""
 # TypeScript ビルド
 # =============================================================================
 
-[tasks.build-analyzer-ts]
-description = "[DEPRECATED] 旧 mb-analyzer-legacy の TypeScript を単発ビルドする"
-run = """
-echo "[DEPRECATED] Building mb-analyzer-legacy TypeScript..."
-pnpm --prefix mb-analyzer-legacy run build
-"""
-
 [tasks.build-analyzer]
 description = "mb-analyzer (新 TypeScript 実装) を dist/cli.js にバンドルする"
 run = """
@@ -167,38 +146,12 @@ pnpm --prefix mb-analyzer install --prefer-offline
 pnpm --prefix mb-analyzer run build
 """
 
-[tasks.watch-analyzer-ts]
-description = "[DEPRECATED] 旧 mb-analyzer-legacy の TypeScript を watch モードでビルドする"
-run = """
-echo "[DEPRECATED] Watching mb-analyzer-legacy TypeScript build..."
-pnpm --prefix mb-analyzer-legacy --filter @mb-analyzer/equivalence-runner run build:watch
-"""
-
 [tasks.stop-analyzer-watch]
 description = "mb-analyzer の TypeScript watch を停止する"
 run = """
 echo "Stopping TypeScript watch processes..."
 pkill -f 'node build.mjs --watch' || true
-pkill -f '@mb-analyzer/equivalence-runner run build:watch' || true
 pkill -f 'esbuild .*src/index.ts.*--watch' || true
-"""
-
-# =============================================================================
-# データベース管理
-# =============================================================================
-
-[tasks.migrate]
-description = "データベースマイグレーションを実行する"
-run = """
-echo "Running database migrations..."
-uv run mb-scanner migrate
-"""
-
-[tasks.migrate-dry-run]
-description = "データベースマイグレーションのドライラン"
-run = """
-echo "Checking pending migrations (dry run)..."
-uv run mb-scanner migrate --dry-run
 """
 
 # =============================================================================

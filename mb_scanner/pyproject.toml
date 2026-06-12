@@ -1,7 +1,7 @@
 [project]
 name = "mb-scanner"
 version = "0.1.0"
-description = "GitHub repository scanner with CodeQL batch platform"
+description = "Research pipeline for deriving performance patterns from microbenchmarks (preprocess / equivalence check / pruning)"
 readme = "../README.md"
 authors = [
     { name = "tomoya0318", email = "s266227@wakayama-u.ac.jp" }
@@ -10,13 +10,7 @@ requires-python = ">=3.13"
 dependencies = [
     "pydantic-settings",
     "typer",
-    "sqlalchemy",
     "pydantic>=2.11.7",
-    "PyGithub",
-    "joblib>=1.4.2",
-    "matplotlib>=3.9.0",
-    "numpy>=1.26.0",
-    "scipy>=1.11.0",
 ]
 
 [project.scripts]
@@ -51,4 +45,4 @@ ignore_imports = [
 name = "Domain must not depend on infrastructure frameworks"
 type = "forbidden"
 source_modules = ["mb_scanner.domain"]
-forbidden_modules = ["sqlalchemy", "typer", "github", "matplotlib"]
+forbidden_modules = ["typer"]

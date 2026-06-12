@@ -23,14 +23,12 @@ __pycache__/
 - data/**
 tmp/
 outputs/
-result.json
 .ai/
 
 # 仮想環境・ビルド成果物
 .venv/
 node_modules/
 dist/
-mb-analyzer-legacy/
 build/
 wheels/
 debug/
