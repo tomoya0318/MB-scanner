@@ -1,7 +1,7 @@
 [project]
 name = "mb-scanner"
 version = "0.1.0"
-description = "GitHub repository scanner with CodeQL batch platform"
+description = "Research pipeline for deriving performance patterns from microbenchmarks (preprocess / equivalence check / pruning)"
 readme = "../README.md"
 authors = [
     { name = "tomoya0318", email = "s266227@wakayama-u.ac.jp" }
