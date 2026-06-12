@@ -14,7 +14,6 @@ FROM debian:bookworm-slim
 ARG UID=1000
 ARG GID=1000
 ARG USERNAME=vscode
-ARG CODEQL_VERSION=latest
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -40,19 +39,6 @@ RUN apt-get update && \
 ENV MISE_YES=1
 RUN curl https://mise.run | sh && \
     mv /root/.local/bin/mise /usr/local/bin/mise
-
-# --- CodeQL CLI ---
-RUN if [ "$CODEQL_VERSION" = "latest" ]; then \
-        CODEQL_URL="https://github.com/github/codeql-cli-binaries/releases/latest/download/codeql-linux64.zip"; \
-    else \
-        CODEQL_URL="https://github.com/github/codeql-cli-binaries/releases/download/v${CODEQL_VERSION}/codeql-linux64.zip"; \
-    fi && \
-    wget -q "$CODEQL_URL" -O /tmp/codeql.zip && \
-    unzip -q /tmp/codeql.zip -d /opt && \
-    rm /tmp/codeql.zip && \
-    chmod -R 755 /opt/codeql
-
-ENV PATH="/opt/codeql:${PATH}"
 
 # --- 非 root ユーザー ---
 RUN if ! getent group ${GID} > /dev/null 2>&1; then \
