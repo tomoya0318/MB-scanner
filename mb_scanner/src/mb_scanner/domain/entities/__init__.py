@@ -20,7 +20,6 @@ from mb_scanner.domain.entities.pruning import (
     PruningResult,
     PruningVerdict,
 )
-from mb_scanner.domain.entities.summary import QuerySummary
 
 __all__ = [
     "BenchmarkEntry",
@@ -37,7 +36,6 @@ __all__ = [
     "PruningInput",
     "PruningResult",
     "PruningVerdict",
-    "QuerySummary",
     "StrategyResult",
     "Topic",
     "Verdict",

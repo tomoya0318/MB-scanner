@@ -3,22 +3,16 @@
 from typer import Typer
 
 from mb_scanner.adapters.cli.benchmark import benchmark_app
-from mb_scanner.adapters.cli.count_lines import count_lines_app
 from mb_scanner.adapters.cli.equivalence import equivalence_app
 from mb_scanner.adapters.cli.migrate import migrate_app
 from mb_scanner.adapters.cli.preprocessing import preprocessing_app
 from mb_scanner.adapters.cli.pruning import pruning_app
-from mb_scanner.adapters.cli.visualize import visualize_app
 
 app = Typer(help="MB-Scanner CLI - GitHub リポジトリ検索と保存ツール")
-
-app.registered_commands.extend(count_lines_app.registered_commands)
-app.registered_groups.extend(count_lines_app.registered_groups)
 
 app.registered_commands.extend(migrate_app.registered_commands)
 app.registered_groups.extend(migrate_app.registered_groups)
 
-app.add_typer(visualize_app, name="visualize")
 app.add_typer(benchmark_app, name="benchmark")
 
 # 新 check-equivalence サブコマンド (Node ランナー経由)

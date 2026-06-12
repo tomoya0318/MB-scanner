@@ -12,9 +12,6 @@ dependencies = [
     "typer",
     "sqlalchemy",
     "pydantic>=2.11.7",
-    "matplotlib>=3.9.0",
-    "numpy>=1.26.0",
-    "scipy>=1.11.0",
 ]
 
 [project.scripts]
@@ -49,4 +46,4 @@ ignore_imports = [
 name = "Domain must not depend on infrastructure frameworks"
 type = "forbidden"
 source_modules = ["mb_scanner.domain"]
-forbidden_modules = ["sqlalchemy", "typer", "matplotlib"]
+forbidden_modules = ["sqlalchemy", "typer"]

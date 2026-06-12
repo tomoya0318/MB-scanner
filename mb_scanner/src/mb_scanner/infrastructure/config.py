@@ -32,13 +32,6 @@ class Settings(BaseSettings):
     log_file: Path | None = None  # 例: MB_SCANNER_LOG_FILE=/path/to/logs/app.log
     log_to_console: bool = True  # 例: MB_SCANNER_LOG_TO_CONSOLE=false
 
-    # 可視化関連設定
-    total_projects_count: int = Field(
-        default=1000,
-        ge=1,
-        description="分析対象の総プロジェクト数（箱ひげ図などで母数を揃えるために使用）",
-    )
-
     # ベンチマーク関連設定
     benchmark_dir: Path | None = Field(
         default=None,
