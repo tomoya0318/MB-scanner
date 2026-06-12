@@ -111,8 +111,11 @@ class TestNodeRunnerGatewayMocked:
         assert result.verdict_reason == "no-positive-evidence"
 
     def test_exit_3_with_error_json_preserves_error_message(self, tmp_path: Path) -> None:
-        """Node が exit=3 (error) で error verdict JSON を返した場合、error_message と
-        verdict_reason (setup-failure 等の throw phase 分類) を汎用メッセージで潰さず保持する"""
+        """Node が exit=3 (error) で error verdict JSON を返した場合の情報保持
+
+        error_message と verdict_reason (setup-failure 等の throw phase 分類) を
+        汎用メッセージで潰さず保持する。
+        """
         fake_cli = tmp_path / "cli.js"
         fake_cli.write_text("// stub")
         stdout_payload = json.dumps(
