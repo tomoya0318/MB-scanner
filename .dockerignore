@@ -5,7 +5,7 @@ outputs/
 .ruff_cache/
 __pycache__/
 tmp/
-node_modules/
+**/node_modules/
 .claude/
 .agents/
 ai-guide/
