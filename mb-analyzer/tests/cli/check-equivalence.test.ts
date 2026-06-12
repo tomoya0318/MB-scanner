@@ -8,7 +8,7 @@
  *   - checker 内部で verdict=error → exit 3
  *   - setup / timeout_ms が checker まで届く (effective_timeout_ms でエコーバック検証)
  *   - JSON parse 失敗 / 非 object / null → exit 3 + stderr、stdout は空
- *   - slow/fast が非 string、setup / timeout_ms が present かつ型不一致 / 非 finite → exit 3
+ *   - before/after が非 string、setup / timeout_ms が present かつ型不一致 / 非 finite → exit 3
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runCheckEquivalence } from "../../src/cli/check-equivalence";
@@ -46,7 +46,7 @@ describe("runCheckEquivalence", () => {
   });
 
   it("equal な入力は exit 0 と result を stdout に出力", async () => {
-    restoreStdin = feedStdin(JSON.stringify({ slow: "1 + 1", fast: "2" }));
+    restoreStdin = feedStdin(JSON.stringify({ before: "1 + 1", after: "2" }));
 
     const code = await runCheckEquivalence();
 
@@ -57,7 +57,7 @@ describe("runCheckEquivalence", () => {
   });
 
   it("not_equal な入力は exit 1 を返す", async () => {
-    restoreStdin = feedStdin(JSON.stringify({ slow: "1", fast: "2" }));
+    restoreStdin = feedStdin(JSON.stringify({ before: "1", after: "2" }));
 
     const code = await runCheckEquivalence();
 
@@ -69,7 +69,7 @@ describe("runCheckEquivalence", () => {
     // setup 自体が throw → executor 側で SandboxSetupError として型分離されて checker トップ catch に届く
     // → verdict=error / verdict_reason=setup-failure (ADR-0023 §D-β)
     restoreStdin = feedStdin(
-      JSON.stringify({ setup: `throw new Error("setup boom")`, slow: "1", fast: "1" }),
+      JSON.stringify({ setup: `throw new Error("setup boom")`, before: "1", after: "1" }),
     );
 
     const code = await runCheckEquivalence();
@@ -82,7 +82,7 @@ describe("runCheckEquivalence", () => {
 
   it("両側が同じ例外で落ちるだけ (positive evidence 無し) は inconclusive / exit 2", async () => {
     restoreStdin = feedStdin(
-      JSON.stringify({ slow: `throw new Error("boom")`, fast: `throw new Error("boom")` }),
+      JSON.stringify({ before: `throw new Error("boom")`, after: `throw new Error("boom")` }),
     );
 
     const code = await runCheckEquivalence();
@@ -95,7 +95,7 @@ describe("runCheckEquivalence", () => {
 
   it("setup + timeout_ms が checker に届く (effective_timeout_ms 反映)", async () => {
     restoreStdin = feedStdin(
-      JSON.stringify({ setup: "const x = 10;", slow: "x + 1", fast: "11", timeout_ms: 3000 }),
+      JSON.stringify({ setup: "const x = 10;", before: "x + 1", after: "11", timeout_ms: 3000 }),
     );
 
     const code = await runCheckEquivalence();
@@ -134,26 +134,26 @@ describe("runCheckEquivalence", () => {
     expect(stderrSpy.writes.join("")).toContain("Expected a JSON object on stdin");
   });
 
-  it("slow が string でないと exit 2", async () => {
-    restoreStdin = feedStdin(JSON.stringify({ slow: 1, fast: "2" }));
+  it("before が string でないと exit 2", async () => {
+    restoreStdin = feedStdin(JSON.stringify({ before: 1, after: "2" }));
 
     const code = await runCheckEquivalence();
 
     expect(code).toBe(3);
-    expect(stderrSpy.writes.join("")).toContain("'slow' field must be a string");
+    expect(stderrSpy.writes.join("")).toContain("'before' field must be a string");
   });
 
-  it("fast が string でないと exit 2", async () => {
-    restoreStdin = feedStdin(JSON.stringify({ slow: "1", fast: 2 }));
+  it("after が string でないと exit 2", async () => {
+    restoreStdin = feedStdin(JSON.stringify({ before: "1", after: 2 }));
 
     const code = await runCheckEquivalence();
 
     expect(code).toBe(3);
-    expect(stderrSpy.writes.join("")).toContain("'fast' field must be a string");
+    expect(stderrSpy.writes.join("")).toContain("'after' field must be a string");
   });
 
   it("setup が present かつ非 string だと exit 2", async () => {
-    restoreStdin = feedStdin(JSON.stringify({ slow: "1", fast: "1", setup: 42 }));
+    restoreStdin = feedStdin(JSON.stringify({ before: "1", after: "1", setup: 42 }));
 
     const code = await runCheckEquivalence();
 
@@ -162,7 +162,7 @@ describe("runCheckEquivalence", () => {
   });
 
   it("timeout_ms が present かつ非 number だと exit 2", async () => {
-    restoreStdin = feedStdin(JSON.stringify({ slow: "1", fast: "1", timeout_ms: "5000" }));
+    restoreStdin = feedStdin(JSON.stringify({ before: "1", after: "1", timeout_ms: "5000" }));
 
     const code = await runCheckEquivalence();
 
@@ -175,7 +175,7 @@ describe("runCheckEquivalence", () => {
   it("timeout_ms が Infinity (非 finite) だと exit 2", async () => {
     // JSON.stringify では Infinity は null 化されるため、文字列リテラルで直接渡す。
     // JSON.parse は 1e500 を Infinity に解釈する。
-    restoreStdin = feedStdin(`{"slow":"1","fast":"1","timeout_ms":1e500}`);
+    restoreStdin = feedStdin(`{"before":"1","after":"1","timeout_ms":1e500}`);
 
     const code = await runCheckEquivalence();
 

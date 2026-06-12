@@ -91,10 +91,10 @@ function parseInput(raw: string): PruningInput | string {
     return "Expected a JSON object on stdin";
   }
   const obj = parsed as Record<string, unknown>;
-  if (typeof obj.slow !== "string") return "'slow' field must be a string";
-  if (typeof obj.fast !== "string") return "'fast' field must be a string";
+  if (typeof obj.before !== "string") return "'before' field must be a string";
+  if (typeof obj.after !== "string") return "'after' field must be a string";
 
-  const input: PruningInput = { slow: obj.slow, fast: obj.fast };
+  const input: PruningInput = { before: obj.before, after: obj.after };
   if (obj.setup !== undefined) {
     if (typeof obj.setup !== "string") return "'setup' field must be a string when present";
     input.setup = obj.setup;
@@ -150,8 +150,8 @@ function parseBatchLine(raw: string): PruningInput | { id: string | undefined; e
   const obj = parsed as Record<string, unknown>;
   const id = typeof obj.id === "string" ? obj.id : undefined;
 
-  if (typeof obj.slow !== "string") return { id, error: "'slow' field must be a string" };
-  if (typeof obj.fast !== "string") return { id, error: "'fast' field must be a string" };
+  if (typeof obj.before !== "string") return { id, error: "'before' field must be a string" };
+  if (typeof obj.after !== "string") return { id, error: "'after' field must be a string" };
   if (obj.timeout_ms === undefined) {
     return { id, error: "'timeout_ms' field is required in batch mode" };
   }
@@ -159,8 +159,8 @@ function parseBatchLine(raw: string): PruningInput | { id: string | undefined; e
   if (typeof validatedTimeout === "string") return { id, error: validatedTimeout };
 
   const input: PruningInput = {
-    slow: obj.slow,
-    fast: obj.fast,
+    before: obj.before,
+    after: obj.after,
     timeout_ms: validatedTimeout,
   };
   if (id !== undefined) input.id = id;

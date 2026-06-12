@@ -5,7 +5,7 @@ import type { ExecutionCapture } from "../../sandbox/capture/types";
 
 /**
  * C2 (DOM-mutation): jsdom 実行後の DOM-HTML (`capture.dom_html` = 正規化前) を `profile` で正規化して
- * slow/fast を文字列比較する。正規化規則 (どの属性/class/コメントが framework ノイズか) は dataset 知識
+ * before/after を文字列比較する。正規化規則 (どの属性/class/コメントが framework ノイズか) は dataset 知識
  * なので `profile` として selakovic adapter から渡す。DOM ノード判定・空白 collapse・属性 sort 自体は汎用。
  *
  * - 両側とも `dom_html` 無し (= vm 環境 or DOM 操作なし) → `not_applicable`
@@ -35,23 +35,23 @@ const NODE_TYPE_TEXT = 3;
 const NODE_TYPE_COMMENT = 8;
 
 export function checkDomMutation(
-  slow: ExecutionCapture,
-  fast: ExecutionCapture,
+  before: ExecutionCapture,
+  after: ExecutionCapture,
   profile: DomNormalizeProfile = EMPTY_PROFILE,
 ): OracleObservation {
   const oracle = ORACLE.DOM_MUTATION;
-  const slowHtml = slow.dom_html ?? null;
-  const fastHtml = fast.dom_html ?? null;
+  const beforeHtml = before.dom_html ?? null;
+  const afterHtml = after.dom_html ?? null;
 
-  if (slowHtml === null && fastHtml === null) {
+  if (beforeHtml === null && afterHtml === null) {
     return { oracle, verdict: ORACLE_VERDICT.NOT_APPLICABLE };
   }
-  if (slowHtml === null || fastHtml === null) {
+  if (beforeHtml === null || afterHtml === null) {
     return {
       oracle,
       verdict: ORACLE_VERDICT.NOT_EQUAL,
-      slow_value: slowHtml,
-      fast_value: fastHtml,
+      before_value: beforeHtml,
+      after_value: afterHtml,
       detail: "DOM was captured on one side only",
     };
   }
@@ -59,15 +59,15 @@ export function checkDomMutation(
   // ので N/A を返す (両側に同じ初期 HTML を流しているので比較は常に equal になるが、それは
   // positive な等価エビデンスにならない。ADR-0018 + verdict.ts の positive-evidence ルールが
   // dom_mutation を信頼するためには「何か触ったかを判定済」が前提)。
-  if (slow.dom_changed === false && fast.dom_changed === false) {
+  if (before.dom_changed === false && after.dom_changed === false) {
     return { oracle, verdict: ORACLE_VERDICT.NOT_APPLICABLE };
   }
 
-  let slowNorm: string;
-  let fastNorm: string;
+  let beforeNorm: string;
+  let afterNorm: string;
   try {
-    slowNorm = normalizeDom(slowHtml, profile);
-    fastNorm = normalizeDom(fastHtml, profile);
+    beforeNorm = normalizeDom(beforeHtml, profile);
+    afterNorm = normalizeDom(afterHtml, profile);
   } catch (e) {
     return {
       oracle,
@@ -76,15 +76,15 @@ export function checkDomMutation(
     };
   }
 
-  if (slowNorm === fastNorm) {
-    return { oracle, verdict: ORACLE_VERDICT.EQUAL, slow_value: slowNorm, fast_value: fastNorm };
+  if (beforeNorm === afterNorm) {
+    return { oracle, verdict: ORACLE_VERDICT.EQUAL, before_value: beforeNorm, after_value: afterNorm };
   }
   return {
     oracle,
     verdict: ORACLE_VERDICT.NOT_EQUAL,
-    slow_value: slowNorm,
-    fast_value: fastNorm,
-    detail: `normalized DOM differs (first diff at char offset ${firstDiffOffset(slowNorm, fastNorm)})`,
+    before_value: beforeNorm,
+    after_value: afterNorm,
+    detail: `normalized DOM differs (first diff at char offset ${firstDiffOffset(beforeNorm, afterNorm)})`,
   };
 }
 
@@ -133,7 +133,7 @@ function normalizeElement(el: Element, profile: DomNormalizeProfile): void {
 if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
   // 観点: jsdom 実行後の dom_html を `profile` で正規化 (ng-* 属性 / ng-scope class / コメント / 空白 / 属性順) してから
-  // slow/fast を文字列比較。両側 dom_html 無し → N/A、片側だけ取得 → not_equal、正規化中に parse 例外 → error。
+  // before/after を文字列比較。両側 dom_html 無し → N/A、片側だけ取得 → not_equal、正規化中に parse 例外 → error。
   // 統合観点: 両側とも DOM を変更しなかった (= 初期 mount HTML のまま) なら N/A — そうしないと「両側に同じ初期 HTML を
   // 流したから equal」を positive evidence に誤認する (react-808#1 / react-1885#0 / react-3665#0、ADR-0018)。
   const cap = (o: Partial<ExecutionCapture> = {}): ExecutionCapture => ({
@@ -154,9 +154,9 @@ if (import.meta.vitest) {
 
     it("両側とも dom_changed=false (初期 mount HTML のまま) → not_applicable", () => {
       const html = "<!doctype html><html><head></head><body><div id=\"demo1\"></div></body></html>";
-      const slow = cap({ dom_html: html, dom_changed: false });
-      const fast = cap({ dom_html: html, dom_changed: false });
-      expect(checkDomMutation(slow, fast).verdict).toBe("not_applicable");
+      const before = cap({ dom_html: html, dom_changed: false });
+      const after = cap({ dom_html: html, dom_changed: false });
+      expect(checkDomMutation(before, after).verdict).toBe("not_applicable");
     });
 
     it("framework ノイズ (ng-* 属性 / ng-scope class / ngRepeat コメント / 空白 / 属性順) だけの差は equal", () => {
@@ -167,13 +167,13 @@ if (import.meta.vitest) {
         collapseWhitespace: true,
         sortAttributes: true,
       };
-      const slow = cap({
+      const before = cap({
         dom_html: `<!doctype html><html><head></head><body><div class="x ng-scope" ng-version="1.5"><!-- ngRepeat: a in b -->  Hi  </div></body></html>`,
       });
-      const fast = cap({
+      const after = cap({
         dom_html: `<!doctype html><html><head></head><body><div ng-version="1.6" class="x"> Hi </div></body></html>`,
       });
-      expect(checkDomMutation(slow, fast, profile).verdict).toBe("equal");
+      expect(checkDomMutation(before, after, profile).verdict).toBe("equal");
     });
 
     it("真の DOM 差は not_equal (detail に char offset)", () => {
@@ -192,14 +192,14 @@ if (import.meta.vitest) {
     });
 
     it("rootSelector で比較対象 subtree を絞れる", () => {
-      const slow = cap({
+      const before = cap({
         dom_html: `<html><head></head><body><div id="demo">X</div><div>noise-A</div></body></html>`,
       });
-      const fast = cap({
+      const after = cap({
         dom_html: `<html><head></head><body><div id="demo">X</div><div>noise-B</div></body></html>`,
       });
-      expect(checkDomMutation(slow, fast, { rootSelector: "#demo" }).verdict).toBe("equal");
-      expect(checkDomMutation(slow, fast).verdict).toBe("not_equal");
+      expect(checkDomMutation(before, after, { rootSelector: "#demo" }).verdict).toBe("equal");
+      expect(checkDomMutation(before, after).verdict).toBe("not_equal");
     });
   });
 }

@@ -10,12 +10,12 @@
  *     closure 経由で参照可能にする)
  *  2. `replaceFunctionBody`: 関数本体の AST span を `{ $BODY$ }` プレースホルダで置換した文字列を返す
  *  3. `replaceFunctionBodyWithObserver`: 関数本体の AST span を「観測ハーネス入り `{ $BODY$ }`」で
- *     置換した文字列を返す (= setup 側に観測 IIFE を inline 化、pruning が見る slow/fast から
+ *     置換した文字列を返す (= setup 側に観測 IIFE を inline 化、pruning が見る before/after から
  *     観測足場を除く目的、ADR-0023 D-δ)
  *  4. `wrapObservedWorkload`: workload (= 観測対象の呼び出し列) を、完了値として観測配列を返す形にラップ
  *  5. `substituteBody`: 2. / 3. の出力の `$BODY$` を裸 body 断片で差し替える
  *
- * 呼び出し側はこれらを組み合わせて 4 値契約 `{setup, workload, slow, fast}` を構築する。
+ * 呼び出し側はこれらを組み合わせて 4 値契約 `{setup, workload, before, after}` を構築する。
  * 中身の構成 (= `setup = (let __OBS__ 宣言) + libs + preWorkload` 等) は ADR-0023 §4 値契約の具体形
  * + code-map §setup 構築規約。
  *
@@ -87,9 +87,9 @@ export function replaceFunctionBody(
  * (ADR-0023 D-δ §observation 仕様)。
  *
  *  - 観測ハーネス (`OBSERVER_HARNESS`) は `let __OBS_R__ = (function () { $BODY$ }).apply(this, arguments); __OBS__.push(...); return __OBS_R__;` の形
- *    で、観測 IIFE を **setup 側の関数本体に inline 化** する。これにより slow/fast には観測足場が乗らず、
+ *    で、観測 IIFE を **setup 側の関数本体に inline 化** する。これにより before/after には観測足場が乗らず、
  *    裸 body (= statementsToCode の出力) のまま `substituteBody` で `$BODY$` に差し込まれる。
- *  - 結果として pruning が見る slow/fast から観測 IIFE が消え、抽出 pattern が「変更関数の等価性の核」だけになる。
+ *  - 結果として pruning が見る before/after から観測 IIFE が消え、抽出 pattern が「変更関数の等価性の核」だけになる。
  *
  * 実装: `replaceFunctionBody` と同じ span slicing で観測ハーネスを直接埋め込む
  * (= `source.slice(0, start) + "{ <observer> }" + source.slice(end)`)。span 外には触らないので:
@@ -114,7 +114,7 @@ export function replaceFunctionBodyWithObserver(
  *
  * `replaceFunctionBodyWithObserver` との違い:
  *  - あちら: 関数本体を「観測ハーネス入り `{ $BODY$ }`」で置換 = **元 body を捨てて** `$BODY$` を残し、
- *    `substituteBody` で slow/fast の body 断片を差し込む (= changed-fn: 変更関数の本体が比較対象)
+ *    `substituteBody` で before/after の body 断片を差し込む (= changed-fn: 変更関数の本体が比較対象)
  *  - こちら: 元 body を **保持したまま** 観測 IIFE の内側に inline する (= `$BODY$` を残さない)。
  *    changed-stmt は変更箇所が関数の外 (stmt) にあり、reachable な named fn は「観測のためだけに計装する
  *    (本体は変えない)」ので、`$BODY$` 穴は changed stmt 側に 1 個だけ残し、fn 群は本体保持で観測化する。

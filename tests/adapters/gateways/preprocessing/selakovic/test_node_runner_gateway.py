@@ -34,8 +34,8 @@ def _fake_issue_result(id_: str | None = None, n_candidates: int = 1) -> dict[st
     candidates: list[dict[str, object]] = [
         {
             "setup": "const arr = [1, 2, 3];",
-            "slow": "arr[0]",
-            "fast": "arr[1]",
+            "before": "arr[0]",
+            "after": "arr[1]",
             "enclosure_node_type": "FunctionExpression",
             "candidate_meta": {
                 "adapter": "selakovic",
@@ -79,8 +79,8 @@ class TestNodeRunnerPreprocessorGatewayMocked:
             result = gw.preprocess(PreprocessingInput(id="case-01", issue_dir="/tmp/x"))
 
         assert result.candidate_count == 1
-        assert result.candidates[0].slow == "arr[0]"
-        assert result.candidates[0].fast == "arr[1]"
+        assert result.candidates[0].before == "arr[0]"
+        assert result.candidates[0].after == "arr[1]"
         assert run_mock.call_count == 1
 
     def test_parses_issue_with_n_candidates(self, tmp_path: Path) -> None:

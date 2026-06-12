@@ -55,7 +55,7 @@ export const EXTERNAL_OBSERVATION_PROFILE: ExternalObservationProfile = {
 };
 
 /**
- * O3 (exception): Selakovic dataset は slow/fast を `<lib>_before/`/`<lib>_after/` の別 dir に置くため、
+ * O3 (exception): Selakovic dataset は before/after を `<lib>_before/`/`<lib>_after/` の別 dir に置くため、
  * dep 解決失敗時の error message に `Cannot find module './backbone_before/...'` のように配置 artifact が混じる。
  * 比較前に `_(before|after)` を除去して「両側同じく落ちた」と正しく判定する (backbone-1097/2858/707 / mocha-763)。
  */
@@ -82,7 +82,7 @@ export const INTERACTION_TRACE_PROFILE: InteractionTraceProfile = {
  * 判断: ai-guide/adr/0017-equivalence-sandbox-pre-execution-transforms.md
  *
  * threshold が低いのは: 反復回数は等価の構成要素ではない (ADR-0013) し、数百回以上回るループは 1 反復あたりの
- * C6 trace エントリ × 反復回数が記録 Proxy の trace 上限を超え、その打ち切り位置が slow/fast の trace 量の僅差で
+ * C6 trace エントリ × 反復回数が記録 Proxy の trace 上限を超え、その打ち切り位置が before/after の trace 量の僅差で
  * ずれて偽 not_equal を生むため。
  */
 export const ITERATION_CAP: IterationCapOptions = { threshold: 100, cap: 5 };

@@ -42,7 +42,7 @@ export interface AngularWrapperInfo {
 
 export interface F1Decomposition {
   readonly wrapperKind: WrapperKind;
-  /** f1 の body (BlockStatement) — slow/fast の母集団。 */
+  /** f1 の body (BlockStatement) — before/after の母集団。 */
   readonly f1Body: BlockStatement;
   /** Program 直下 (top-level) or controller body 内で f1 定義より前の非ハーネス statement (= setup の一部)。 */
   readonly preWorkloadStatements: readonly Statement[];

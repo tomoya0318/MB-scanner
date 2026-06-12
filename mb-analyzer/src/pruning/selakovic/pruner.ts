@@ -7,7 +7,7 @@ import { prune as prunePure } from "../common/engine";
 /**
  * `PruningInput` 由来の等価検証コンテキストを `EquivalenceInput` に乗せ替えて返す。
  *
- * `pruning/common/engine.prune` は `(setup, slow, fast, timeout_ms)` の最小契約で `checkEquivalence` を
+ * `pruning/common/engine.prune` は `(setup, before, after, timeout_ms)` の最小契約で `checkEquivalence` を
  * 呼ぶので、その 4 つは `common/` 側が毎 iteration ごとに渡す。`environment` / `module_base_dir` /
  * `mount_html` は候補ごとに不変なので、ここで closure に閉じ込めて毎回マージする。
  * `common/` はこれらの存在を知らない (= pruning アルゴリズムは dataset 非依存)。
@@ -40,11 +40,11 @@ if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
 
   describe("buildEquivContext (in-source)", () => {
-    it("等価検証コンテキストの 3 フィールドだけを抽出する (slow/fast/setup/timeout_ms/max_iterations は含めない)", () => {
+    it("等価検証コンテキストの 3 フィールドだけを抽出する (before/after/setup/timeout_ms/max_iterations は含めない)", () => {
       const ctx = buildEquivContext({
         id: "x",
-        slow: "a",
-        fast: "b",
+        before: "a",
+        after: "b",
         setup: "s",
         timeout_ms: 1000,
         max_iterations: 5,
@@ -60,8 +60,8 @@ if (import.meta.vitest) {
     });
 
     it("undefined のフィールドはキーごと落とす (= checkEquivalence のデフォルトに委ねる)", () => {
-      expect(buildEquivContext({ slow: "a", fast: "b" })).toStrictEqual({});
-      expect(buildEquivContext({ slow: "a", fast: "b", environment: "vm" })).toStrictEqual({
+      expect(buildEquivContext({ before: "a", after: "b" })).toStrictEqual({});
+      expect(buildEquivContext({ before: "a", after: "b", environment: "vm" })).toStrictEqual({
         environment: "vm",
       });
     });

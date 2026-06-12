@@ -4,6 +4,6 @@
   "expected_verdict": "equal",
   "expected_primary_oracles": ["return_value"],
   "setup": "var x;",
-  "slow": "typeof x === 'undefined'",
-  "fast": "x === void 0"
+  "before": "typeof x === 'undefined'",
+  "after": "x === void 0"
 }

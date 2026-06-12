@@ -3,11 +3,11 @@
  * 観点: stdin に 1 件の JSON object を受け取り、verdict を stdout に出力し、exit code に対応させる契約
  * 判定事項:
  *   - pruned → stdout に result JSON、exit 0
- *   - initial_mismatch (slow ≢ fast) → exit 1
+ *   - initial_mismatch (before ≢ after) → exit 1
  *   - parse 失敗等で verdict=error → exit 2
  *   - timeout_ms / max_iterations が engine まで届く (effective_timeout_ms でエコーバック検証)
  *   - JSON parse 失敗 / 非 object / null → exit 2 + stderr、stdout は空
- *   - slow/fast が非 string、setup / timeout_ms / max_iterations が present かつ型不一致 → exit 2
+ *   - before/after が非 string、setup / timeout_ms / max_iterations が present かつ型不一致 → exit 2
  *
  * 注意: pattern_code / pattern_ast の具体値は engine 層の責務 (`src/pruning/README.md` +
  * `tests/pruning/engine.test.ts` でカバー) なので、CLI テストでは verdict と
@@ -49,7 +49,7 @@ describe("runPrune", () => {
 
   it("pruned な入力は exit 0 と result を stdout に出力", async () => {
     restoreStdin = feedStdin(
-      JSON.stringify({ slow: "1 + 1", fast: "2", timeout_ms: 1000, max_iterations: 10 }),
+      JSON.stringify({ before: "1 + 1", after: "2", timeout_ms: 1000, max_iterations: 10 }),
     );
 
     const code = await runPrune();
@@ -60,9 +60,9 @@ describe("runPrune", () => {
     expect(stderrSpy.writes).toHaveLength(0);
   });
 
-  it("slow ≢ fast の入力は initial_mismatch で exit 1", async () => {
+  it("before ≢ after の入力は initial_mismatch で exit 1", async () => {
     restoreStdin = feedStdin(
-      JSON.stringify({ slow: "1", fast: "2", timeout_ms: 1000, max_iterations: 10 }),
+      JSON.stringify({ before: "1", after: "2", timeout_ms: 1000, max_iterations: 10 }),
     );
 
     const code = await runPrune();
@@ -75,8 +75,8 @@ describe("runPrune", () => {
     restoreStdin = feedStdin(
       JSON.stringify({
         setup: `throw new Error("setup boom")`,
-        slow: "1",
-        fast: "1",
+        before: "1",
+        after: "1",
         timeout_ms: 1000,
         max_iterations: 10,
       }),
@@ -90,7 +90,7 @@ describe("runPrune", () => {
 
   it("timeout_ms が engine に届く (effective_timeout_ms 反映)", async () => {
     restoreStdin = feedStdin(
-      JSON.stringify({ slow: "1 + 1", fast: "2", timeout_ms: 3000, max_iterations: 10 }),
+      JSON.stringify({ before: "1 + 1", after: "2", timeout_ms: 3000, max_iterations: 10 }),
     );
 
     const code = await runPrune();
@@ -101,7 +101,7 @@ describe("runPrune", () => {
   });
 
   it("max_iterations 省略時もデフォルトで動作 (engine 解決)", async () => {
-    restoreStdin = feedStdin(JSON.stringify({ slow: "1 + 1", fast: "2", timeout_ms: 1000 }));
+    restoreStdin = feedStdin(JSON.stringify({ before: "1 + 1", after: "2", timeout_ms: 1000 }));
 
     const code = await runPrune();
 
@@ -137,26 +137,26 @@ describe("runPrune", () => {
     expect(stderrSpy.writes.join("")).toContain("Expected a JSON object on stdin");
   });
 
-  it("slow が string でないと exit 2", async () => {
-    restoreStdin = feedStdin(JSON.stringify({ slow: 1, fast: "2" }));
+  it("before が string でないと exit 2", async () => {
+    restoreStdin = feedStdin(JSON.stringify({ before: 1, after: "2" }));
 
     const code = await runPrune();
 
     expect(code).toBe(2);
-    expect(stderrSpy.writes.join("")).toContain("'slow' field must be a string");
+    expect(stderrSpy.writes.join("")).toContain("'before' field must be a string");
   });
 
-  it("fast が string でないと exit 2", async () => {
-    restoreStdin = feedStdin(JSON.stringify({ slow: "1", fast: 2 }));
+  it("after が string でないと exit 2", async () => {
+    restoreStdin = feedStdin(JSON.stringify({ before: "1", after: 2 }));
 
     const code = await runPrune();
 
     expect(code).toBe(2);
-    expect(stderrSpy.writes.join("")).toContain("'fast' field must be a string");
+    expect(stderrSpy.writes.join("")).toContain("'after' field must be a string");
   });
 
   it("setup が present かつ非 string だと exit 2", async () => {
-    restoreStdin = feedStdin(JSON.stringify({ slow: "1", fast: "1", setup: 42 }));
+    restoreStdin = feedStdin(JSON.stringify({ before: "1", after: "1", setup: 42 }));
 
     const code = await runPrune();
 
@@ -165,7 +165,7 @@ describe("runPrune", () => {
   });
 
   it("timeout_ms が present かつ非 number だと exit 2", async () => {
-    restoreStdin = feedStdin(JSON.stringify({ slow: "1", fast: "1", timeout_ms: "5000" }));
+    restoreStdin = feedStdin(JSON.stringify({ before: "1", after: "1", timeout_ms: "5000" }));
 
     const code = await runPrune();
 
@@ -175,7 +175,7 @@ describe("runPrune", () => {
 
   it("max_iterations が present かつ非 number だと exit 2", async () => {
     restoreStdin = feedStdin(
-      JSON.stringify({ slow: "1", fast: "1", timeout_ms: 1000, max_iterations: "50" }),
+      JSON.stringify({ before: "1", after: "1", timeout_ms: 1000, max_iterations: "50" }),
     );
 
     const code = await runPrune();
@@ -185,7 +185,7 @@ describe("runPrune", () => {
   });
 
   it("max_iterations が Infinity (非整数) だと exit 2", async () => {
-    restoreStdin = feedStdin(`{"slow":"1","fast":"1","timeout_ms":1000,"max_iterations":1e500}`);
+    restoreStdin = feedStdin(`{"before":"1","after":"1","timeout_ms":1000,"max_iterations":1e500}`);
 
     const code = await runPrune();
 
@@ -195,7 +195,7 @@ describe("runPrune", () => {
 
   it("max_iterations=0 は exit 2 (engine がループをスキップして silently pruned を返す事故を防ぐ)", async () => {
     restoreStdin = feedStdin(
-      JSON.stringify({ slow: "1", fast: "1", timeout_ms: 1000, max_iterations: 0 }),
+      JSON.stringify({ before: "1", after: "1", timeout_ms: 1000, max_iterations: 0 }),
     );
 
     const code = await runPrune();
@@ -206,7 +206,7 @@ describe("runPrune", () => {
 
   it("max_iterations が負だと exit 2", async () => {
     restoreStdin = feedStdin(
-      JSON.stringify({ slow: "1", fast: "1", timeout_ms: 1000, max_iterations: -1 }),
+      JSON.stringify({ before: "1", after: "1", timeout_ms: 1000, max_iterations: -1 }),
     );
 
     const code = await runPrune();
@@ -217,7 +217,7 @@ describe("runPrune", () => {
 
   it("max_iterations が小数だと exit 2", async () => {
     restoreStdin = feedStdin(
-      JSON.stringify({ slow: "1", fast: "1", timeout_ms: 1000, max_iterations: 0.5 }),
+      JSON.stringify({ before: "1", after: "1", timeout_ms: 1000, max_iterations: 0.5 }),
     );
 
     const code = await runPrune();
@@ -227,7 +227,7 @@ describe("runPrune", () => {
   });
 
   it("timeout_ms=0 は exit 2", async () => {
-    restoreStdin = feedStdin(JSON.stringify({ slow: "1", fast: "1", timeout_ms: 0 }));
+    restoreStdin = feedStdin(JSON.stringify({ before: "1", after: "1", timeout_ms: 0 }));
 
     const code = await runPrune();
 
@@ -236,7 +236,7 @@ describe("runPrune", () => {
   });
 
   it("timeout_ms が上限超過 (60000 超) だと exit 2", async () => {
-    restoreStdin = feedStdin(JSON.stringify({ slow: "1", fast: "1", timeout_ms: 60001 }));
+    restoreStdin = feedStdin(JSON.stringify({ before: "1", after: "1", timeout_ms: 60001 }));
 
     const code = await runPrune();
 
@@ -247,8 +247,8 @@ describe("runPrune", () => {
   it("等価検証コンテキスト (environment / module_base_dir / mount_html) を渡しても受理される", async () => {
     restoreStdin = feedStdin(
       JSON.stringify({
-        slow: "1 + 1",
-        fast: "2",
+        before: "1 + 1",
+        after: "2",
         timeout_ms: 1000,
         max_iterations: 10,
         environment: "vm",
@@ -265,7 +265,7 @@ describe("runPrune", () => {
   });
 
   it("environment が \"vm\" / \"jsdom\" 以外だと exit 2", async () => {
-    restoreStdin = feedStdin(JSON.stringify({ slow: "1", fast: "1", environment: "node" }));
+    restoreStdin = feedStdin(JSON.stringify({ before: "1", after: "1", environment: "node" }));
 
     const code = await runPrune();
 
@@ -274,7 +274,7 @@ describe("runPrune", () => {
   });
 
   it("module_base_dir が present かつ非 string だと exit 2", async () => {
-    restoreStdin = feedStdin(JSON.stringify({ slow: "1", fast: "1", module_base_dir: 42 }));
+    restoreStdin = feedStdin(JSON.stringify({ before: "1", after: "1", module_base_dir: 42 }));
 
     const code = await runPrune();
 
@@ -288,8 +288,8 @@ describe("runPrune", () => {
     // 誤判定して exit 2 にしてはいけない (回帰防止: prune-batch で server 系 7 件が全部 error になった事故)。
     restoreStdin = feedStdin(
       JSON.stringify({
-        slow: "1 + 1",
-        fast: "2",
+        before: "1 + 1",
+        after: "2",
         timeout_ms: 1000,
         max_iterations: 10,
         environment: null,

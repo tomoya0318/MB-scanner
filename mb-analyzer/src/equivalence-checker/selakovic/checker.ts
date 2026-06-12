@@ -40,7 +40,7 @@ import {
 const DEFAULT_TIMEOUT_MS = 5000;
 
 /**
- * Selakovic dataset 用の等価検証エントリ。`(setup, slow, fast)` を環境ごとに実行し、
+ * Selakovic dataset 用の等価検証エントリ。`(setup, before, after)` を環境ごとに実行し、
  * `oracle-routing.ts` が選んだ oracle 群で観測して verdict に畳む。
  *
  * - `environment === "vm"` (デフォルト / pruning): 素 vm + 非決定性遮断。oracle は C1/C4/C5/C3 の 4 本。
@@ -52,12 +52,12 @@ const DEFAULT_TIMEOUT_MS = 5000;
  *
  * 入力 2 系統 (`input.workload` の有無で分岐):
  * - **placeholder substitution model** (`input.workload != null`、ADR-0023 D-β): setup に `$BODY$` 1 個 +
- *   slow/fast は body 断片 (関数本体に差し込まれる前提) + workload が呼び出し列。checker 側で:
- *     1. `substituteBody(setup, slow|fast)` で `$BODY$` を body 断片で差し替え
+ *   before/after は body 断片 (関数本体に差し込まれる前提) + workload が呼び出し列。checker 側で:
+ *     1. `substituteBody(setup, before|after)` で `$BODY$` を body 断片で差し替え
  *     2. `declareObservationGlobal()` で setup 最先頭に `let __OBS__ = [];` を prepend
  *     3. 結果を executor の setup 引数、`input.workload` を executor の workload 引数に渡す (iteration-cap は workload 側)
- * - **direct executable** (`input.workload == null`、client embedded / fallback / server 等の経路): slow/fast が
- *   top-level program 形式でそのまま executor の workload 引数に流れる (executor は無改修、iteration-cap は slow/fast 側)
+ * - **direct executable** (`input.workload == null`、client embedded / fallback / server 等の経路): before/after が
+ *   top-level program 形式でそのまま executor の workload 引数に流れる (executor は無改修、iteration-cap は before/after 側)
  *
  * 判断: ai-guide/adr/0012-equivalence-checker-execution-environment.md / 0015-equivalence-checker-layering-and-dom-oracle.md / 0023-preprocess-placeholder-substitution.md
  */
@@ -69,7 +69,7 @@ export async function checkEquivalence(input: EquivalenceInput): Promise<Equival
 
   const cap = (code: string): string => (isJsdom ? applyIterationCap(code, ITERATION_CAP) : code);
 
-  // 1 side (slow / fast の body) を executor 入力 {setup, workload} に組み立てる。
+  // 1 side (before / after の body) を executor 入力 {setup, workload} に組み立てる。
   // placeholder model のときは body を $BODY$ に差し込んで setup を再構成し、workload を別に持つ。
   // direct executable のときは body 自体が top-level program なので executor の workload に流す。
   const buildExecutorInput = (body: string): { setup: string; workload: string } => {
@@ -98,9 +98,9 @@ export async function checkEquivalence(input: EquivalenceInput): Promise<Equival
   };
 
   try {
-    const [slow, fast] = await Promise.all([run(input.slow), run(input.fast)]);
+    const [before, after] = await Promise.all([run(input.before), run(input.after)]);
     const observations: OracleObservation[] = routeOracles(isJsdom ? "jsdom" : "vm").map((o) =>
-      runOracle(o, slow, fast, isJsdom),
+      runOracle(o, before, after, isJsdom),
     );
     const verdict = deriveOverallVerdict(observations);
     return {
@@ -132,23 +132,23 @@ export async function checkEquivalence(input: EquivalenceInput): Promise<Equival
 
 function runOracle(
   oracle: Oracle,
-  slow: ExecutionCapture,
-  fast: ExecutionCapture,
+  before: ExecutionCapture,
+  after: ExecutionCapture,
   isJsdom: boolean,
 ): OracleObservation {
   switch (oracle) {
     case ORACLE.RETURN_VALUE:
-      return checkReturnValue(slow, fast);
+      return checkReturnValue(before, after);
     case ORACLE.ARGUMENT_MUTATION:
-      return checkArgumentMutation(slow, fast);
+      return checkArgumentMutation(before, after);
     case ORACLE.EXCEPTION:
-      return checkException(slow, fast, EXCEPTION_PROFILE);
+      return checkException(before, after, EXCEPTION_PROFILE);
     case ORACLE.EXTERNAL_OBSERVATION:
-      return checkExternalObservation(slow, fast, isJsdom ? EXTERNAL_OBSERVATION_PROFILE : undefined);
+      return checkExternalObservation(before, after, isJsdom ? EXTERNAL_OBSERVATION_PROFILE : undefined);
     case ORACLE.DOM_MUTATION:
-      return checkDomMutation(slow, fast, DOM_NORMALIZE_PROFILE);
+      return checkDomMutation(before, after, DOM_NORMALIZE_PROFILE);
     case ORACLE.INTERACTION_TRACE:
-      return checkInteractionTrace(slow, fast, INTERACTION_TRACE_PROFILE);
+      return checkInteractionTrace(before, after, INTERACTION_TRACE_PROFILE);
   }
 }
 
@@ -170,7 +170,7 @@ if (import.meta.vitest) {
   const { describe, it, expect, vi } = import.meta.vitest;
   // 観点: placeholder substitution model のとき executor に届く setup が
   //  - `let __OBS__ = []` で始まり
-  //  - `$BODY$` プレースホルダが slow/fast の body で差し替え済み
+  //  - `$BODY$` プレースホルダが before/after の body で差し替え済み
   //  であることを確認する。executor 自体は mock してチェック。
 
   describe("checkEquivalence (in-source) — placeholder substitution model", () => {
@@ -193,10 +193,10 @@ if (import.meta.vitest) {
         });
       try {
         await checkEquivalence({
-          // ADR-0023 D-δ: 観測ハーネスは setup 側に inline 化、slow/fast は裸 body 断片
+          // ADR-0023 D-δ: 観測ハーネスは setup 側に inline 化、before/after は裸 body 断片
           setup: "var f = function (x) { let __OBS_R__ = (function () { $BODY$ }).call(this); __OBS__.push(JSON.stringify(__OBS_R__)); return __OBS_R__; };",
-          slow: "return x + 1;",
-          fast: "return x + 2;",
+          before: "return x + 1;",
+          after: "return x + 2;",
           workload: "(function () { __OBS__ = []; f(7); f(8); return JSON.stringify(__OBS__); })()",
           timeout_ms: 1000,
         });
@@ -212,7 +212,7 @@ if (import.meta.vitest) {
           expect(c.workload).toContain("__OBS__ = [];");
           expect(c.workload).toContain("JSON.stringify(__OBS__)");
         }
-        // slow / fast の body 断片が差し込まれて、それぞれの side に正しく入っている
+        // before / after の body 断片が差し込まれて、それぞれの side に正しく入っている
         expect(calls[0]!.setup).toContain("return x + 1;");
         expect(calls[1]!.setup).toContain("return x + 2;");
       } finally {
@@ -220,7 +220,7 @@ if (import.meta.vitest) {
       }
     });
 
-    it("workload == null は setup が原文のまま + slow/fast が executor の workload に流れる", async () => {
+    it("workload == null は setup が原文のまま + before/after が executor の workload に流れる", async () => {
       const sandbox = await import("../common/sandbox");
       const calls: Array<{ setup: string; workload: string }> = [];
       const spy = vi
@@ -240,9 +240,9 @@ if (import.meta.vitest) {
       try {
         await checkEquivalence({
           setup: "var lib = { f: function (x) { return x; } };",
-          slow: "lib.f(1); lib.f(2);",
-          fast: "lib.f(3); lib.f(4);",
-          // workload 省略 = slow/fast 素通し経路
+          before: "lib.f(1); lib.f(2);",
+          after: "lib.f(3); lib.f(4);",
+          // workload 省略 = before/after 素通し経路
           timeout_ms: 1000,
         });
         expect(calls.length).toBe(2);
@@ -250,7 +250,7 @@ if (import.meta.vitest) {
           // setup は原文そのまま (declareObservationGlobal は通っていない)
           expect(c.setup).toBe("var lib = { f: function (x) { return x; } };");
         }
-        // slow / fast がそのまま executor の workload に
+        // before / after がそのまま executor の workload に
         expect(calls[0]!.workload).toBe("lib.f(1); lib.f(2);");
         expect(calls[1]!.workload).toBe("lib.f(3); lib.f(4);");
       } finally {

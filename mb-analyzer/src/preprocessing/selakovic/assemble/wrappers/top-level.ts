@@ -10,7 +10,7 @@ import { buildAngularRunnable } from "./angular";
 import { wrapClientLibGlobalsStatement } from "../recorder-hooks";
 
 /**
- * clientIssues の `(setup, slow, fast)` candidate を作用点 (lib / workload / lib+workload) × wrapper kind
+ * clientIssues の `(setup, before, after)` candidate を作用点 (lib / workload / lib+workload) × wrapper kind
  * (top-level f1 / Angular controller-wrapper) で組み立てる (ADR-0011 §段2 / ADR-0014)。
  * `f1` body 内のループ反復回数は書き換えない (ADR-0017)。
  *
@@ -20,7 +20,7 @@ import { wrapClientLibGlobalsStatement } from "../recorder-hooks";
  * ラベル "lib-file" 等は assemble_path 相当を adapter_meta から派生で識別)。
  */
 
-/** 作用点 lib の embedded lib candidate: lib varies / workload body fixed@before (lib 全文を slow/fast に丸ごと埋める)。 */
+/** 作用点 lib の embedded lib candidate: lib varies / workload body fixed@before (lib 全文を before/after に丸ごと埋める)。 */
 export function buildClientLibCandidate(
   f1Before: F1Decomposition,
   libSourceBefore: string,
@@ -32,15 +32,15 @@ export function buildClientLibCandidate(
     const a = f1Before.angular;
     return {
       setup: "",
-      slow: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1Before) }),
-      fast: buildAngularRunnable({ libSource: libSourceAfter, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1Before) }),
+      before: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1Before) }),
+      after: buildAngularRunnable({ libSource: libSourceAfter, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1Before) }),
       candidate_meta: { adapter: "selakovic", target_side: targetSide, is_workload_reachable: false },
     };
   }
   return {
     setup: "",
-    slow: flatRunnable(libSourceBefore, preWorkload, f1BodyWrapped(f1Before), clientRecorderHook(libSourceBefore)),
-    fast: flatRunnable(libSourceAfter, preWorkload, f1BodyWrapped(f1Before), clientRecorderHook(libSourceAfter)),
+    before: flatRunnable(libSourceBefore, preWorkload, f1BodyWrapped(f1Before), clientRecorderHook(libSourceBefore)),
+    after: flatRunnable(libSourceAfter, preWorkload, f1BodyWrapped(f1Before), clientRecorderHook(libSourceAfter)),
     candidate_meta: { adapter: "selakovic", target_side: targetSide, is_workload_reachable: false },
   };
 }
@@ -58,8 +58,8 @@ export function buildClientBodyCandidate(
     const a = f1Before.angular;
     return {
       setup: "",
-      slow: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1Before) }),
-      fast: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1After) }),
+      before: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1Before) }),
+      after: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1After) }),
       candidate_meta: { adapter: "selakovic", target_side: targetSide, is_workload_reachable: false },
     };
   }
@@ -68,8 +68,8 @@ export function buildClientBodyCandidate(
   if (preWorkload.length > 0) setupParts.push(preWorkload);
   return {
     setup: setupParts.join("\n;\n"),
-    slow: f1BodyWrapped(f1Before),
-    fast: f1BodyWrapped(f1After),
+    before: f1BodyWrapped(f1Before),
+    after: f1BodyWrapped(f1After),
     candidate_meta: { adapter: "selakovic", target_side: targetSide, is_workload_reachable: false },
   };
 }
@@ -86,15 +86,15 @@ export function buildClientCombinedCandidate(
     const a = f1Before.angular;
     return {
       setup: "",
-      slow: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1Before) }),
-      fast: buildAngularRunnable({ libSource: libSourceAfter, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1After) }),
+      before: buildAngularRunnable({ libSource: libSourceBefore, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1Before) }),
+      after: buildAngularRunnable({ libSource: libSourceAfter, moduleName: a.moduleName, ctrlName: a.ctrlName, ctrlParams: a.ctrlParams, preWorkloadCode: preWorkload, f1BodyCode: f1BodyRaw(f1After) }),
       candidate_meta: { adapter: "selakovic", target_side: TARGET_SIDE.BOTH, is_workload_reachable: false },
     };
   }
   return {
     setup: "",
-    slow: flatRunnable(libSourceBefore, preWorkload, f1BodyWrapped(f1Before), clientRecorderHook(libSourceBefore)),
-    fast: flatRunnable(libSourceAfter, preWorkload, f1BodyWrapped(f1After), clientRecorderHook(libSourceAfter)),
+    before: flatRunnable(libSourceBefore, preWorkload, f1BodyWrapped(f1Before), clientRecorderHook(libSourceBefore)),
+    after: flatRunnable(libSourceAfter, preWorkload, f1BodyWrapped(f1After), clientRecorderHook(libSourceAfter)),
     candidate_meta: { adapter: "selakovic", target_side: TARGET_SIDE.BOTH, is_workload_reachable: false },
   };
 }
@@ -149,15 +149,15 @@ function f1BodyWrapped(f1: F1Decomposition): string {
  *
  *  - `setup` = `holedLib` (変更関数 body を観測ハーネス入り `{ $BODY$ }` で置換済、`$BODY$` 1 個) +
  *    `preWorkloadCode` を `\n;\n` 結合。
- *  - `slow` / `fast` = 変更前 / 後 body の裸 statementsToCode 出力 (= 観測足場無し)。
+ *  - `before` / `after` = 変更前 / 後 body の裸 statementsToCode 出力 (= 観測足場無し)。
  *  - `workload` = `wrapObservedWorkload(f1BodyCode)` (= `__OBS__=[]` reset → f1 body 実行 →
  *    `JSON.stringify(__OBS__)` 完了値返却)。
  */
 export interface AssembleTopLevelChangedFnArgs {
   readonly holedLib: string;
   readonly preWorkloadCode: string;
-  readonly slow: string;
-  readonly fast: string;
+  readonly before: string;
+  readonly after: string;
   readonly f1BodyCode: string;
   readonly enclosureNodeType: string;
   readonly beforeNodeCount: number;
@@ -168,8 +168,8 @@ export function assembleTopLevelChangedFn(args: AssembleTopLevelChangedFnArgs): 
   const setup = [args.holedLib, args.preWorkloadCode].filter((s) => s.length > 0).join("\n;\n");
   return {
     setup,
-    slow: args.slow,
-    fast: args.fast,
+    before: args.before,
+    after: args.after,
     workload: wrapObservedWorkload(args.f1BodyCode),
     enclosure_node_type: args.enclosureNodeType,
     // node count は「pruning が削る対象 = 変更関数の本体」のサイズ (inline 全文サイズ ≠ embedded の値)。

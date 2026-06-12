@@ -1,6 +1,6 @@
 """等価性検証の Use Case 層
 
-1 トリプル (setup, slow, fast) に対して ``EquivalenceCheckerPort`` を呼び出し、
+1 トリプル (setup, before, after) に対して ``EquivalenceCheckerPort`` を呼び出し、
 Port から受け取った observation を使って全体 verdict を導出する。
 
 Pruning や同値分割テストといった複数 setup の処理は呼び出し側の責務。

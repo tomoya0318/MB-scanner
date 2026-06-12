@@ -33,7 +33,7 @@ def _fake_node_result(
         "id": id_,
         "verdict": verdict,
         "observations": [
-            {"oracle": "return_value", "verdict": verdict, "slow_value": "1", "fast_value": "1"},
+            {"oracle": "return_value", "verdict": verdict, "before_value": "1", "after_value": "1"},
             {"oracle": "argument_mutation", "verdict": "not_applicable"},
             {"oracle": "exception", "verdict": "not_applicable"},
             {"oracle": "external_observation", "verdict": "not_applicable"},
@@ -54,8 +54,8 @@ class TestCheckBatchMocked:
     def test_missing_bundle_returns_error_per_item(self, tmp_path: Path) -> None:
         gw = _gateway(tmp_path / "nonexistent.js")
         items = [
-            EquivalenceInput(id="a", slow="1", fast="1"),
-            EquivalenceInput(id="b", slow="1", fast="1"),
+            EquivalenceInput(id="a", before="1", after="1"),
+            EquivalenceInput(id="b", before="1", after="1"),
         ]
         results = gw.check_batch(items)
         assert len(results) == 2
@@ -77,9 +77,9 @@ class TestCheckBatchMocked:
             gw = _gateway(fake_cli)
             results = gw.check_batch(
                 [
-                    EquivalenceInput(id="a", slow="1", fast="1"),
-                    EquivalenceInput(id="b", slow="1", fast="2"),
-                    EquivalenceInput(id="c", slow="3", fast="3"),
+                    EquivalenceInput(id="a", before="1", after="1"),
+                    EquivalenceInput(id="b", before="1", after="2"),
+                    EquivalenceInput(id="c", before="3", after="3"),
                 ],
             )
 
@@ -107,8 +107,8 @@ class TestCheckBatchMocked:
             gw = _gateway(fake_cli)
             gw.check_batch(
                 [
-                    EquivalenceInput(id="a", slow="1", fast="1"),  # timeout_ms はデフォルト 5000
-                    EquivalenceInput(id="b", slow="1", fast="1", timeout_ms=1000),
+                    EquivalenceInput(id="a", before="1", after="1"),  # timeout_ms はデフォルト 5000
+                    EquivalenceInput(id="b", before="1", after="1", timeout_ms=1000),
                 ],
             )
 
@@ -130,8 +130,8 @@ class TestCheckBatchMocked:
             gw = _gateway(fake_cli)
             results = gw.check_batch(
                 [
-                    EquivalenceInput(id="a", slow="1", fast="1"),
-                    EquivalenceInput(id="b", slow="1", fast="1"),
+                    EquivalenceInput(id="a", before="1", after="1"),
+                    EquivalenceInput(id="b", before="1", after="1"),
                 ],
             )
         assert [r.verdict for r in results] == [Verdict.ERROR, Verdict.ERROR]
@@ -144,7 +144,7 @@ class TestCheckBatchMocked:
         with patch.object(subprocess, "run", return_value=completed):
             gw = _gateway(fake_cli)
             results = gw.check_batch(
-                [EquivalenceInput(id="a", slow="1", fast="1")],
+                [EquivalenceInput(id="a", before="1", after="1")],
             )
         assert results[0].verdict is Verdict.ERROR
         assert results[0].error_message is not None
@@ -160,8 +160,8 @@ class TestCheckBatchMocked:
             gw = _gateway(fake_cli)
             results = gw.check_batch(
                 [
-                    EquivalenceInput(id="a", slow="1", fast="1"),
-                    EquivalenceInput(id="b", slow="1", fast="1"),
+                    EquivalenceInput(id="a", before="1", after="1"),
+                    EquivalenceInput(id="b", before="1", after="1"),
                 ],
             )
         assert results[0].id == "a"
@@ -196,7 +196,7 @@ class TestCheckBatchMocked:
 
         with patch.object(subprocess, "run", side_effect=fake_run):
             gw = _gateway(fake_cli)
-            results = gw.check_batch([EquivalenceInput(slow="1", fast="1")])
+            results = gw.check_batch([EquivalenceInput(before="1", after="1")])
         assert captured["key"].startswith("__mb_batch_idx__")
         assert results[0].id is None
         assert results[0].verdict is Verdict.EQUAL
@@ -207,7 +207,7 @@ class TestCheckBatchMocked:
         fake_cli.write_text("// stub")
         gw = _gateway(fake_cli)
         with pytest.raises(ValueError, match="reserved prefix"):
-            gw.check_batch([EquivalenceInput(id="__mb_batch_idx__evil", slow="1", fast="1")])
+            gw.check_batch([EquivalenceInput(id="__mb_batch_idx__evil", before="1", after="1")])
 
     def test_effective_timeout_ms_mismatch_is_warned(self, tmp_path: Path) -> None:
         """Node が異なる timeout_ms で実行していた場合に警告を error_message に注入する"""
@@ -218,7 +218,7 @@ class TestCheckBatchMocked:
         with patch.object(subprocess, "run", return_value=completed):
             gw = _gateway(fake_cli)
             results = gw.check_batch(
-                [EquivalenceInput(id="a", slow="1", fast="1", timeout_ms=1000)],
+                [EquivalenceInput(id="a", before="1", after="1", timeout_ms=1000)],
             )
         assert results[0].error_message is not None
         assert "timeout_ms mismatch" in results[0].error_message

@@ -11,48 +11,48 @@ import type { ExecutionCapture } from "../../sandbox/capture/types";
  * - それ以外は serialize された文字列の完全一致で equal / not_equal
  */
 export function checkReturnValue(
-  slow: ExecutionCapture,
-  fast: ExecutionCapture,
+  before: ExecutionCapture,
+  after: ExecutionCapture,
 ): OracleObservation {
   const oracle = ORACLE.RETURN_VALUE;
 
-  if (slow.exception !== null || fast.exception !== null) {
+  if (before.exception !== null || after.exception !== null) {
     return { oracle, verdict: ORACLE_VERDICT.NOT_APPLICABLE };
   }
-  if (slow.return_is_undefined && fast.return_is_undefined) {
+  if (before.return_is_undefined && after.return_is_undefined) {
     return { oracle, verdict: ORACLE_VERDICT.NOT_APPLICABLE };
   }
-  if (slow.return_value === UNSERIALIZABLE_MARKER || fast.return_value === UNSERIALIZABLE_MARKER) {
+  if (before.return_value === UNSERIALIZABLE_MARKER || after.return_value === UNSERIALIZABLE_MARKER) {
     return {
       oracle,
       verdict: ORACLE_VERDICT.ERROR,
-      slow_value: slow.return_value,
-      fast_value: fast.return_value,
+      before_value: before.return_value,
+      after_value: after.return_value,
       detail: "return value could not be serialized",
     };
   }
-  if (slow.return_is_undefined !== fast.return_is_undefined) {
+  if (before.return_is_undefined !== after.return_is_undefined) {
     return {
       oracle,
       verdict: ORACLE_VERDICT.NOT_EQUAL,
-      slow_value: slow.return_value,
-      fast_value: fast.return_value,
+      before_value: before.return_value,
+      after_value: after.return_value,
       detail: "one side returned undefined while the other returned a value",
     };
   }
-  if (slow.return_value === fast.return_value) {
+  if (before.return_value === after.return_value) {
     return {
       oracle,
       verdict: ORACLE_VERDICT.EQUAL,
-      slow_value: slow.return_value,
-      fast_value: fast.return_value,
+      before_value: before.return_value,
+      after_value: after.return_value,
     };
   }
   return {
     oracle,
     verdict: ORACLE_VERDICT.NOT_EQUAL,
-    slow_value: slow.return_value,
-    fast_value: fast.return_value,
+    before_value: before.return_value,
+    after_value: after.return_value,
   };
 }
 
@@ -78,14 +78,14 @@ if (import.meta.vitest) {
       expect(checkReturnValue(v, cap({ return_value: "42", return_is_undefined: false })).verdict).toBe("equal");
     });
 
-    it("値が異なる → not_equal (slow_value/fast_value を載せる)", () => {
+    it("値が異なる → not_equal (before_value/after_value を載せる)", () => {
       const obs = checkReturnValue(
         cap({ return_value: "-1", return_is_undefined: false }),
         cap({ return_value: "1", return_is_undefined: false }),
       );
       expect(obs.verdict).toBe("not_equal");
-      expect(obs.slow_value).toBe("-1");
-      expect(obs.fast_value).toBe("1");
+      expect(obs.before_value).toBe("-1");
+      expect(obs.after_value).toBe("1");
     });
 
     it("両側 undefined → not_applicable", () => {
@@ -99,15 +99,15 @@ if (import.meta.vitest) {
     });
 
     it("片方でも exception → not_applicable (O3 に委譲)", () => {
-      const slow = cap({ exception: { ctor: "Error", message: "e" } });
-      expect(checkReturnValue(slow, cap({ return_value: "1", return_is_undefined: false })).verdict).toBe(
+      const before = cap({ exception: { ctor: "Error", message: "e" } });
+      expect(checkReturnValue(before, cap({ return_value: "1", return_is_undefined: false })).verdict).toBe(
         "not_applicable",
       );
     });
 
     it("シリアライズ不能 (UNSERIALIZABLE_MARKER) → error", () => {
-      const slow = cap({ return_value: UNSERIALIZABLE_MARKER, return_is_undefined: false });
-      expect(checkReturnValue(slow, cap({ return_value: "1", return_is_undefined: false })).verdict).toBe("error");
+      const before = cap({ return_value: UNSERIALIZABLE_MARKER, return_is_undefined: false });
+      expect(checkReturnValue(before, cap({ return_value: "1", return_is_undefined: false })).verdict).toBe("error");
     });
   });
 }

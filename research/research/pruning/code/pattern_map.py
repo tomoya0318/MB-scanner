@@ -6,7 +6,7 @@
 - AST セレクタ条件は match_ast.mjs 側に同じ番号で実装 (言語が違うため定義は分散だが、番号と
   before_shape の意図はここに集約)
 
-precondition (いつ適用してよいか) は対象外。各 regex は「変更前 (slow) の形」を検出する。
+precondition (いつ適用してよいか) は対象外。各 regex は「変更前 (before) の形」を検出する。
 
 入力 jsonl は preprocess_workload_reachability/code/ を参照する。
 """

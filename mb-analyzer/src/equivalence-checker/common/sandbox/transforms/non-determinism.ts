@@ -1,6 +1,6 @@
 /**
  * 非決定性 API (Math.random / Date.now / new Date() / timer / performance.now) の遮断・固定化。
- * slow/fast の 2 実行で同じ入力から同じ観測値が得られるようにする。
+ * before/after の 2 実行で同じ入力から同じ観測値が得られるようにする。
  * 判断: ai-guide/adr/0012-equivalence-checker-execution-environment.md
  *
  * - vm 環境: 素の sandbox に置く差し替えグローバル一式を `nonDeterministicGlobals()` で作る。
@@ -64,7 +64,7 @@ export function nonDeterministicGlobals(): Record<string, unknown> {
 
 /**
  * jsdom の internal VM context の `Date.now` / `new Date()` / `Math.random` を凍結する。
- * (= AngularJS の `ng-<Date.now()>` キャッシュキー等の非決定 global が slow/fast で食い違って
+ * (= AngularJS の `ng-<Date.now()>` キャッシュキー等の非決定 global が before/after で食い違って
  * 偽 not_equal にならないように)。timer 系は同期実行では fire しないので触らない。
  */
 export function freezeContextNonDeterminism(context: vm.Context): void {
@@ -76,7 +76,7 @@ export function freezeContextNonDeterminism(context: vm.Context): void {
 // 判断: ai-guide/adr/0007-in-source-testing-internal-helpers.md
 if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
-  // 観点: slow/fast の 2 実行で同じ入力から同じ観測値が得られるよう、Math.random は決定的シードで同一値列を、
+  // 観点: before/after の 2 実行で同じ入力から同じ観測値が得られるよう、Math.random は決定的シードで同一値列を、
   // Date.now / new Date() / performance.now は固定値を返し、timer の本体は実行されないこと。
   const vmContextWithGlobals = (): vm.Context => vm.createContext({ ...nonDeterministicGlobals() });
 

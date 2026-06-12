@@ -18,14 +18,14 @@ import { walkNodes } from "../../../ast/walk";
  * `test` は FunctionDeclaration の他に `exports.test = function(){...}` / `var test = function(){...}`
  * の形もありうる。
  *
- * `init`/`setupTest` は計測ハーネスの一部 (= setup 扱い)。`test()` body が slow/fast の母集団。
+ * `init`/`setupTest` は計測ハーネスの一部 (= setup 扱い)。`test()` body が before/after の母集団。
  * 規約外フォーマット (`test()` が見つからない等) は `null`。
  */
 
 type FnLike = FunctionDeclaration | FunctionExpression | ArrowFunctionExpression;
 
 export interface TestDecomposition {
-  /** test() の body (BlockStatement) — slow/fast の母集団。 */
+  /** test() の body (BlockStatement) — before/after の母集団。 */
   readonly testBody: BlockStatement;
   /** test() の宣言パラメタ名 (= `initResult` / `setupTestResult` 等)。 */
   readonly testParams: readonly string[];

@@ -1,6 +1,6 @@
 /**
  * 対象: ADR-0011 Tier 2 の公開 API `preprocess()` — 1 issue → 1 IssueResult (内部に candidates: list) の契約 (ADR-0024)。
- * 観点: 計測ハーネスを剥がして `f1`/`test()` body を slow/fast の母集団に取り、lib と body の
+ * 観点: 計測ハーネスを剥がして `f1`/`test()` body を before/after の母集団に取り、lib と body の
  *       実コード差で lib / workload / lib+workload / fallback に振り分け、A+B は ADR-0014 で independent なら 2 candidate、
  *       co-evolution の疑いなら 1 candidate にする。wrapper kind (top-level / Angular controller) と
  *       ADR-0013 (反復回数は書き換えない) も合わせて確認する。
@@ -48,9 +48,9 @@ describe("preprocess — client / top-level f1", () => {
     const c = result.candidates[0]!;
     expect(c.candidate_meta.target_side).toBe(TARGET_SIDE.WORKLOAD);
     expect(c.candidate_meta.is_workload_reachable).toBe(false);
-    expect(c.slow).toContain("(function () {");
-    expect(c.slow).toContain("% 2 === 0");
-    expect(c.fast).toContain("& 1 === 0");
+    expect(c.before).toContain("(function () {");
+    expect(c.before).toContain("% 2 === 0");
+    expect(c.after).toContain("& 1 === 0");
     expect(c.setup).toContain("var keys = [1, 2, 3]");
     expect(c.setup).not.toContain("execute"); // 計測ハーネスは setup に残らない
   });
@@ -78,24 +78,24 @@ describe("preprocess — client / top-level f1", () => {
     expect(embedded.candidate_meta.is_workload_reachable).toBe(false);
     expect(embedded.candidate_excluded).toBeUndefined();
     expect(embedded.setup).toBe(""); // lib が runnable 本体に入るので setup は空
-    expect(embedded.slow).toContain("var helpers = {}"); // lib 全文が slow に埋まる
-    expect(embedded.slow).toContain("index % 2 == 0"); // lib_before
-    expect(embedded.fast).toContain("index & 1 == 0"); // lib_after
-    expect(embedded.slow).toContain("keys[i] % 2 === 0"); // f1 body — slow/fast 両側とも before のまま固定
-    expect(embedded.fast).toContain("keys[i] % 2 === 0");
+    expect(embedded.before).toContain("var helpers = {}"); // lib 全文が before に埋まる
+    expect(embedded.before).toContain("index % 2 == 0"); // lib_before
+    expect(embedded.after).toContain("index & 1 == 0"); // lib_after
+    expect(embedded.before).toContain("keys[i] % 2 === 0"); // f1 body — before/after 両側とも before のまま固定
+    expect(embedded.after).toContain("keys[i] % 2 === 0");
 
     const excluded = result.candidates[1]!;
     expect(excluded.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED);
     expect(excluded.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
     expect(excluded.candidate_meta.is_workload_reachable).toBe(false);
     expect(excluded.setup).toBeUndefined();
-    expect(excluded.slow).toBeUndefined();
-    expect(excluded.fast).toBeUndefined();
+    expect(excluded.before).toBeUndefined();
+    expect(excluded.after).toBeUndefined();
     expect(excluded.before_node_count).toBeUndefined();
     expect(excluded.after_node_count).toBeUndefined();
   });
 
-  it("作用点 lib: f1 が変更 lib 関数を呼ぶ → embedded #0 + changed-fn #1 (4 値契約: setup に観測ハーネス + $BODY$ / slow・fast は裸 body / workload に IIFE)", () => {
+  it("作用点 lib: f1 が変更 lib 関数を呼ぶ → embedded #0 + changed-fn #1 (4 値契約: setup に観測ハーネス + $BODY$ / before・after は裸 body / workload に IIFE)", () => {
     const libBefore = "var slice = [].slice;\nvar lib = {};\nlib.norm = function (x) { return slice.call([x]).length % 2 === 0; };\nlib.unused = function () { return 0; };";
     const libAfter = "var slice = [].slice;\nvar lib = {};\nlib.norm = function (x) { return slice.call([x]).length & 1 === 0; };\nlib.unused = function () { return 0; };";
     const inlineCallsLib = `
@@ -139,17 +139,17 @@ describe("preprocess — client / top-level f1", () => {
     expect(cf.setup).not.toContain("globalThis.__HOLE__");
     expect(cf.setup).not.toContain("& 1 === 0"); // body は $BODY$ で穴あき、after 本体は残らない
 
-    // slow: 変更前 body (% 2 === 0) の裸 statement 列 (= 観測ハーネス無し、lib 宣言も含まない)
-    expect(cf.slow).toContain("% 2 === 0");
-    expect(cf.slow).not.toContain("__OBS_R__"); // 観測ハーネスは setup 側に移動
-    expect(cf.slow).not.toContain("__OBS__.push");
-    expect(cf.slow).not.toContain("var lib = {};");
-    expect(cf.slow).not.toContain("lib.norm(i);"); // workload 呼び出しは workload 側に移動
+    // before: 変更前 body (% 2 === 0) の裸 statement 列 (= 観測ハーネス無し、lib 宣言も含まない)
+    expect(cf.before).toContain("% 2 === 0");
+    expect(cf.before).not.toContain("__OBS_R__"); // 観測ハーネスは setup 側に移動
+    expect(cf.before).not.toContain("__OBS__.push");
+    expect(cf.before).not.toContain("var lib = {};");
+    expect(cf.before).not.toContain("lib.norm(i);"); // workload 呼び出しは workload 側に移動
 
-    // fast: 変更後 body (& 1 === 0) の裸 statement 列
-    expect(cf.fast).toContain("& 1 === 0");
-    expect(cf.fast).not.toContain("__OBS_R__");
-    expect(cf.fast).not.toContain("__OBS__.push");
+    // after: 変更後 body (& 1 === 0) の裸 statement 列
+    expect(cf.after).toContain("& 1 === 0");
+    expect(cf.after).not.toContain("__OBS_R__");
+    expect(cf.after).not.toContain("__OBS__.push");
 
     // workload: __OBS__ を init → workload 呼び出し列 → JSON.stringify(__OBS__) を完了値で返す IIFE
     expect(cf.workload).toContain("(function () {");
@@ -189,7 +189,7 @@ describe("preprocess — client / top-level f1", () => {
     expect(reachable.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
     expect(reachable.candidate_meta.is_workload_reachable).toBe(true);
     expect(reachable.candidate_excluded).toBeUndefined();
-    expect(reachable.slow).toContain("% 2 === 0"); // norm の before
+    expect(reachable.before).toContain("% 2 === 0"); // norm の before
 
     const excluded = result.candidates[2]!;
     expect(excluded.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED);
@@ -220,7 +220,7 @@ describe("preprocess — client / top-level f1", () => {
       expect(c.setup).toContain("/* handlebars 1.1.0 stub */");
       expect(c.setup!.indexOf("jquery 2.1.3 stub")).toBeLessThan(c.setup!.indexOf("handlebars 1.1.0 stub"));
     }
-    // embedded の setup は dep だけ (lib は slow/fast 側) / changed-fn の setup は dep + 穴あき lib + preWorkload
+    // embedded の setup は dep だけ (lib は before/after 側) / changed-fn の setup は dep + 穴あき lib + preWorkload
     const embedded = result.candidates.find((c) => !c.candidate_meta.is_workload_reachable)!;
     expect(embedded.setup).toMatch(/^\/\* jquery 2\.1\.3 stub \*\//);
     const cf = result.candidates.find((c) => c.candidate_meta.is_workload_reachable)!;
@@ -277,13 +277,13 @@ describe("preprocess — client / top-level f1", () => {
     const c = result.candidates[0]!;
     expect(result.issue_meta?.aspect).toBe(ASPECT.BOTH);
     expect(c.candidate_meta.target_side).toBe(TARGET_SIDE.BOTH);
-    expect(c.slow).toContain("ngRepeatAction(data, 0)");
-    expect(c.fast).toContain("ngRepeatAction(data, 1)");
-    expect(c.slow).toContain("arr[k] % 2 == 0");
-    expect(c.fast).toContain("arr[k] & 1 == 0");
+    expect(c.before).toContain("ngRepeatAction(data, 0)");
+    expect(c.after).toContain("ngRepeatAction(data, 1)");
+    expect(c.before).toContain("arr[k] % 2 == 0");
+    expect(c.after).toContain("arr[k] & 1 == 0");
   });
 
-  it("ループ反復回数は書き換えない (ADR-0011 §段1): for (i < 50000) がそのまま slow/fast に乗る", () => {
+  it("ループ反復回数は書き換えない (ADR-0011 §段1): for (i < 50000) がそのまま before/after に乗る", () => {
     const result = preprocess({
       kind: "client",
       before_inline: `
@@ -304,10 +304,10 @@ describe("preprocess — client / top-level f1", () => {
     expect(result.candidate_count).toBe(1);
     const c = result.candidates[0]!;
     expect(result.issue_meta?.aspect).toBe(ASPECT.WORKLOAD);
-    expect(c.slow).toMatch(/i\s*<\s*50000/);
-    expect(c.fast).toMatch(/i\s*<\s*50000/);
-    expect(c.slow).toContain("arr.push");
-    expect(c.fast).toContain("arr.unshift");
+    expect(c.before).toMatch(/i\s*<\s*50000/);
+    expect(c.after).toMatch(/i\s*<\s*50000/);
+    expect(c.before).toContain("arr.push");
+    expect(c.after).toContain("arr.unshift");
     expect(c.setup).toContain("var arr = []");
     expect(c.setup).not.toContain("execute");
   });
@@ -379,13 +379,13 @@ describe("preprocess — client / Angular controller-wrapper", () => {
     expect(result.issue_meta?.wrapper_kind).toBe(WRAPPER_KIND.ANGULAR_CONTROLLER_WRAPPER);
     expect(c.candidate_meta.target_side).toBe(TARGET_SIDE.WORKLOAD);
     expect(c.setup).toBe("");
-    expect(c.slow).toContain('angular.module("benchApp", [])');
-    expect(c.slow).toContain('.controller("BenchCtrl", function ($scope) {');
-    expect(c.slow).toContain("globalThis.__selakovic_f1 = f1");
-    expect(c.slow).toContain("% 2");
-    expect(c.fast).toContain("& 1");
-    expect(c.slow).not.toContain("execute");
-    expect(c.slow).not.toContain("jStat");
+    expect(c.before).toContain('angular.module("benchApp", [])');
+    expect(c.before).toContain('.controller("BenchCtrl", function ($scope) {');
+    expect(c.before).toContain("globalThis.__selakovic_f1 = f1");
+    expect(c.before).toContain("% 2");
+    expect(c.after).toContain("& 1");
+    expect(c.before).not.toContain("execute");
+    expect(c.before).not.toContain("jStat");
   });
 
   it("作用点 lib: controller 内 f1 が変更 lib 関数を呼ぶ → angular changed-fn candidate に救済 (案 C'、ADR-0023 §順 2-1)", () => {
@@ -421,9 +421,9 @@ describe("preprocess — client / Angular controller-wrapper", () => {
     expect(cf!.setup).toContain('.controller("BenchCtrl", function ($scope) {');
     expect(cf!.setup).toContain("globalThis.__selakovic_f1 = f1;");
     expect(cf!.setup).toContain("__selakovic_inj.get('$controller')");
-    // slow / fast は裸 body 断片、workload は f1 1 回呼び出し
-    expect(cf!.slow).toContain("% 2 === 0");
-    expect(cf!.fast).toContain("& 1 === 0");
+    // before / after は裸 body 断片、workload は f1 1 回呼び出し
+    expect(cf!.before).toContain("% 2 === 0");
+    expect(cf!.after).toContain("& 1 === 0");
     expect(cf!.workload).toContain("__OBS__ = [];");
     expect(cf!.workload).toContain("globalThis.__selakovic_f1();");
     expect(cf!.workload).toContain("return JSON.stringify(__OBS__);");
@@ -463,7 +463,7 @@ describe("preprocess — client / Angular controller-wrapper", () => {
 });
 
 describe("preprocess — server (test_case)", () => {
-  it("作用点 workload: test() body 変化 → aspect=workload, target_side=workload, runnable program を slow/fast に", () => {
+  it("作用点 workload: test() body 変化 → aspect=workload, target_side=workload, runnable program を before/after に", () => {
     const before = `(function () { function init() { return 1; } function test(i) { return i % 2; } exports.init = init; exports.test = test; })();`;
     const after = `(function () { function init() { return 1; } function test(i) { return i & 1; } exports.init = init; exports.test = test; })();`;
     const result = preprocess({
@@ -479,9 +479,9 @@ describe("preprocess — server (test_case)", () => {
     expect(result.issue_meta?.layout).toBe(LAYOUT_KIND.SERVER);
     expect(result.issue_meta?.aspect).toBe(ASPECT.WORKLOAD);
     expect(c.candidate_meta.target_side).toBe(TARGET_SIDE.WORKLOAD);
-    expect(c.slow).toContain("i % 2");
-    expect(c.fast).toContain("i & 1");
-    expect(c.slow).toContain("exports.test");
+    expect(c.before).toContain("i % 2");
+    expect(c.after).toContain("i & 1");
+    expect(c.before).toContain("exports.test");
   });
 
   it("作用点 lib: lib 変化・test() body 不変 → embedded #0 (require 切替) + server-changed-fn candidate を append (ADR-0025、順 3-2)", () => {
@@ -501,17 +501,17 @@ describe("preprocess — server (test_case)", () => {
     const embedded = result.candidates[0]!;
     expect(embedded.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
     expect(embedded.candidate_meta.is_workload_reachable).toBe(false);
-    expect(embedded.slow).toContain("require('./mylib_before')");
-    expect(embedded.fast).toContain("require('./mylib_after')");
-    expect(embedded.slow).toContain("lib.compute(3)");
+    expect(embedded.before).toContain("require('./mylib_before')");
+    expect(embedded.after).toContain("require('./mylib_after')");
+    expect(embedded.before).toContain("lib.compute(3)");
     // #1: 変更関数 compute の server-changed-fn candidate (is_workload_reachable=true で small-candidate フィルタを通る)
     const changedFn = result.candidates.find((c) => c.candidate_meta.is_workload_reachable);
     expect(changedFn).toBeDefined();
     expect(changedFn!.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
     expect((changedFn!.setup!.match(/\$BODY\$/g) ?? []).length).toBe(1);
     expect(changedFn!.setup).toContain("globalThis.__SUT__ = __mapRequire__");
-    expect(changedFn!.slow).toContain("x * 2");
-    expect(changedFn!.fast).toContain("x << 1");
+    expect(changedFn!.before).toContain("x * 2");
+    expect(changedFn!.after).toContain("x << 1");
     // 2 チャネル観測 (戻り値 r + post-state s)
     expect(changedFn!.workload).toContain("return JSON.stringify({ r: __OBS__, s: __s__ });");
   });
@@ -532,8 +532,8 @@ describe("preprocess — server (test_case)", () => {
     // 変更ファイル impl.js が穴あけ対象 (__HOLED__)、entry は index.js
     expect(changedFn!.setup).toContain('globalThis.__HOLED__["impl.js"]');
     expect(changedFn!.setup).toContain('globalThis.__SUT__ = __mapRequire__(\'\')("./index");');
-    expect(changedFn!.slow).toContain("return 1;");
-    expect(changedFn!.fast).toContain("return 2;");
+    expect(changedFn!.before).toContain("return 1;");
+    expect(changedFn!.after).toContain("return 2;");
   });
 
   it("test_case が無いと fallback (lib top-level diff)", () => {

@@ -32,7 +32,7 @@ def _gateway(cli_path: Path | None = None) -> NodeRunnerEquivalenceGateway:
 class TestNodeRunnerGatewayMocked:
     def test_returns_error_when_bundle_missing(self, tmp_path: Path) -> None:
         gw = _gateway(tmp_path / "nonexistent.js")
-        result = gw.check(EquivalenceInput(slow="1", fast="1"))
+        result = gw.check(EquivalenceInput(before="1", after="1"))
         assert result.verdict is Verdict.ERROR
         assert result.error_message is not None
         assert "not found" in result.error_message
@@ -47,8 +47,8 @@ class TestNodeRunnerGatewayMocked:
                     {
                         "oracle": "return_value",
                         "verdict": "equal",
-                        "slow_value": "2",
-                        "fast_value": "2",
+                        "before_value": "2",
+                        "after_value": "2",
                     },
                     {"oracle": "argument_mutation", "verdict": "not_applicable"},
                     {"oracle": "exception", "verdict": "not_applicable"},
@@ -59,7 +59,7 @@ class TestNodeRunnerGatewayMocked:
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout_payload, stderr="")
         with patch.object(subprocess, "run", return_value=completed) as run_mock:
             gw = _gateway(fake_cli)
-            result = gw.check(EquivalenceInput(slow="1+1", fast="2"))
+            result = gw.check(EquivalenceInput(before="1+1", after="2"))
 
         assert result.verdict is Verdict.EQUAL
         assert result.observations[0].oracle is Oracle.RETURN_VALUE
@@ -75,7 +75,7 @@ class TestNodeRunnerGatewayMocked:
             side_effect=subprocess.TimeoutExpired(cmd="node", timeout=5),
         ):
             gw = _gateway(fake_cli)
-            result = gw.check(EquivalenceInput(slow="1", fast="1"))
+            result = gw.check(EquivalenceInput(before="1", after="1"))
         assert result.verdict is Verdict.ERROR
         assert result.error_message is not None
         assert "timeout" in result.error_message.lower()
@@ -87,7 +87,7 @@ class TestNodeRunnerGatewayMocked:
         completed = subprocess.CompletedProcess(args=[], returncode=2, stdout="", stderr="bad input")
         with patch.object(subprocess, "run", return_value=completed):
             gw = _gateway(fake_cli)
-            result = gw.check(EquivalenceInput(slow="1", fast="1"))
+            result = gw.check(EquivalenceInput(before="1", after="1"))
         assert result.verdict is Verdict.ERROR
         assert result.error_message is not None
         assert "bad input" in result.error_message
@@ -106,7 +106,7 @@ class TestNodeRunnerGatewayMocked:
         completed = subprocess.CompletedProcess(args=[], returncode=2, stdout=stdout_payload, stderr="")
         with patch.object(subprocess, "run", return_value=completed):
             gw = _gateway(fake_cli)
-            result = gw.check(EquivalenceInput(slow="1", fast="1"))
+            result = gw.check(EquivalenceInput(before="1", after="1"))
         assert result.verdict is Verdict.INCONCLUSIVE
         assert result.verdict_reason == "no-positive-evidence"
 
@@ -129,7 +129,7 @@ class TestNodeRunnerGatewayMocked:
         completed = subprocess.CompletedProcess(args=[], returncode=3, stdout=stdout_payload, stderr="")
         with patch.object(subprocess, "run", return_value=completed):
             gw = _gateway(fake_cli)
-            result = gw.check(EquivalenceInput(slow="1", fast="1"))
+            result = gw.check(EquivalenceInput(before="1", after="1"))
         assert result.verdict is Verdict.ERROR
         assert result.verdict_reason == "setup-failure"
         assert result.error_message == "setup code threw: ReferenceError"
@@ -141,7 +141,7 @@ class TestNodeRunnerGatewayMocked:
         completed = subprocess.CompletedProcess(args=[], returncode=139, stdout="", stderr="killed")
         with patch.object(subprocess, "run", return_value=completed):
             gw = _gateway(fake_cli)
-            result = gw.check(EquivalenceInput(slow="1", fast="1"))
+            result = gw.check(EquivalenceInput(before="1", after="1"))
         assert result.verdict is Verdict.ERROR
         assert result.error_message is not None
         assert "139" in result.error_message
@@ -152,7 +152,7 @@ class TestNodeRunnerGatewayMocked:
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="not json", stderr="")
         with patch.object(subprocess, "run", return_value=completed):
             gw = _gateway(fake_cli)
-            result = gw.check(EquivalenceInput(slow="1", fast="1"))
+            result = gw.check(EquivalenceInput(before="1", after="1"))
         assert result.verdict is Verdict.ERROR
         assert result.error_message is not None
         assert "JSON" in result.error_message
@@ -167,18 +167,18 @@ class TestNodeRunnerGatewayIntegration:
             pytest.skip(f"CLI bundle not built: {CLI_PATH}")
 
     def test_equal_verdict(self) -> None:
-        result = _gateway().check(EquivalenceInput(slow="1 + 1", fast="2"))
+        result = _gateway().check(EquivalenceInput(before="1 + 1", after="2"))
         assert result.verdict is Verdict.EQUAL
 
     def test_not_equal_verdict_on_selakovic_8_negative(self) -> None:
         result = _gateway().check(
-            EquivalenceInput(setup="const x = -3;", slow="x % 2", fast="x & 1"),
+            EquivalenceInput(setup="const x = -3;", before="x % 2", after="x & 1"),
         )
         assert result.verdict is Verdict.NOT_EQUAL
 
     def test_timeout_is_not_equal(self) -> None:
         result = _gateway().check(
-            EquivalenceInput(slow="while(true){}", fast="1", timeout_ms=50),
+            EquivalenceInput(before="while(true){}", after="1", timeout_ms=50),
         )
         # 片方 timeout 例外、片方正常 → O3 で not_equal
         assert result.verdict is Verdict.NOT_EQUAL

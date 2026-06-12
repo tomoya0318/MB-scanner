@@ -1,7 +1,7 @@
 /**
  * checkReturnValue の代数的性質 (反射律・対称律) を property-based に検証する。
  *
- * 自分自身との比較では not_equal は起きてはいけない、また slow/fast を入れ替えても
+ * 自分自身との比較では not_equal は起きてはいけない、また before/after を入れ替えても
  * verdict は不変であるべき。これらは oracle の実装バグ (非対称比較・NaN 扱い漏れ等) を
  * 自動検出するための invariant。
  */
@@ -41,7 +41,7 @@ describe("checkReturnValue (property)", () => {
     );
   });
 
-  it("対称律: slow/fast 入れ替えで verdict 不変", () => {
+  it("対称律: before/after 入れ替えで verdict 不変", () => {
     fc.assert(
       fc.property(arbitraryCapture, arbitraryCapture, (a, b) => {
         return checkReturnValue(a, b).verdict === checkReturnValue(b, a).verdict;

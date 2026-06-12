@@ -34,8 +34,8 @@ def _fake_issue_result(id_: str | None = None) -> str:
         "candidates": [
             {
                 "setup": None,
-                "slow": "arr[0]",
-                "fast": "arr[1]",
+                "before": "arr[0]",
+                "after": "arr[1]",
                 "candidate_meta": {
                     "adapter": "selakovic",
                     "target_side": "workload",

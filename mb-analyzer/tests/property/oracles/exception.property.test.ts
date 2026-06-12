@@ -20,7 +20,7 @@ describe("checkException (property)", () => {
     );
   });
 
-  it("対称律: slow/fast 入れ替えで verdict 不変", () => {
+  it("対称律: before/after 入れ替えで verdict 不変", () => {
     fc.assert(
       fc.property(arbitraryCapture, arbitraryCapture, (a, b) => {
         return checkException(a, b).verdict === checkException(b, a).verdict;

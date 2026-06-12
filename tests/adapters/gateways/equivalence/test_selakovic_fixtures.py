@@ -1,7 +1,7 @@
 """Selakovic 10 パターン fixture による等価性検証の回帰テスト
 
 - fixture は `tests/fixtures/selakovic/pattern_*.json` に配置される
-- 各 fixture は `setup` / `slow` / `fast` / `expected_verdict` を必須で持つ
+- 各 fixture は `setup` / `before` / `after` / `expected_verdict` を必須で持つ
 - `expected_primary_oracles` は参考情報（主担当 oracle）
 - 実行には `mb-analyzer/dist/cli.js` のビルドが必要
 """
@@ -33,8 +33,8 @@ def test_selakovic_pattern(fixture_path: Path) -> None:
     data = json.loads(fixture_path.read_text())
     input_ = EquivalenceInput(
         setup=data.get("setup", ""),
-        slow=data["slow"],
-        fast=data["fast"],
+        before=data["before"],
+        after=data["after"],
         timeout_ms=data.get("timeout_ms", 5000),
     )
     gateway = NodeRunnerEquivalenceGateway(CLI_PATH)
@@ -85,8 +85,8 @@ def test_selakovic_all_patterns_in_single_batch() -> None:
             EquivalenceInput(
                 id=fixture_id,
                 setup=data.get("setup", ""),
-                slow=data["slow"],
-                fast=data["fast"],
+                before=data["before"],
+                after=data["after"],
                 timeout_ms=data.get("timeout_ms", 5000),
             ),
         )
@@ -118,8 +118,8 @@ def test_batch_timeout_ms_is_actually_passed_to_node() -> None:
     inputs = [
         EquivalenceInput(
             id="tight-timeout",
-            slow="while(true){}",
-            fast="while(true){}",
+            before="while(true){}",
+            after="while(true){}",
             timeout_ms=1,
         ),
     ]

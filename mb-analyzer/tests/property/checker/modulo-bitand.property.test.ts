@@ -19,8 +19,8 @@ describe("x % 2 vs x & 1 boundary (Angular #4359)", () => {
       fc.asyncProperty(fc.integer({ min: 0, max: 10_000 }), async (x) => {
         const r = await checkEquivalence({
           setup: `const x = ${x};`,
-          slow: "x % 2",
-          fast: "x & 1",
+          before: "x % 2",
+          after: "x & 1",
         });
         return r.verdict === "equal";
       }),
@@ -35,8 +35,8 @@ describe("x % 2 vs x & 1 boundary (Angular #4359)", () => {
         async (x) => {
           const r = await checkEquivalence({
             setup: `const x = ${x};`,
-            slow: "x % 2",
-            fast: "x & 1",
+            before: "x % 2",
+            after: "x & 1",
           });
           return r.verdict === "not_equal";
         },
@@ -52,8 +52,8 @@ describe("x % 2 vs x & 1 boundary (Angular #4359)", () => {
         async (x) => {
           const r = await checkEquivalence({
             setup: `const x = ${x};`,
-            slow: "x % 2",
-            fast: "x & 1",
+            before: "x % 2",
+            after: "x & 1",
           });
           return r.verdict === "not_equal";
         },

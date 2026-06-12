@@ -4,6 +4,6 @@
   "expected_verdict": "equal",
   "expected_primary_oracles": ["return_value"],
   "setup": "const arr = [3, 1, 4, 1, 5, 9, 2, 6];",
-  "slow": "Math.max.apply(null, arr)",
-  "fast": "Math.max(...arr)"
+  "before": "Math.max.apply(null, arr)",
+  "after": "Math.max(...arr)"
 }

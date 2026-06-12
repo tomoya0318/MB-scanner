@@ -53,7 +53,7 @@ class TestCheckEquivalenceCLI:
     def test_with_inline_flags_equal(self) -> None:
         with patch(GATEWAY_CLS) as gw_cls:
             gw_cls.return_value.check.return_value = _stub_result(Verdict.EQUAL)
-            res = self.runner.invoke(app, ["check-equivalence", "--slow", "1", "--fast", "1"])
+            res = self.runner.invoke(app, ["check-equivalence", "--before", "1", "--after", "1"])
         assert res.exit_code == 0
         payload = json.loads(res.stdout)
         assert payload["verdict"] == "equal"
@@ -61,13 +61,13 @@ class TestCheckEquivalenceCLI:
     def test_not_equal_exit_code_1(self) -> None:
         with patch(GATEWAY_CLS) as gw_cls:
             gw_cls.return_value.check.return_value = _stub_result(Verdict.NOT_EQUAL)
-            res = self.runner.invoke(app, ["check-equivalence", "--slow", "1", "--fast", "2"])
+            res = self.runner.invoke(app, ["check-equivalence", "--before", "1", "--after", "2"])
         assert res.exit_code == 1
 
     def test_inconclusive_exit_code_2(self) -> None:
         with patch(GATEWAY_CLS) as gw_cls:
             gw_cls.return_value.check.return_value = _stub_result(Verdict.INCONCLUSIVE)
-            res = self.runner.invoke(app, ["check-equivalence", "--slow", "1", "--fast", "1"])
+            res = self.runner.invoke(app, ["check-equivalence", "--before", "1", "--after", "1"])
         assert res.exit_code == 2
         payload = json.loads(res.stdout)
         assert payload["verdict"] == "inconclusive"
@@ -76,25 +76,25 @@ class TestCheckEquivalenceCLI:
     def test_error_exit_code_3(self) -> None:
         with patch(GATEWAY_CLS) as gw_cls:
             gw_cls.return_value.check.return_value = _stub_result(Verdict.ERROR)
-            res = self.runner.invoke(app, ["check-equivalence", "--slow", "1", "--fast", "1"])
+            res = self.runner.invoke(app, ["check-equivalence", "--before", "1", "--after", "1"])
         assert res.exit_code == 3
 
-    def test_missing_slow_fast_without_input_is_error(self) -> None:
+    def test_missing_before_after_without_input_is_error(self) -> None:
         res = self.runner.invoke(app, ["check-equivalence"])
         assert res.exit_code != 0
         assert "--input" in res.stdout or "--input" in res.stderr or "--input" in (res.output or "")
 
     def test_with_input_file(self, tmp_path: Path) -> None:
         input_file = tmp_path / "trip.json"
-        input_file.write_text(json.dumps({"setup": "const x = 1;", "slow": "x", "fast": "x"}))
+        input_file.write_text(json.dumps({"setup": "const x = 1;", "before": "x", "after": "x"}))
         with patch(GATEWAY_CLS) as gw_cls:
             gw_cls.return_value.check.return_value = _stub_result(Verdict.EQUAL)
             res = self.runner.invoke(app, ["check-equivalence", "--input", str(input_file)])
         assert res.exit_code == 0
         call_input = gw_cls.return_value.check.call_args.args[0]
         assert call_input.setup == "const x = 1;"
-        assert call_input.slow == "x"
-        assert call_input.fast == "x"
+        assert call_input.before == "x"
+        assert call_input.after == "x"
 
     def test_output_to_file(self, tmp_path: Path) -> None:
         out = tmp_path / "result.json"
@@ -102,7 +102,7 @@ class TestCheckEquivalenceCLI:
             gw_cls.return_value.check.return_value = _stub_result(Verdict.EQUAL)
             res = self.runner.invoke(
                 app,
-                ["check-equivalence", "--slow", "1", "--fast", "1", "--output", str(out)],
+                ["check-equivalence", "--before", "1", "--after", "1", "--output", str(out)],
             )
         assert res.exit_code == 0
         written = json.loads(out.read_text())
@@ -110,7 +110,7 @@ class TestCheckEquivalenceCLI:
 
     def test_inline_flags_override_input_file(self, tmp_path: Path) -> None:
         input_file = tmp_path / "trip.json"
-        input_file.write_text(json.dumps({"setup": "var a = 1;", "slow": "a", "fast": "a"}))
+        input_file.write_text(json.dumps({"setup": "var a = 1;", "before": "a", "after": "a"}))
         with patch(GATEWAY_CLS) as gw_cls:
             gw_cls.return_value.check.return_value = _stub_result(Verdict.EQUAL)
             self.runner.invoke(
@@ -119,15 +119,15 @@ class TestCheckEquivalenceCLI:
                     "check-equivalence",
                     "--input",
                     str(input_file),
-                    "--slow",
+                    "--before",
                     "1",
-                    "--fast",
+                    "--after",
                     "2",
                 ],
             )
         call_input = gw_cls.return_value.check.call_args.args[0]
-        assert call_input.slow == "1"
-        assert call_input.fast == "2"
+        assert call_input.before == "1"
+        assert call_input.after == "2"
         assert call_input.setup == "var a = 1;"  # setup は file のまま
 
     def test_invalid_json_input(self, tmp_path: Path) -> None:
@@ -155,16 +155,16 @@ class TestCheckEquivalenceBatchCLI:
         input_path = self._write_jsonl(
             tmp_path,
             [
-                {"id": "a", "slow": "1", "fast": "1"},
-                {"id": "b", "slow": "1", "fast": "2"},
-                {"id": "c", "slow": "3", "fast": "3"},
+                {"id": "a", "before": "1", "after": "1"},
+                {"id": "b", "before": "1", "after": "2"},
+                {"id": "c", "before": "3", "after": "3"},
             ],
         )
         output_path = tmp_path / "results.jsonl"
 
         def fake_check_batch(items: Sequence[EquivalenceInput]) -> list[EquivalenceCheckResult]:
             return [
-                _stub_batch_result(item.id or "?", Verdict.EQUAL if item.slow == item.fast else Verdict.NOT_EQUAL)
+                _stub_batch_result(item.id or "?", Verdict.EQUAL if item.before == item.after else Verdict.NOT_EQUAL)
                 for item in items
             ]
 
@@ -191,7 +191,7 @@ class TestCheckEquivalenceBatchCLI:
     def test_workers_minus_one_resolves(self, tmp_path: Path) -> None:
         input_path = self._write_jsonl(
             tmp_path,
-            [{"id": "a", "slow": "1", "fast": "1"}],
+            [{"id": "a", "before": "1", "after": "1"}],
         )
         with patch(GATEWAY_CLS) as gw_cls, patch("os.cpu_count", return_value=4):
             gw_cls.return_value.check_batch.return_value = [_stub_batch_result("a")]
@@ -216,7 +216,7 @@ class TestCheckEquivalenceBatchCLI:
     def test_stdout_output_when_no_output_path(self, tmp_path: Path) -> None:
         input_path = self._write_jsonl(
             tmp_path,
-            [{"id": "a", "slow": "1", "fast": "1"}],
+            [{"id": "a", "before": "1", "after": "1"}],
         )
         with patch(GATEWAY_CLS) as gw_cls:
             gw_cls.return_value.check_batch.return_value = [_stub_batch_result("a")]
@@ -237,8 +237,8 @@ class TestCheckEquivalenceBatchCLI:
         input_path = self._write_jsonl(
             tmp_path,
             [
-                {"id": "a", "slow": "1", "fast": "1", "timeout_ms": 1500},
-                {"id": "b", "slow": "1", "fast": "1"},  # timeout_ms なし
+                {"id": "a", "before": "1", "after": "1", "timeout_ms": 1500},
+                {"id": "b", "before": "1", "after": "1"},  # timeout_ms なし
             ],
         )
         captured: list[EquivalenceInput] = []
@@ -293,7 +293,7 @@ class TestCheckEquivalenceBatchCLI:
     def test_id_auto_filled_when_missing_in_jsonl(self, tmp_path: Path) -> None:
         input_path = self._write_jsonl(
             tmp_path,
-            [{"slow": "1", "fast": "1"}, {"slow": "2", "fast": "2"}],
+            [{"before": "1", "after": "1"}, {"before": "2", "after": "2"}],
         )
         captured: list[EquivalenceInput] = []
 

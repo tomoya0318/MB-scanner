@@ -16,7 +16,7 @@ import { enumerateCandidates, type CandidatePath } from "./candidates";
 import { PLACEHOLDER_NAME_PATTERN, replacementFor } from "./rules/replacement";
 
 /**
- * pruning が「この slow 変種はまだ等価か」を判定するために呼ぶ等価検証関数。
+ * pruning が「この before 変種はまだ等価か」を判定するために呼ぶ等価検証関数。
  *
  * `pruning/common/` は dataset 非依存層なので `equivalence-checker/` を直接 import せず、
  * この関数を DI で受け取る (`pruning/selakovic/` が `checkEquivalence` を bind する)。
@@ -26,8 +26,8 @@ import { PLACEHOLDER_NAME_PATTERN, replacementFor } from "./rules/replacement";
 export interface EquivalenceCheck {
   (args: {
     setup: string;
-    slow: string;
-    fast: string;
+    before: string;
+    after: string;
     timeout_ms: number;
   }): Promise<{ verdict: Verdict; error_message?: string | null }>;
 }
@@ -42,10 +42,10 @@ export interface PruneDeps {
  *
  * 処理の骨格 (研究計画 ai-guide/current-research.md §第 1 段階):
  *
- *   1. 初回等価性検証: slow ≡ fast が `setup` 上で成立しなければ `initial_mismatch`
+ *   1. 初回等価性検証: before ≡ after が `setup` 上で成立しなければ `initial_mismatch`
  *      (pruning 前提が崩れているので即 return)
- *   2. AST 差分フィルタ: SubtreeSet で fast に同型が存在する「共通ノード」のみを
- *      候補として列挙。差分ノードは「fast に対応物がない = パターンの本質」として
+ *   2. AST 差分フィルタ: SubtreeSet で after に同型が存在する「共通ノード」のみを
+ *      候補として列挙。差分ノードは「after に対応物がない = パターンの本質」として
  *      必須扱い (試行しない)
  *   3. 候補を大きい順に DFS 走査: 1 候補ごとに親キーを mutate → 等価判定 → 等価なら
  *      reparsed AST を採用、不等価/round-trip 失敗なら finally で必ず revert (DB の
@@ -79,13 +79,13 @@ export async function prune(input: PruningInput, deps: PruneDeps): Promise<Pruni
   };
 
   // Phase 0: parse。parse 失敗は verdict=error。
-  let slowAst: File;
-  let fastAst: File;
-  let currentSlowCode: string;
+  let beforeAst: File;
+  let afterAst: File;
+  let currentBeforeCode: string;
   try {
-    slowAst = parse(input.slow);
-    fastAst = parse(input.fast);
-    currentSlowCode = input.slow;
+    beforeAst = parse(input.before);
+    afterAst = parse(input.after);
+    currentBeforeCode = input.before;
   } catch (e) {
     const message = e instanceof Error ? e.message : "parse failed";
     return {
@@ -95,19 +95,19 @@ export async function prune(input: PruningInput, deps: PruneDeps): Promise<Pruni
     };
   }
 
-  const nodeCountBefore = countNodes(slowAst);
+  const nodeCountInitial = countNodes(beforeAst);
 
   // 入力に placeholder 形 (`$Pn`) の Identifier があれば warning を出す (ADR-0009)。
   // 動作は変えない: 候補列挙では placeholder と区別できず除外される副作用があるが、
   // 等価性検証は普通の Identifier として走る。ユーザー側の知っておくべきリスク。
-  warnIfPlaceholderCollision(slowAst, "slow");
-  warnIfPlaceholderCollision(fastAst, "fast");
+  warnIfPlaceholderCollision(beforeAst, "before");
+  warnIfPlaceholderCollision(afterAst, "after");
 
-  // Phase 1: 初回等価性検証。slow ≡ fast でなければ pruning を回す意味がない。
+  // Phase 1: 初回等価性検証。before ≡ after でなければ pruning を回す意味がない。
   const initialCheck = await cfg.checkEquivalence({
     setup: cfg.setup,
-    slow: currentSlowCode,
-    fast: cfg.fastCode,
+    before: currentBeforeCode,
+    after: cfg.afterCode,
     timeout_ms: cfg.timeout_ms,
   });
   if (initialCheck.verdict === VERDICT.ERROR) {
@@ -115,37 +115,37 @@ export async function prune(input: PruningInput, deps: PruneDeps): Promise<Pruni
       ...baseResult,
       verdict: PRUNING_VERDICT.ERROR,
       error_message: initialCheck.error_message ?? "initial equivalence check error",
-      node_count_before: nodeCountBefore,
+      node_count_initial: nodeCountInitial,
     };
   }
   if (!isEquivalentEnoughForPruning(initialCheck.verdict)) {
     return {
       ...baseResult,
       verdict: PRUNING_VERDICT.INITIAL_MISMATCH,
-      node_count_before: nodeCountBefore,
+      node_count_initial: nodeCountInitial,
     };
   }
 
   // Phase 2: AST 差分フィルタ + 候補列挙 + DFS 走査
-  // 1 回 prune に成功したら slowAst が変わるので候補を再列挙する。SubtreeSet は
-  // fast 側の hash 集合だけを保持し fast は不変なので、ループ外で 1 回だけ構築する。
+  // 1 回 prune に成功したら beforeAst が変わるので候補を再列挙する。SubtreeSet は
+  // after 側の hash 集合だけを保持し after は不変なので、ループ外で 1 回だけ構築する。
   // 失敗候補のクロスパス dedup は将来の最適化として保留 (canonical hash ベースで
   // 実装する余地あり)。
   const placeholders: Placeholder[] = [];
   let iterations = 0;
   const startedAt = Date.now();
-  const diff = new SubtreeSet(fastAst);
+  const diff = new SubtreeSet(afterAst);
 
   while (iterations < cfg.max_iterations) {
     if (Date.now() - startedAt >= cfg.total_budget_ms) break;
 
-    const candidates = enumerateCandidates(slowAst, diff);
+    const candidates = enumerateCandidates(beforeAst, diff);
     if (candidates.length === 0) break;
 
     const prunedInThisPass = await tryPruneCandidates({
       candidates,
-      slowAst,
-      currentSlowCode,
+      beforeAst,
+      currentBeforeCode,
       cfg,
       placeholders,
       startedAt,
@@ -155,28 +155,28 @@ export async function prune(input: PruningInput, deps: PruneDeps): Promise<Pruni
     iterations = prunedInThisPass.iterations;
     if (!prunedInThisPass.pruned) break; // もう縮まない or budget 切れ
 
-    slowAst = prunedInThisPass.nextAst;
-    currentSlowCode = prunedInThisPass.nextCode;
+    beforeAst = prunedInThisPass.nextAst;
+    currentBeforeCode = prunedInThisPass.nextCode;
   }
 
-  const patternCode = generate(slowAst);
-  const nodeCountAfter = countNodes(slowAst);
+  const patternCode = generate(beforeAst);
+  const nodeCountPruned = countNodes(beforeAst);
 
   return {
     ...baseResult,
     verdict: PRUNING_VERDICT.PRUNED,
-    pattern_ast: slowAst,
+    pattern_ast: beforeAst,
     pattern_code: patternCode,
     placeholders,
     iterations,
-    node_count_before: nodeCountBefore,
-    node_count_after: nodeCountAfter,
+    node_count_initial: nodeCountInitial,
+    node_count_pruned: nodeCountPruned,
   };
 }
 
 interface ResolvedConfig {
   readonly setup: string;
-  readonly fastCode: string;
+  readonly afterCode: string;
   readonly timeout_ms: number;
   readonly max_iterations: number;
   readonly total_budget_ms: number;
@@ -195,7 +195,7 @@ function resolveBudget(input: PruningInput, deps: PruneDeps): ResolvedConfig {
   const max_iterations = input.max_iterations ?? DEFAULT_MAX_ITERATIONS;
   return {
     setup: input.setup ?? "",
-    fastCode: input.fast,
+    afterCode: input.after,
     timeout_ms,
     max_iterations,
     total_budget_ms: timeout_ms * max_iterations,
@@ -205,8 +205,8 @@ function resolveBudget(input: PruningInput, deps: PruneDeps): ResolvedConfig {
 
 interface TryPruneInput {
   readonly candidates: CandidatePath[];
-  readonly slowAst: File;
-  readonly currentSlowCode: string;
+  readonly beforeAst: File;
+  readonly currentBeforeCode: string;
   readonly cfg: ResolvedConfig;
   readonly placeholders: Placeholder[];
   readonly startedAt: number;
@@ -227,12 +227,12 @@ interface TryPruneResult {
  * 試行で消費した分まで反映済み。
  */
 async function tryPruneCandidates(args: TryPruneInput): Promise<TryPruneResult> {
-  const { candidates, slowAst, currentSlowCode, cfg, placeholders, startedAt } = args;
+  const { candidates, beforeAst, currentBeforeCode, cfg, placeholders, startedAt } = args;
   let iterations = args.iterations;
   const stop = (): TryPruneResult => ({
     pruned: false,
-    nextAst: slowAst,
-    nextCode: currentSlowCode,
+    nextAst: beforeAst,
+    nextCode: currentBeforeCode,
     iterations,
   });
 
@@ -252,7 +252,7 @@ async function tryPruneCandidates(args: TryPruneInput): Promise<TryPruneResult> 
       let code: string;
       let reparsed: File;
       try {
-        code = generate(slowAst);
+        code = generate(beforeAst);
         reparsed = parse(code);
       } catch {
         continue; // round-trip 失敗 (finally で revert)
@@ -261,8 +261,8 @@ async function tryPruneCandidates(args: TryPruneInput): Promise<TryPruneResult> 
       iterations += 1;
       const result = await cfg.checkEquivalence({
         setup: cfg.setup,
-        slow: code,
-        fast: cfg.fastCode,
+        before: code,
+        after: cfg.afterCode,
         timeout_ms: cfg.timeout_ms,
       });
 
@@ -272,7 +272,7 @@ async function tryPruneCandidates(args: TryPruneInput): Promise<TryPruneResult> 
       placeholders.push({
         id: placeholderId,
         kind: replacement.placeholderKind,
-        original_snippet: snippetOfNode(candidate.node, currentSlowCode),
+        original_snippet: snippetOfNode(candidate.node, currentBeforeCode),
       });
       return {
         pruned: true,
@@ -295,7 +295,7 @@ async function tryPruneCandidates(args: TryPruneInput): Promise<TryPruneResult> 
  *
  * 重複検出を避けるため、同じ name は 1 input につき 1 行だけ通知する。
  */
-function warnIfPlaceholderCollision(ast: File, label: "slow" | "fast"): void {
+function warnIfPlaceholderCollision(ast: File, label: "before" | "after"): void {
   const seen = new Set<string>();
   walkNodes(ast, ({ node }) => {
     if (node.type !== "Identifier") return;
@@ -319,7 +319,7 @@ function readAt(parent: Node, parentKey: string, listIndex: number | undefined):
 /**
  * `parent[parentKey]` (listIndex 指定時は配列要素) に値を代入する。
  * `enumerateCandidates` (`walkNodes` 経由) の不変条件を信頼し、配列でない / 範囲外の
- * 不正位置は内部 bug として例外で fail-fast する。
+ * 不正位置は内部 bug として例外で fail-after する。
  */
 function writeAt(
   parent: Node,
@@ -352,9 +352,9 @@ if (import.meta.vitest) {
     it("入力に $Pn Identifier があれば stderr に warning を 1 行出す", () => {
       const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
       try {
-        warnIfPlaceholderCollision(parse("const $P0 = 1;"), "slow");
+        warnIfPlaceholderCollision(parse("const $P0 = 1;"), "before");
         const calls = spy.mock.calls.map((c) => String(c[0]));
-        expect(calls.some((m) => m.includes("warning") && m.includes("$P0") && m.includes("slow")))
+        expect(calls.some((m) => m.includes("warning") && m.includes("$P0") && m.includes("before")))
           .toBe(true);
       } finally {
         spy.mockRestore();
@@ -364,7 +364,7 @@ if (import.meta.vitest) {
     it("同じ name の重複出現は 1 行に dedup される", () => {
       const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
       try {
-        warnIfPlaceholderCollision(parse("$P0; $P0; $P0;"), "fast");
+        warnIfPlaceholderCollision(parse("$P0; $P0; $P0;"), "after");
         const matches = spy.mock.calls.filter((c) => String(c[0]).includes("$P0"));
         expect(matches.length).toBe(1);
       } finally {
@@ -375,7 +375,7 @@ if (import.meta.vitest) {
     it("複数の異なる $Pn name は別行で通知される", () => {
       const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
       try {
-        warnIfPlaceholderCollision(parse("$P0; $P1;"), "slow");
+        warnIfPlaceholderCollision(parse("$P0; $P1;"), "before");
         const lines = spy.mock.calls.map((c) => String(c[0]));
         expect(lines.some((m) => m.includes("$P0"))).toBe(true);
         expect(lines.some((m) => m.includes("$P1"))).toBe(true);
@@ -387,7 +387,7 @@ if (import.meta.vitest) {
     it("placeholder 形と無関係な Identifier では warning は出ない", () => {
       const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
       try {
-        warnIfPlaceholderCollision(parse("const x = $P; foo();"), "slow");
+        warnIfPlaceholderCollision(parse("const x = $P; foo();"), "before");
         // `$P` (数字なし) は PLACEHOLDER_NAME_PATTERN に合わない
         expect(spy).not.toHaveBeenCalled();
       } finally {
@@ -398,27 +398,27 @@ if (import.meta.vitest) {
 
   describe("resolveBudget (in-source)", () => {
     it("timeout_ms / max_iterations のデフォルトは 5_000 / 1_000、total_budget_ms はその積", () => {
-      const cfg = resolveBudget({ slow: "", fast: "" }, stubDeps);
+      const cfg = resolveBudget({ before: "", after: "" }, stubDeps);
       expect(cfg.timeout_ms).toBe(5_000);
       expect(cfg.max_iterations).toBe(1_000);
       expect(cfg.total_budget_ms).toBe(5_000_000);
     });
 
     it("入力で渡された値はデフォルトを上書きする", () => {
-      const cfg = resolveBudget({ slow: "", fast: "", timeout_ms: 100, max_iterations: 7 }, stubDeps);
+      const cfg = resolveBudget({ before: "", after: "", timeout_ms: 100, max_iterations: 7 }, stubDeps);
       expect(cfg.timeout_ms).toBe(100);
       expect(cfg.max_iterations).toBe(7);
       expect(cfg.total_budget_ms).toBe(700);
     });
 
-    it("setup 未指定は空文字、fast はそのまま fastCode に渡る", () => {
-      const cfg = resolveBudget({ slow: "a", fast: "b" }, stubDeps);
+    it("setup 未指定は空文字、after はそのまま afterCode に渡る", () => {
+      const cfg = resolveBudget({ before: "a", after: "b" }, stubDeps);
       expect(cfg.setup).toBe("");
-      expect(cfg.fastCode).toBe("b");
+      expect(cfg.afterCode).toBe("b");
     });
 
     it("checkEquivalence は deps からそのまま cfg に渡る", () => {
-      const cfg = resolveBudget({ slow: "", fast: "" }, stubDeps);
+      const cfg = resolveBudget({ before: "", after: "" }, stubDeps);
       expect(cfg.checkEquivalence).toBe(stubDeps.checkEquivalence);
     });
   });

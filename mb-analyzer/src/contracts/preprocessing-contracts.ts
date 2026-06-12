@@ -6,7 +6,7 @@
  *
  * 構造の方針 (ADR-0024):
  *  - **base contract**: 全 dataset で意味を持つフィールドのみ
- *    (id, issue_excluded, issue_excluded_detail, candidate_count, candidates[].setup/slow/fast,
+ *    (id, issue_excluded, issue_excluded_detail, candidate_count, candidates[].setup/before/after,
  *     candidates[].before/after_node_count, candidates[].enclosure_node_type, candidates[].candidate_excluded)
  *  - **adapter extension**: dataset 固有情報は `issue_meta` / `candidate_meta` (discriminated union)
  *  - **issue 階層化**: jsonl 1 行 = 1 issue、`candidates: list[PreprocessingCandidate]`
@@ -42,21 +42,21 @@ export interface PreprocessingInput {
 /**
  * 1 candidate の出力 (equivalence-checker の入力単位)。
  *
- * `candidate_excluded` が指定されている場合 `slow` / `fast` / `setup` は undefined。
+ * `candidate_excluded` が指定されている場合 `before` / `after` / `setup` は undefined。
  * `enclosure_node_type` は抽出した最小 enclosure の AST ノード型名 (Babel ノード型、
  * "FunctionDeclaration" / "BlockStatement" 等)。threats to validity 集計で「どの粒度に
  * 収束したか」を見るため (ADR-0010)。
  *
  * `workload` は ADR-0023 D-β の placeholder substitution + 4 値契約フィールド。
- * `setup` に `$BODY$` プレースホルダを 1 個含み、`slow` / `fast` を `setup` の `$BODY$`
+ * `setup` に `$BODY$` プレースホルダを 1 個含み、`before` / `after` を `setup` の `$BODY$`
  * に差し込んで sandbox に渡す経路 (= changed-fn 経路) でのみ定義される。それ以外の
  * 経路 (client embedded / fallback / server 等) では `null` / `undefined`
  * (Python paired side が `None` を送ると JSON 経由で `null` になる)。
  */
 export interface PreprocessingCandidate {
   setup?: string;
-  slow?: string;
-  fast?: string;
+  before?: string;
+  after?: string;
   workload?: string;
   before_node_count?: number;
   after_node_count?: number;

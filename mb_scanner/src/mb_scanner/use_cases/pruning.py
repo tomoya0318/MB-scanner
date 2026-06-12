@@ -1,6 +1,6 @@
 """Pruning の Use Case 層
 
-1 トリプル (setup, slow, fast) に対して ``PrunerPort`` を呼び出し、結果を
+1 トリプル (setup, before, after) に対して ``PrunerPort`` を呼び出し、結果を
 そのまま返す。equivalence と異なり ``observations`` を持たないため、verdict 再計算
 ロジックは不要 (engine が verdict を直接決定する)。
 """

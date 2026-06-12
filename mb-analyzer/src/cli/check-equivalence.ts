@@ -53,10 +53,10 @@ function parseInput(raw: string): EquivalenceInput | string {
     return "Expected a JSON object on stdin";
   }
   const obj = parsed as Record<string, unknown>;
-  if (typeof obj.slow !== "string") return "'slow' field must be a string";
-  if (typeof obj.fast !== "string") return "'fast' field must be a string";
+  if (typeof obj.before !== "string") return "'before' field must be a string";
+  if (typeof obj.after !== "string") return "'after' field must be a string";
 
-  const input: EquivalenceInput = { slow: obj.slow, fast: obj.fast };
+  const input: EquivalenceInput = { before: obj.before, after: obj.after };
   if (obj.setup !== undefined) {
     if (typeof obj.setup !== "string") return "'setup' field must be a string when present";
     input.setup = obj.setup;
@@ -114,8 +114,8 @@ function parseBatchLine(raw: string): EquivalenceInput | { id: string | undefine
   const obj = parsed as Record<string, unknown>;
   const id = typeof obj.id === "string" ? obj.id : undefined;
 
-  if (typeof obj.slow !== "string") return { id, error: "'slow' field must be a string" };
-  if (typeof obj.fast !== "string") return { id, error: "'fast' field must be a string" };
+  if (typeof obj.before !== "string") return { id, error: "'before' field must be a string" };
+  if (typeof obj.after !== "string") return { id, error: "'after' field must be a string" };
   if (obj.timeout_ms === undefined) {
     return { id, error: "'timeout_ms' field is required in batch mode" };
   }
@@ -124,8 +124,8 @@ function parseBatchLine(raw: string): EquivalenceInput | { id: string | undefine
   }
 
   const input: EquivalenceInput = {
-    slow: obj.slow,
-    fast: obj.fast,
+    before: obj.before,
+    after: obj.after,
     timeout_ms: obj.timeout_ms,
   };
   if (id !== undefined) input.id = id;
@@ -144,7 +144,7 @@ function parseBatchLine(raw: string): EquivalenceInput | { id: string | undefine
 }
 
 function errorResult(id: string | undefined, message: string): EquivalenceCheckResult {
-  // batch 行のパース失敗 (slow/fast 欠落 / timeout_ms 不正 / 非 JSON 等) も
+  // batch 行のパース失敗 (before/after 欠落 / timeout_ms 不正 / 非 JSON 等) も
   // 「使える verdict が出せなかった」= executor-error と同じ分類 (ADR-0018) なので
   // verdict_reason を付ける (Gateway 側 _error と揃える)。
   const result: EquivalenceCheckResult = {

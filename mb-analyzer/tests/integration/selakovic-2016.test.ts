@@ -19,12 +19,12 @@ describe("Selakovic 2016 integration", () => {
     it("plain object で equal", async () => {
       const result = await checkEquivalence({
         setup: `const obj = { a: 1, b: 2, c: 3 };`,
-        slow: `(() => {
+        before: `(() => {
           const values = [];
           for (const key in obj) if (Object.prototype.hasOwnProperty.call(obj, key)) values.push(obj[key]);
           return values;
         })()`,
-        fast: `(() => {
+        after: `(() => {
           const keys = Object.keys(obj);
           const values = new Array(keys.length);
           for (let i = 0, l = keys.length; i < l; i++) values[i] = obj[keys[i]];
@@ -40,8 +40,8 @@ describe("Selakovic 2016 integration", () => {
     it("in-range index は equal", async () => {
       const result = await checkEquivalence({
         setup: `const str = "abc"; const i = 1;`,
-        slow: `str.substr(i, 1)`,
-        fast: `str[i]`,
+        before: `str.substr(i, 1)`,
+        after: `str[i]`,
       });
       expect(result.verdict).toBe("equal");
     });
@@ -49,8 +49,8 @@ describe("Selakovic 2016 integration", () => {
     it("out-of-range index は not_equal ('' vs undefined) — 従来研究の反例", async () => {
       const result = await checkEquivalence({
         setup: `const str = "abc"; const i = 10;`,
-        slow: `str.substr(i, 1)`,
-        fast: `str[i]`,
+        before: `str.substr(i, 1)`,
+        after: `str[i]`,
       });
       expect(result.verdict).toBe("not_equal");
     });
@@ -61,12 +61,12 @@ describe("Selakovic 2016 integration", () => {
     it("ネスト配列 shallow flatten で equal", async () => {
       const result = await checkEquivalence({
         setup: `const arr = [[1, 2], [3], [4, 5]];`,
-        slow: `(() => {
+        before: `(() => {
           let memo = [];
           for (const v of arr) memo = memo.concat(v);
           return memo;
         })()`,
-        fast: `(() => {
+        after: `(() => {
           const flat = [];
           for (const v of arr) Array.prototype.push.apply(flat, v);
           return flat;
@@ -87,8 +87,8 @@ describe("Selakovic 2016 integration", () => {
           ];
           const input = "hello";
         `,
-        slow: `styles.reduce((str, s) => s.open + str + s.close, input)`,
-        fast: `(() => {
+        before: `styles.reduce((str, s) => s.open + str + s.close, input)`,
+        after: `(() => {
           let str = input;
           for (let i = 0; i < styles.length; i++) {
             str = styles[i].open + str + styles[i].close;
@@ -106,8 +106,8 @@ describe("Selakovic 2016 integration", () => {
     it("非負数では equal", async () => {
       const result = await checkEquivalence({
         setup: `const x = 7;`,
-        slow: `x % 2`,
-        fast: `x & 1`,
+        before: `x % 2`,
+        after: `x & 1`,
       });
       expect(result.verdict).toBe("equal");
     });
@@ -115,8 +115,8 @@ describe("Selakovic 2016 integration", () => {
     it("負数では not_equal — 従来研究の反例", async () => {
       const result = await checkEquivalence({
         setup: `const x = -3;`,
-        slow: `x % 2`,
-        fast: `x & 1`,
+        before: `x % 2`,
+        after: `x & 1`,
       });
       expect(result.verdict).toBe("not_equal");
     });
@@ -129,13 +129,13 @@ describe("Selakovic 2016 integration", () => {
    */
   describe("tmp 由来の偽 verdict 再発防止", () => {
     it("C-1: 両側が同じ ReferenceError で落ちると inconclusive(both-sides-threw) — 偽 equal にしない", async () => {
-      const result = await checkEquivalence({ setup: "", slow: `undefinedVar.foo()`, fast: `undefinedVar.foo()` });
+      const result = await checkEquivalence({ setup: "", before: `undefinedVar.foo()`, after: `undefinedVar.foo()` });
       expect(result.verdict).toBe("inconclusive");
       expect(result.verdict_reason).toBe("both-sides-threw");
     });
 
     it("C-2: 片方だけ ReferenceError (f1-body 抽出 artefact) は not_equal", async () => {
-      const result = await checkEquivalence({ setup: "", slow: `1`, fast: `el.x` });
+      const result = await checkEquivalence({ setup: "", before: `1`, after: `el.x` });
       expect(result.verdict).toBe("not_equal");
     });
 
@@ -144,8 +144,8 @@ describe("Selakovic 2016 integration", () => {
         environment: "jsdom",
         module_base_dir: tmpdir(),
         setup: "",
-        slow: `require('./fixture_before/does-not-exist.js')`,
-        fast: `require('./fixture_after/does-not-exist.js')`,
+        before: `require('./fixture_before/does-not-exist.js')`,
+        after: `require('./fixture_after/does-not-exist.js')`,
       });
       expect(result.verdict).toBe("inconclusive");
       expect(result.verdict_reason).toBe("both-sides-threw");
@@ -155,12 +155,12 @@ describe("Selakovic 2016 integration", () => {
       const input = {
         environment: "jsdom" as const,
         setup: `const obj = { a: 1, b: 2, c: 3 };`,
-        slow: `var values = []; for (var key in obj) values.push(obj[key]); values`,
-        fast: `var keys = Object.keys(obj); var values = new Array(keys.length); for (var i = 0; i < keys.length; i++) values[i] = obj[keys[i]]; values`,
+        before: `var values = []; for (var key in obj) values.push(obj[key]); values`,
+        after: `var keys = Object.keys(obj); var values = new Array(keys.length); for (var i = 0; i < keys.length; i++) values[i] = obj[keys[i]]; values`,
       };
       expect((await checkEquivalence(input)).verdict).toBe("equal");
       // vm 環境では external-observation に profile が渡らないので、漏れた temp 変数の差がそのまま not_equal になる (現仕様)
-      expect((await checkEquivalence({ setup: input.setup, slow: input.slow, fast: input.fast })).verdict).toBe(
+      expect((await checkEquivalence({ setup: input.setup, before: input.before, after: input.after })).verdict).toBe(
         "not_equal",
       );
     });
@@ -170,8 +170,8 @@ describe("Selakovic 2016 integration", () => {
         environment: "jsdom",
         mount_html: `<div id="demo1"></div>`,
         setup: "",
-        slow: `console.log("noop");`,
-        fast: `console.log("noop");`,
+        before: `console.log("noop");`,
+        after: `console.log("noop");`,
       });
       expect(result.verdict).toBe("inconclusive");
       expect(result.verdict_reason).toBe("no-positive-evidence");
@@ -182,43 +182,43 @@ describe("Selakovic 2016 integration", () => {
         environment: "jsdom",
         mount_html: `<div id="demo1"></div>`,
         setup: "",
-        slow: `document.getElementById("demo1").innerHTML = "x";`,
-        fast: `document.getElementById("demo1").textContent = "x";`,
+        before: `document.getElementById("demo1").innerHTML = "x";`,
+        after: `document.getElementById("demo1").textContent = "x";`,
       });
       expect(result.verdict).toBe("equal");
       expect(result.observations.find((o) => o.oracle === "dom_mutation")?.verdict).toBe("equal");
     });
 
     it("C-9: cross-realm Error (vm context で生成) のメッセージが exception oracle に正しく載る", async () => {
-      const result = await checkEquivalence({ setup: "", slow: `throw new TypeError("boom");`, fast: `42` });
+      const result = await checkEquivalence({ setup: "", before: `throw new TypeError("boom");`, after: `42` });
       expect(result.verdict).toBe("not_equal");
-      expect(result.observations.find((o) => o.oracle === "exception")?.slow_value).toBe("TypeError: boom");
+      expect(result.observations.find((o) => o.oracle === "exception")?.before_value).toBe("TypeError: boom");
     });
 
     it("C-10: setup の const/let が body から見えて argument_mutation の pre/post 観測対象になる", async () => {
-      const result = await checkEquivalence({ setup: `const obj = { a: 1 };`, slow: `obj.a = 2;`, fast: `obj.a = 2;` });
+      const result = await checkEquivalence({ setup: `const obj = { a: 1 };`, before: `obj.a = 2;`, after: `obj.a = 2;` });
       expect(result.verdict).toBe("equal");
       // 観測されている (= obj が tracked) ことが要点。tracked でなければ N/A になる。
       expect(result.observations.find((o) => o.oracle === "argument_mutation")?.verdict).toBe("equal");
     });
 
     it("C-11: 片側が無限ループで timeout すると exception として捕捉され not_equal", async () => {
-      const result = await checkEquivalence({ setup: "", slow: `while (true) {}`, fast: `1`, timeout_ms: 200 });
+      const result = await checkEquivalence({ setup: "", before: `while (true) {}`, after: `1`, timeout_ms: 200 });
       expect(result.verdict).toBe("not_equal");
     });
 
     it("C-12: JSX を含む body は VM eval の SyntaxError として捕捉され not_equal", async () => {
-      const result = await checkEquivalence({ setup: "", slow: `<div/>`, fast: `1` });
+      const result = await checkEquivalence({ setup: "", before: `<div/>`, after: `1` });
       expect(result.verdict).toBe("not_equal");
-      expect(result.observations.find((o) => o.oracle === "exception")?.slow_value).toContain("SyntaxError");
+      expect(result.observations.find((o) => o.oracle === "exception")?.before_value).toContain("SyntaxError");
     });
 
-    it("C-13: workload が中間結果を捨てても C6 (interaction_trace) が slow/fast の差を検出する (angular-10351 の本質; checker のバグではない)", async () => {
+    it("C-13: workload が中間結果を捨てても C6 (interaction_trace) が before/after の差を検出する (angular-10351 の本質; checker のバグではない)", async () => {
       const result = await checkEquivalence({
         environment: "jsdom",
         setup: `var host = __recorder.wrap({ run: function (impl) { return impl(40); } }, "host");`,
-        slow: `(function () { host.run(function (n) { return n + 2; }); })()`,
-        fast: `(function () { host.run(function () { return undefined; }); })()`,
+        before: `(function () { host.run(function (n) { return n + 2; }); })()`,
+        after: `(function () { host.run(function () { return undefined; }); })()`,
       });
       expect(result.verdict).toBe("not_equal");
       expect(result.observations.find((o) => o.oracle === "interaction_trace")?.verdict).toBe("not_equal");

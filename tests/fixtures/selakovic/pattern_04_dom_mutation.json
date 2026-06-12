@@ -4,6 +4,6 @@
   "expected_verdict": "equal",
   "expected_primary_oracles": ["argument_mutation"],
   "setup": "const node = { attributes: {}, setAttribute(k, v) { this.attributes[k] = v; } }; const $node = { el: node, attr(k, v) { this.el.attributes[k] = v; return this; } };",
-  "slow": "$node.attr('id', 'hero'); node.attributes",
-  "fast": "node.setAttribute('id', 'hero'); node.attributes"
+  "before": "$node.attr('id', 'hero'); node.attributes",
+  "after": "node.setAttribute('id', 'hero'); node.attributes"
 }

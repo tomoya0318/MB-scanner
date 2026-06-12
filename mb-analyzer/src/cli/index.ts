@@ -31,7 +31,7 @@ async function main(): Promise<number> {
  * `process.exit()` 即座実行だと flush が間に合わず stdout が truncate される。
  * 解決策: `drain` イベントを `await` して書き残しを掃いてから `process.exit(code)` を呼ぶ。
  *
- * preprocess-selakovic で 1 issue から 100KB+ の slow/fast を返すケースに対応。
+ * preprocess-selakovic で 1 issue から 100KB+ の before/after を返すケースに対応。
  */
 async function waitForFlush(stream: NodeJS.WriteStream): Promise<void> {
   return new Promise<void>((resolve) => {

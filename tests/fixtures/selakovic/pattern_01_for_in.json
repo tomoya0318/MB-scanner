@@ -4,6 +4,6 @@
   "expected_verdict": "equal",
   "expected_primary_oracles": ["argument_mutation"],
   "setup": "const arr = [10, 20, 30]; const result = [];",
-  "slow": "for (const i in arr) { result.push(arr[i]); } result.length",
-  "fast": "for (let i = 0; i < arr.length; i++) { result.push(arr[i]); } result.length"
+  "before": "for (const i in arr) { result.push(arr[i]); } result.length",
+  "after": "for (let i = 0; i < arr.length; i++) { result.push(arr[i]); } result.length"
 }

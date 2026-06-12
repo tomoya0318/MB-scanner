@@ -3,7 +3,7 @@
  *
  * workload (`f1` / `test()`) が叩く境界オブジェクト (server: `init`/`setupTest` の戻り値、
  * client: 注入 service / workload が直接叩く framework global) を Proxy で包み、呼び出し列を
- * `TraceEntry[]` に記録する。slow/fast の trace を比較するのが C6。
+ * `TraceEntry[]` に記録する。before/after の trace を比較するのが C6。
  *
  * 判断: ai-guide/adr/0015-equivalence-checker-layering-and-dom-oracle.md
  * - `get` / `set` / `apply` / `construct` トラップのみ定義。他 (`has`/`ownKeys`/`getPrototypeOf`/...) は
@@ -70,7 +70,7 @@ const DOM_TEXT_MAX = 200;
  * trace に積む最大エントリ数 (それ以上は捨てる + 末尾に 1 件だけ `<trace-truncated>` を残す)。
  * react-895 系 (workload が 1000 ノード規模の component tree を構築し、`recurse:true` で wrap した
  * lib グローバルの呼び出し列が膨れる) で V8 の文字列上限を超えてプロセスごと落ちるのを防ぐ。
- * slow/fast 両方が同じ閾値で打ち切られるので、prefix が一致すれば C6 は `equal`、差があれば `not_equal` のまま。
+ * before/after 両方が同じ閾値で打ち切られるので、prefix が一致すれば C6 は `equal`、差があれば `not_equal` のまま。
  */
 const MAX_TRACE_ENTRIES = 2_000;
 

@@ -101,8 +101,8 @@ class TestPreprocessingCandidate:
         c = PreprocessingCandidate.model_validate(
             {
                 "setup": "var x=1;",
-                "slow": "x",
-                "fast": "x",
+                "before": "x",
+                "after": "x",
                 "enclosure_node_type": "FunctionExpression",
                 "candidate_meta": {
                     "adapter": "selakovic",
@@ -128,15 +128,15 @@ class TestPreprocessingCandidate:
             },
         )
         assert c.candidate_excluded == SelakovicExclusionReason.CHANGE_NOT_EXERCISED
-        assert c.slow is None
+        assert c.before is None
 
     def test_workload_default_none(self) -> None:
         """ADR-0023 D-β: workload は changed-fn 経路でのみ非 None、旧経路は None"""
         c = PreprocessingCandidate.model_validate(
             {
                 "setup": "var x=1;",
-                "slow": "x",
-                "fast": "x",
+                "before": "x",
+                "after": "x",
                 "candidate_meta": {
                     "adapter": "selakovic",
                     "target_side": "lib",
@@ -150,8 +150,8 @@ class TestPreprocessingCandidate:
         """Placeholder substitution + 4 値契約 (changed-fn 経路) の workload を round-trip"""
         payload = {
             "setup": "var lib = { f: function () { $BODY$ } };",
-            "slow": "__OBS__.push(1); return 1;",
-            "fast": "__OBS__.push(2); return 2;",
+            "before": "__OBS__.push(1); return 1;",
+            "after": "__OBS__.push(2); return 2;",
             "workload": "(function(){ __OBS__ = []; lib.f(); return JSON.stringify(__OBS__); })()",
             "candidate_meta": {
                 "adapter": "selakovic",
@@ -173,8 +173,8 @@ class TestPreprocessingIssueResult:
                 "candidates": [
                     {
                         "setup": "var x=1;",
-                        "slow": "x",
-                        "fast": "x",
+                        "before": "x",
+                        "after": "x",
                         "candidate_meta": {
                             "adapter": "selakovic",
                             "target_side": "workload",

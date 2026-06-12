@@ -5,16 +5,16 @@ import { walkNodes } from "../../ast/walk";
 
 /**
  * enclosure を含む最も近い Program 直下の statement で AST を分割し、
- * 「slow/fast に渡す statement」と「setup として渡す前置 statement 列」を返す。
+ * 「before/after に渡す statement」と「setup として渡す前置 statement 列」を返す。
  *
  * 切り方の根拠 (plan.md §抽出器の設計 Step 3):
- * - slow/fast は「enclosure を含む top-level statement」 (例: `var f1 = function () { ... };`
+ * - before/after は「enclosure を含む top-level statement」 (例: `var f1 = function () { ... };`
  *   のような変数宣言全体)
  * - setup は「その statement より前の statement 列」 = ファイル先頭 〜 enclosure 直前
  * - enclosure 直後の statement (jsperf の `execute(f1)` などの報告コード) は捨てる
  *
  * これにより:
- * 1. setup と slow/fast の意味論が分離される (setup には enclosure 関数の宣言が残らない)
+ * 1. setup と before/after の意味論が分離される (setup には enclosure 関数の宣言が残らない)
  * 2. 報告系ノイズ (execute / jStat / $.ajax) が自動除外される
  * 3. server 系の Step 4 浄化が statement 分割で自動的に達成される
  *
@@ -23,7 +23,7 @@ import { walkNodes } from "../../ast/walk";
  */
 export interface SplitResult {
   readonly setupStatements: readonly Statement[];
-  readonly slowStatement: Statement;
+  readonly beforeStatement: Statement;
   readonly statementIndex: number;
 }
 
@@ -35,7 +35,7 @@ export function splitAtEnclosure(ast: File, enclosure: Node): SplitResult | null
     if (containsNode(stmt, enclosure)) {
       return {
         setupStatements: programBody.slice(0, i),
-        slowStatement: stmt,
+        beforeStatement: stmt,
         statementIndex: i,
       };
     }
@@ -64,7 +64,7 @@ export function containsNode(root: Node, target: Node): boolean {
  *
  * コメントは出力しない: `File.comments=[]` だけだと Node に attach された
  * leadingComments / trailingComments は @babel/generator が依然出力するため、
- * generate 側に明示的に `{ comments: false }` を渡す。preprocess の slow/fast/setup
+ * generate 側に明示的に `{ comments: false }` を渡す。preprocess の before/after/setup
  * は元 lib のコメントを引きずる必要が無い (むしろ candidate サイズが膨らむ)。
  */
 export function statementsToCode(statements: readonly Statement[]): string {

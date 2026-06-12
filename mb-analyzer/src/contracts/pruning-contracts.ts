@@ -33,8 +33,8 @@ export type ExecutionEnvironmentHint = "vm" | "jsdom";
 
 export interface PruningInput {
   id?: string;
-  slow: string;
-  fast: string;
+  before: string;
+  after: string;
   setup?: string;
   timeout_ms?: number;
   max_iterations?: number;
@@ -64,8 +64,8 @@ export interface PruningResult {
   pattern_code?: string;
   placeholders?: Placeholder[];
   iterations?: number;
-  node_count_before?: number;
-  node_count_after?: number;
+  node_count_initial?: number;
+  node_count_pruned?: number;
   effective_timeout_ms?: number;
   error_message?: string | null;
 }

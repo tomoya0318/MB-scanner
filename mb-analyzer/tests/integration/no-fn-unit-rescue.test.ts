@@ -46,8 +46,8 @@ describe("no-fn-unit rescue (順 1-d) — changed-stmt end-to-end verdict", () =
 
     const result = await checkEquivalence({
       setup: candidate.setup!,
-      slow: candidate.slow!,
-      fast: candidate.fast!,
+      before: candidate.before!,
+      after: candidate.after!,
       workload: candidate.workload!,
       timeout_ms: 5000,
     });

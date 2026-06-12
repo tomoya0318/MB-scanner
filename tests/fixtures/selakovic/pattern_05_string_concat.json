@@ -4,6 +4,6 @@
   "expected_verdict": "equal",
   "expected_primary_oracles": ["return_value"],
   "setup": "const arr = ['foo', 'bar', 'baz'];",
-  "slow": "let s = ''; arr.forEach(x => { s += x; }); s",
-  "fast": "arr.join('')"
+  "before": "let s = ''; arr.forEach(x => { s += x; }); s",
+  "after": "arr.join('')"
 }

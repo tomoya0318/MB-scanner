@@ -57,8 +57,8 @@ def _build_input(
     *,
     input_path: Path | None,
     setup: str | None,
-    slow: str | None,
-    fast: str | None,
+    before: str | None,
+    after: str | None,
     timeout_ms: int,
 ) -> EquivalenceInput:
     if input_path is not None:
@@ -69,21 +69,21 @@ def _build_input(
         payload: dict[str, Any] = dict(cast("dict[str, Any]", raw))
         if setup is not None:
             payload["setup"] = setup
-        if slow is not None:
-            payload["slow"] = slow
-        if fast is not None:
-            payload["fast"] = fast
+        if before is not None:
+            payload["before"] = before
+        if after is not None:
+            payload["after"] = after
         payload.setdefault("timeout_ms", timeout_ms)
         return EquivalenceInput.model_validate(payload)
 
-    if slow is None or fast is None:
+    if before is None or after is None:
         raise typer.BadParameter(
-            "Either --input FILE or both --slow and --fast must be provided.",
+            "Either --input FILE or both --before and --after must be provided.",
         )
     return EquivalenceInput(
         setup=setup or "",
-        slow=slow,
-        fast=fast,
+        before=before,
+        after=after,
         timeout_ms=timeout_ms,
     )
 
@@ -199,12 +199,12 @@ def check_equivalence(
         typer.Option(
             "--input",
             "-i",
-            help='入力 JSON ファイル (`{"setup","slow","fast","timeout_ms"}`)',
+            help='入力 JSON ファイル (`{"setup","before","after","timeout_ms"}`)',
         ),
     ] = None,
     setup: Annotated[str | None, typer.Option("--setup", help="setup コード断片")] = None,
-    slow: Annotated[str | None, typer.Option("--slow", help="slow コード断片")] = None,
-    fast: Annotated[str | None, typer.Option("--fast", help="fast コード断片")] = None,
+    before: Annotated[str | None, typer.Option("--before", help="before コード断片")] = None,
+    after: Annotated[str | None, typer.Option("--after", help="after コード断片")] = None,
     timeout_ms: Annotated[
         int,
         typer.Option("--timeout-ms", help="sandbox 内部タイムアウト (ms)"),
@@ -214,7 +214,7 @@ def check_equivalence(
         typer.Option("--output", "-o", help="結果 JSON を書き出すファイル（未指定で stdout）"),
     ] = None,
 ) -> None:
-    """1 トリプル (setup, slow, fast) を Node ランナーで検証し、結果を JSON で出力する。
+    """1 トリプル (setup, before, after) を Node ランナーで検証し、結果を JSON で出力する。
 
     終了コード: equal=0 / not_equal=1 / inconclusive=2 / error=3 (入力パース失敗も 3)
     """
@@ -222,8 +222,8 @@ def check_equivalence(
         input_model = _build_input(
             input_path=input_path,
             setup=setup,
-            slow=slow,
-            fast=fast,
+            before=before,
+            after=after,
             timeout_ms=timeout_ms,
         )
     except (json.JSONDecodeError, ValueError) as e:

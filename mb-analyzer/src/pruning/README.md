@@ -1,10 +1,10 @@
 # pruning
 
-構造パターン導出エンジン。`(slow, fast, setup)` トリプルから **ワイルドカード付きの最小構造パターン** を出力する。公開エントリポイントは `index.ts` の `prune`（= `selakovic/pruner.ts` → `common/engine.ts`）。
+構造パターン導出エンジン。`(before, after, setup)` トリプルから **ワイルドカード付きの最小構造パターン** を出力する。公開エントリポイントは `index.ts` の `prune`（= `selakovic/pruner.ts` → `common/engine.ts`）。
 
 `preprocessing/` / `equivalence-checker/` と対称の二層構成（ESLint `import/no-restricted-paths` で機械強制）:
 
-- **`common/`** — dataset 非依存の pruning アルゴリズム本体。候補列挙（AST 差分フィルタ）と iterate&revert ループ。「この slow 変種はまだ等価か」を判定するための等価検証関数を **DI（`PruneDeps`）で受け取る** だけで、`equivalence-checker/` を直接知らない。`common/` は `pruning/selakovic` も `equivalence-checker` も import しない。
+- **`common/`** — dataset 非依存の pruning アルゴリズム本体。候補列挙（AST 差分フィルタ）と iterate&revert ループ。「この before 変種はまだ等価か」を判定するための等価検証関数を **DI（`PruneDeps`）で受け取る** だけで、`equivalence-checker/` を直接知らない。`common/` は `pruning/selakovic` も `equivalence-checker` も import しない。
 - **`selakovic/`** — dataset adapter。`equivalence-checker` の `checkEquivalence` を bind して `common/engine.prune()` に注入する薄い層。等価検証の実行環境（`environment` / `module_base_dir` / `mount_html`）といった dataset 固有の事情はこの層が `checkEquivalence` への呼び出しに閉じ込める。
 
 「主軸（pruning など）は論文 / dataset 非依存」というルールを構造で担保するための分割: `common/` がアルゴリズム、`selakovic/` が dataset の事情を closure に閉じ込める層。`equivalence-checker/common ↔ selakovic` と完全に対称。
@@ -20,8 +20,8 @@ CLI ラッパは `mb-analyzer/src/cli/prune.ts` (`runPrune` / `runPruneBatch`、
 ```ts
 interface PruningInput {
   id?: string;                // バッチ API での順序追跡用 (省略可)
-  slow: string;               // 元コード (検証対象、必須)
-  fast: string;               // パッチ後コード (検証対象、必須)
+  before: string;               // 元コード (検証対象、必須)
+  after: string;               // パッチ後コード (検証対象、必須)
   setup?: string;             // 両側で共通の事前定義コード (省略時 "")
   timeout_ms?: number;        // 1 回の checkEquivalence 上限 (default 5000)
   max_iterations?: number;    // L4 (Hydra 実行) の試行上限 (default 1000)
@@ -40,8 +40,8 @@ interface PruningResult {
   pattern_code?: string;      // generate(pattern_ast) の出力 (人間可読形)
   placeholders?: Placeholder[];
   iterations?: number;        // 実消費した L4 試行回数
-  node_count_before?: number;
-  node_count_after?: number;
+  node_count_initial?: number;
+  node_count_pruned?: number;
   effective_timeout_ms?: number;
   error_message?: string | null;
 }
@@ -49,7 +49,7 @@ interface PruningResult {
 interface Placeholder {
   id: string;                 // "$P0", "$P1", ... (3 カテゴリ共通の連番)
   kind: "statement" | "expression" | "identifier";
-  original_snippet: string;   // 置換前の slow コード片 (第 2 段階で参照)
+  original_snippet: string;   // 置換前の before コード片 (第 2 段階で参照)
 }
 ```
 
@@ -58,8 +58,8 @@ verdict ごとの付与フィールド:
 | verdict | 付与されるフィールド | 意味 |
 |---|---|---|
 | `pruned` | `pattern_ast` / `pattern_code` / `placeholders` / `iterations` / `node_count_*` | pruning 完走、最小パターン確定 |
-| `initial_mismatch` | `node_count_before` のみ | 初回検証で slow ≢ fast、pruning を回さず停止 |
-| `error` | `error_message` (+ 部分的に `node_count_before`) | parse 失敗 / 等価性検証 error / setup runtime error |
+| `initial_mismatch` | `node_count_initial` のみ | 初回検証で before ≢ after、pruning を回さず停止 |
+| `error` | `error_message` (+ 部分的に `node_count_initial`) | parse 失敗 / 等価性検証 error / setup runtime error |
 
 ### 3 カテゴリ placeholder の見え方 (ADR-0009)
 
@@ -75,10 +75,10 @@ verdict ごとの付与フィールド:
 
 ### 元コード衝突の扱い
 
-入力 slow / fast に `/^\$P\d+$/` 形の Identifier が含まれていると、placeholder と AST 上で区別不能になる。`prune()` は parse 直後に walk して該当 Identifier があれば **stderr に warning を出す** が、pruning 動作は変えない (ADR-0009 §元コード衝突):
+入力 before / after に `/^\$P\d+$/` 形の Identifier が含まれていると、placeholder と AST 上で区別不能になる。`prune()` は parse 直後に walk して該当 Identifier があれば **stderr に warning を出す** が、pruning 動作は変えない (ADR-0009 §元コード衝突):
 
 ```
-warning: input (slow) contains identifier "$P0" which collides with internal placeholder format. pruning may produce ambiguous results.
+warning: input (before) contains identifier "$P0" which collides with internal placeholder format. pruning may produce ambiguous results.
 ```
 
 副作用として、入力中の `$Pn` Identifier は `common/candidates.ts:isPlaceholderNode` フィルタにより候補から除外される (= pruning では触らない)。判別不能 risk はユーザー責任で許容する設計。
@@ -110,7 +110,7 @@ AST toolbox 本体は **`src/ast/`** に集約 (機能間で共有、pruning 知
 | `parser.ts` | parse / generate / tryGenerateNode (Babel ラッパ) |
 | `walk.ts` | walkNodes / isNode (VISITOR_KEYS ベースの DFS 走査) |
 | `inspect.ts` | countNodes / nodeSize / snippetOfNode (read-only AST 検査) |
-| `subtree-hash.ts` | `SubtreeSet` (top-down subtree hash で fast 所属判定) + `canonicalHash` |
+| `subtree-hash.ts` | `SubtreeSet` (top-down subtree hash で after 所属判定) + `canonicalHash` |
 
 層の役割分担:
 

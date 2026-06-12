@@ -20,10 +20,10 @@ import type { F1Decomposition } from "../../decompose/f1";
  * を 1st-class candidate に格上げする strategy (順 1-d、no-fn-unit rescue)。`changed-fn.ts` の stmt 版で、
  * ファイル配置を `changed-fn` と対称にしている。
  *
- *  - `lib_after` 内の対応 stmt span を `$BODY$` で hole 置換 (slow/fast がここに差し込まれる)
+ *  - `lib_after` 内の対応 stmt span を `$BODY$` で hole 置換 (before/after がここに差し込まれる)
  *  - **workload から到達可能な named fn 全部の本体を observer ラッパで計装** (`wrapBodyWithObserver`)。
  *    これにより workload (`f1`) 実行時、reachable fn が呼ばれるたびに戻り値が `__OBS__` に push される
- *  - slow/fast は before/after stmt の `statementToCode` 出力 (= 裸 stmt、観測足場は load しない)
+ *  - before/after は before/after stmt の `statementToCode` 出力 (= 裸 stmt、観測足場は load しない)
  *  - workload = `wrapObservedWorkload(f1Body)`
  *  - adapter_meta: target_side=lib / is_workload_reachable=true
  *
@@ -89,14 +89,14 @@ export function buildChangedStmtCandidate(
   const holedLib = applySpanEdits(libAfterSrc, edits);
   const preWorkload = statementsToCode([...f1Decomposition.preWorkloadStatements]);
   const setup = [holedLib, preWorkload].filter((s) => s.length > 0).join("\n;\n");
-  const slow = statementToCode(unit.stmt as Statement);
-  const fast = statementToCode(afterStmt as Statement);
+  const before = statementToCode(unit.stmt as Statement);
+  const after = statementToCode(afterStmt as Statement);
   const workload = wrapObservedWorkload(statementsToCode([...f1Decomposition.f1Body.body]));
 
   return {
     setup,
-    slow,
-    fast,
+    before,
+    after,
     workload,
     enclosure_node_type: (unit.stmt as { type: string }).type,
     before_node_count: countNodes(unit.stmt),
@@ -232,19 +232,19 @@ if (import.meta.vitest) {
       expect(r.setup).not.toContain("'1.0'");
       expect(r.setup).not.toContain("'2.0'");
 
-      // slow / fast は裸 stmt (観測足場は load しない)
-      expect(r.slow).toContain("'1.0'");
-      expect(r.fast).toContain("'2.0'");
-      expect(r.slow).not.toContain("__OBS_R__");
-      expect(r.fast).not.toContain("__OBS_R__");
+      // before / after は裸 stmt (観測足場は load しない)
+      expect(r.before).toContain("'1.0'");
+      expect(r.after).toContain("'2.0'");
+      expect(r.before).not.toContain("__OBS_R__");
+      expect(r.after).not.toContain("__OBS_R__");
 
       // workload: __OBS__ 初期化 + f1 body + JSON.stringify(__OBS__)
       expect(r.workload).toContain("__OBS__ = [];");
       expect(r.workload).toContain("lib.foo()");
       expect(r.workload).toContain("return JSON.stringify(__OBS__);");
 
-      // substituteBody(setup, slow) は valid JS として parse できる (= sandbox 投入直前形)
-      const substituted = substituteBody(r.setup!, r.slow!);
+      // substituteBody(setup, before) は valid JS として parse できる (= sandbox 投入直前形)
+      const substituted = substituteBody(r.setup!, r.before!);
       expect(() => parse(substituted)).not.toThrow();
     });
 
@@ -269,22 +269,22 @@ if (import.meta.vitest) {
       const r = buildChangedStmtCandidate(unit, before, after, f1d, graph);
 
       expect(r.candidate_excluded).toBeUndefined();
-      // fast は after の 2 回目 (= 'bar')、誤って 1 回目 ('var X = 1') を拾っていないこと
-      expect(r.fast).toContain("'bar'");
-      expect(r.fast).not.toContain("= 1");
+      // after は after の 2 回目 (= 'bar')、誤って 1 回目 ('var X = 1') を拾っていないこと
+      expect(r.after).toContain("'bar'");
+      expect(r.after).not.toContain("= 1");
       // setup には after の 1 回目 (var X = 1) が残り、2 回目が $BODY$ で穴あき
       expect(r.setup).toContain("var X = 1;");
       expect(r.setup).not.toContain("'bar'");
     });
 
-    it("buildExcludedChangedStmtCandidate: setup/slow/fast 無し + target_side=lib / is_workload_reachable=false", () => {
+    it("buildExcludedChangedStmtCandidate: setup/before/after 無し + target_side=lib / is_workload_reachable=false", () => {
       const c = buildExcludedChangedStmtCandidate(SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED);
       expect(c.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED);
       expect(c.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
       expect(c.candidate_meta.is_workload_reachable).toBe(false);
       expect(c.setup).toBeUndefined();
-      expect(c.slow).toBeUndefined();
-      expect(c.fast).toBeUndefined();
+      expect(c.before).toBeUndefined();
+      expect(c.after).toBeUndefined();
       expect(c.workload).toBeUndefined();
     });
   });

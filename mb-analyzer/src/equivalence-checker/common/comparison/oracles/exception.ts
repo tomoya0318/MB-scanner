@@ -5,7 +5,7 @@ import type { ExceptionCapture, ExecutionCapture } from "../../sandbox/capture/t
 export interface ExceptionProfile {
   /**
    * 比較前に ctor / message に適用する `[RegExp, replacement]` 群。
-   * 例: Selakovic dataset は slow/fast を `<lib>_before/`/`<lib>_after/` の別 dir に置くので
+   * 例: Selakovic dataset は before/after を `<lib>_before/`/`<lib>_after/` の別 dir に置くので
    * `Cannot find module './backbone_before/...'` vs `'./backbone_after/...'` のように message に
    * 配置 artifact が混じる → `_(before|after)` を除去して「両側同じく落ちた」と正しく判定する。
    */
@@ -22,13 +22,13 @@ const EMPTY_PROFILE: ExceptionProfile = {};
  * - 片方だけ例外 → not_equal
  */
 export function checkException(
-  slow: ExecutionCapture,
-  fast: ExecutionCapture,
+  before: ExecutionCapture,
+  after: ExecutionCapture,
   profile: ExceptionProfile = EMPTY_PROFILE,
 ): OracleObservation {
   const oracle = ORACLE.EXCEPTION;
-  const se = slow.exception;
-  const fe = fast.exception;
+  const se = before.exception;
+  const fe = after.exception;
   const patterns = profile.normalizeMessagePatterns ?? [];
   const norm = (s: string): string => patterns.reduce((acc, [re, repl]) => acc.replace(re, repl), s);
 
@@ -44,15 +44,15 @@ export function checkException(
       return {
         oracle,
         verdict: ORACLE_VERDICT.EQUAL,
-        slow_value: formatException(se),
-        fast_value: formatException(fe),
+        before_value: formatException(se),
+        after_value: formatException(fe),
       };
     }
     return {
       oracle,
       verdict: ORACLE_VERDICT.NOT_EQUAL,
-      slow_value: formatException(se),
-      fast_value: formatException(fe),
+      before_value: formatException(se),
+      after_value: formatException(fe),
       detail:
         sCtor !== fCtor
           ? `different exception type: ${se.ctor} vs ${fe.ctor}`
@@ -62,9 +62,9 @@ export function checkException(
   return {
     oracle,
     verdict: ORACLE_VERDICT.NOT_EQUAL,
-    slow_value: se ? formatException(se) : null,
-    fast_value: fe ? formatException(fe) : null,
-    detail: se ? "only slow threw an exception" : "only fast threw an exception",
+    before_value: se ? formatException(se) : null,
+    after_value: fe ? formatException(fe) : null,
+    detail: se ? "only before threw an exception" : "only after threw an exception",
   };
 }
 
@@ -77,7 +77,7 @@ if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
   // 観点: 両側の throw 状況と例外 ctor + (正規化後の) message を比較。両側正常 → N/A、両側 throw で一致 → equal、
   // ctor / message 差 → not_equal、片側だけ throw → not_equal。
-  // 統合観点: dataset が slow/fast を `<lib>_before/` `<lib>_after/` の別 dir に置くと
+  // 統合観点: dataset が before/after を `<lib>_before/` `<lib>_after/` の別 dir に置くと
   // `Cannot find module './backbone_before/...'` vs `'./backbone_after/...'` の message 差が偽 not_equal を生む
   // (backbone-1097/2858/707 / mocha-763)。`normalizeMessagePatterns` で `_(before|after)` を除去すると一致する。
   const cap = (o: Partial<ExecutionCapture> = {}): ExecutionCapture => ({
@@ -119,7 +119,7 @@ if (import.meta.vitest) {
     it("片方だけ例外 → not_equal (detail に which side)", () => {
       const obs = checkException(cap({ exception: { ctor: "Error", message: "x" } }), cap());
       expect(obs.verdict).toBe("not_equal");
-      expect(obs.detail).toContain("only slow");
+      expect(obs.detail).toContain("only before");
     });
 
     it("normalizeMessagePatterns で `_before`/`_after` を消すと両側同じく落ちたと判定 → equal", () => {

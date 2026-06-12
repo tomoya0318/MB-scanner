@@ -14,7 +14,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-# ADR-0022 (workload-reachability) の changed-fn candidate は ``slow``/``fast`` は小さい (= 変更関数本体 + workload)
+# ADR-0022 (workload-reachability) の changed-fn candidate は ``before``/``after`` は小さい (= 変更関数本体 + workload)
 # が ``setup`` に lib 全文 (Ember 1.x ≈ 1.5MB + 依存 lib jquery/handlebars) を丸ごと残すので上限は大きめに取る。
 # ``EquivalenceInput.MAX_CODE_LENGTH`` (= 20MB) と揃える — equiv を通った candidate は prune にも回せるべき。
 MAX_CODE_LENGTH = 20_000_000
@@ -47,7 +47,7 @@ class PlaceholderKind(StrEnum):
 class Placeholder(BaseModel):
     """pruning の結果 AST に差し込まれるワイルドカード
 
-    ``original_snippet`` は置換前の slow コード片をそのまま保持し、第 2 段階で参照する。
+    ``original_snippet`` は置換前の before コード片をそのまま保持し、第 2 段階で参照する。
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -76,8 +76,8 @@ class PruningInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str | None = None
-    slow: str = Field(max_length=MAX_CODE_LENGTH)
-    fast: str = Field(max_length=MAX_CODE_LENGTH)
+    before: str = Field(max_length=MAX_CODE_LENGTH)
+    after: str = Field(max_length=MAX_CODE_LENGTH)
     setup: str = Field(default="", max_length=MAX_CODE_LENGTH)
     timeout_ms: int = Field(default=DEFAULT_TIMEOUT_MS, ge=MIN_TIMEOUT_MS, le=MAX_TIMEOUT_MS)
     max_iterations: int = Field(default=DEFAULT_MAX_ITERATIONS, ge=MIN_MAX_ITERATIONS, le=MAX_MAX_ITERATIONS)
@@ -93,12 +93,12 @@ class PruningInput(BaseModel):
 
 
 class PruningResult(BaseModel):
-    """1 (slow, fast, setup) トリプルに対する pruning 最終結果
+    """1 (before, after, setup) トリプルに対する pruning 最終結果
 
     verdict ごとに Node 側実装が **付与する想定** のフィールドは以下（スキーマでは任意）:
 
     - ``verdict == PRUNED``: ``pattern_ast`` / ``pattern_code`` / ``placeholders`` / ``iterations`` を付与
-    - ``verdict == INITIAL_MISMATCH``: slow ≢ fast のため pruning 前段で停止、pattern 系は付与しない
+    - ``verdict == INITIAL_MISMATCH``: before ≢ after のため pruning 前段で停止、pattern 系は付与しない
     - ``verdict == ERROR``: parse 失敗やタイムアウトなど予期しない失敗。``error_message`` を付与
 
     スキーマ上は全て optional であり、verdict に応じた条件付き必須チェックは行わない
@@ -118,7 +118,7 @@ class PruningResult(BaseModel):
     pattern_code: str | None = None
     placeholders: list[Placeholder] = Field(default_factory=list[Placeholder])
     iterations: int | None = None
-    node_count_before: int | None = None
-    node_count_after: int | None = None
+    node_count_initial: int | None = None
+    node_count_pruned: int | None = None
     effective_timeout_ms: int | None = None
     error_message: str | None = None

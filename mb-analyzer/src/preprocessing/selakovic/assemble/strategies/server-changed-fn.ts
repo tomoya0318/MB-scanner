@@ -20,7 +20,7 @@ import { buildExcludedChangedFnCandidate } from "./changed-fn";
 /**
  * server (CommonJS) layout の changed-fn candidate を組む (ADR-0025、placeholder substitution model)。
  *
- * client `buildChangedFnCandidate` と同じ「変更関数 body を `$BODY$` 穴あけ → slow/fast に裸 body」モデルを、
+ * client `buildChangedFnCandidate` と同じ「変更関数 body を `$BODY$` 穴あけ → before/after に裸 body」モデルを、
  * CommonJS `module.exports`/`require` 構造を保ったまま server の `test_case_*.js` 経路に乗せる。
  *
  * **module 解決 (map-require)**: lib の全 after ファイルを in-memory map に持ち、相対 require を map 上で解決する
@@ -48,7 +48,7 @@ export function buildServerChangedFnCandidate(params: {
   otherAfterFiles: Record<string, string>;
   /** lib の entry ファイルの map キー (multi-file は通常 `index.js`、single-file は変更ファイルと同じ)。 */
   entryKey: string;
-  /** after 側 `test_case_*.js` 全文 (slow/fast 共通の workload)。 */
+  /** after 側 `test_case_*.js` 全文 (before/after 共通の workload)。 */
   testCaseSource: string;
 }): PreprocessingCandidate {
   const { unit, changedFileKey, changedFileAfterSrc, otherAfterFiles, entryKey, testCaseSource } = params;
@@ -80,13 +80,13 @@ export function buildServerChangedFnCandidate(params: {
     start: afterBody.start,
     end: afterBody.end,
   });
-  const slow = statementsToCode(beforeBodyStatements);
-  const fast = statementsToCode(afterBody.body as readonly Statement[]);
+  const before = statementsToCode(beforeBodyStatements);
+  const after = statementsToCode(afterBody.body as readonly Statement[]);
 
   return {
     setup: buildMapRequireSetup(otherAfterFiles, changedFileKey, holedSrc, entryKey),
-    slow,
-    fast,
+    before,
+    after,
     workload: buildServerObservedWorkload(testCaseSource),
     before_node_count: countNodes(beforeBody as unknown as Node),
     after_node_count: countNodes(afterBody as unknown as Node),
@@ -212,7 +212,7 @@ if (import.meta.vitest) {
   const { substituteBody, declareObservationGlobal } = await import("../../../../codegen/placeholder");
   // 観点: single-file / multi-file CommonJS lib の変更関数を map-require + 2 チャネル観測 workload で 4 値契約に組む。
   // setup = map-require ランタイム ($BODY$ 1 個 + 観測ハーネス入り穴あきファイル + __SUT__ ロード)。
-  // slow/fast = 変更前/後 body 裸断片。workload = test_case を __SUT__ に繋ぎ post-state(s) + 戻り値(r) を返す。
+  // before/after = 変更前/後 body 裸断片。workload = test_case を __SUT__ に繋ぎ post-state(s) + 戻り値(r) を返す。
   // rename/削除・param 本質変更は excluded marker。
 
   const libBefore = `var lib = module.exports;\nlib.run = function () { return wrap(function self() { return 1; }); };`;
@@ -227,7 +227,7 @@ if (import.meta.vitest) {
   };
 
   describe("buildServerChangedFnCandidate (in-source)", () => {
-    it("single-file: map-require setup ($BODY$ 1 個 + __SUT__) / 裸 body slow·fast / 2 チャネル観測 workload", () => {
+    it("single-file: map-require setup ($BODY$ 1 個 + __SUT__) / 裸 body before·after / 2 チャネル観測 workload", () => {
       const unit = fnUnitFor(libBefore, libAfter, "self");
       const c = buildServerChangedFnCandidate({
         unit,
@@ -249,10 +249,10 @@ if (import.meta.vitest) {
       expect((c.setup!.match(/\$BODY\$/g) ?? []).length).toBe(1);
       expect(c.setup).toContain("let __OBS_R__");
 
-      // slow/fast: 裸 body
-      expect(c.slow).toContain("return 1;");
-      expect(c.slow).not.toContain("__OBS_R__");
-      expect(c.fast).toContain("return 2;");
+      // before/after: 裸 body
+      expect(c.before).toContain("return 1;");
+      expect(c.before).not.toContain("__OBS_R__");
+      expect(c.after).toContain("return 2;");
 
       // workload: __SUT__ 差し替え + 2 チャネル (r/s) + safe-walk
       expect(c.workload).toContain("return globalThis.__SUT__;");
@@ -262,7 +262,7 @@ if (import.meta.vitest) {
       expect(c.workload).toContain("return JSON.stringify({ r: __OBS__, s: __s__ });");
 
       // sandbox 投入直前形が valid JS
-      expect(() => parse(declareObservationGlobal(substituteBody(c.setup!, c.slow!)))).not.toThrow();
+      expect(() => parse(declareObservationGlobal(substituteBody(c.setup!, c.before!)))).not.toThrow();
       expect(() => parse(`var _ = ${c.workload!};`)).not.toThrow();
     });
 

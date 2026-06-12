@@ -48,8 +48,8 @@ class TestPruneBatchMocked:
     def test_missing_bundle_returns_error_per_item(self, tmp_path: Path) -> None:
         gw = _gateway(tmp_path / "nonexistent.js")
         items = [
-            PruningInput(id="a", slow="1", fast="1"),
-            PruningInput(id="b", slow="1", fast="1"),
+            PruningInput(id="a", before="1", after="1"),
+            PruningInput(id="b", before="1", after="1"),
         ]
         results = gw.prune_batch(items)
         assert len(results) == 2
@@ -71,9 +71,9 @@ class TestPruneBatchMocked:
             gw = _gateway(fake_cli)
             results = gw.prune_batch(
                 [
-                    PruningInput(id="a", slow="1", fast="1"),
-                    PruningInput(id="b", slow="1", fast="2"),
-                    PruningInput(id="c", slow="3", fast="3"),
+                    PruningInput(id="a", before="1", after="1"),
+                    PruningInput(id="b", before="1", after="2"),
+                    PruningInput(id="c", before="3", after="3"),
                 ],
             )
 
@@ -101,8 +101,8 @@ class TestPruneBatchMocked:
             gw = _gateway(fake_cli)
             gw.prune_batch(
                 [
-                    PruningInput(id="a", slow="1", fast="1"),  # デフォルト値が乗る
-                    PruningInput(id="b", slow="1", fast="1", timeout_ms=1000, max_iterations=20),
+                    PruningInput(id="a", before="1", after="1"),  # デフォルト値が乗る
+                    PruningInput(id="b", before="1", after="1", timeout_ms=1000, max_iterations=20),
                 ],
             )
 
@@ -133,8 +133,8 @@ class TestPruneBatchMocked:
             gw = _gateway(fake_cli)
             gw.prune_batch(
                 [
-                    PruningInput(id="a", slow="1", fast="1", timeout_ms=1000, max_iterations=5),
-                    PruningInput(id="b", slow="1", fast="1", timeout_ms=2000, max_iterations=3),
+                    PruningInput(id="a", before="1", after="1", timeout_ms=1000, max_iterations=5),
+                    PruningInput(id="b", before="1", after="1", timeout_ms=2000, max_iterations=3),
                 ],
             )
 
@@ -153,8 +153,8 @@ class TestPruneBatchMocked:
             gw = _gateway(fake_cli)
             results = gw.prune_batch(
                 [
-                    PruningInput(id="a", slow="1", fast="1"),
-                    PruningInput(id="b", slow="1", fast="1"),
+                    PruningInput(id="a", before="1", after="1"),
+                    PruningInput(id="b", before="1", after="1"),
                 ],
             )
         assert [r.verdict for r in results] == [PruningVerdict.ERROR, PruningVerdict.ERROR]
@@ -167,7 +167,7 @@ class TestPruneBatchMocked:
         with patch.object(subprocess, "run", return_value=completed):
             gw = _gateway(fake_cli)
             results = gw.prune_batch(
-                [PruningInput(id="a", slow="1", fast="1")],
+                [PruningInput(id="a", before="1", after="1")],
             )
         assert results[0].verdict is PruningVerdict.ERROR
         assert results[0].error_message is not None
@@ -183,8 +183,8 @@ class TestPruneBatchMocked:
             gw = _gateway(fake_cli)
             results = gw.prune_batch(
                 [
-                    PruningInput(id="a", slow="1", fast="1"),
-                    PruningInput(id="b", slow="1", fast="1"),
+                    PruningInput(id="a", before="1", after="1"),
+                    PruningInput(id="b", before="1", after="1"),
                 ],
             )
         assert results[0].id == "a"
@@ -219,7 +219,7 @@ class TestPruneBatchMocked:
 
         with patch.object(subprocess, "run", side_effect=fake_run):
             gw = _gateway(fake_cli)
-            results = gw.prune_batch([PruningInput(slow="1", fast="1")])
+            results = gw.prune_batch([PruningInput(before="1", after="1")])
         assert captured["key"].startswith("__mb_prune_batch_idx__")
         assert results[0].id is None
         assert results[0].verdict is PruningVerdict.PRUNED
@@ -230,7 +230,7 @@ class TestPruneBatchMocked:
         fake_cli.write_text("// stub")
         gw = _gateway(fake_cli)
         with pytest.raises(ValueError, match="reserved prefix"):
-            gw.prune_batch([PruningInput(id="__mb_prune_batch_idx__evil", slow="1", fast="1")])
+            gw.prune_batch([PruningInput(id="__mb_prune_batch_idx__evil", before="1", after="1")])
 
     def test_effective_timeout_ms_mismatch_is_warned(self, tmp_path: Path) -> None:
         """Node が異なる timeout_ms で実行していた場合に警告を error_message に注入する"""
@@ -241,7 +241,7 @@ class TestPruneBatchMocked:
         with patch.object(subprocess, "run", return_value=completed):
             gw = _gateway(fake_cli)
             results = gw.prune_batch(
-                [PruningInput(id="a", slow="1", fast="1", timeout_ms=1000)],
+                [PruningInput(id="a", before="1", after="1", timeout_ms=1000)],
             )
         assert results[0].error_message is not None
         assert "timeout_ms mismatch" in results[0].error_message

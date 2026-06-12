@@ -1,6 +1,6 @@
 # preprocessing
 
-データセットの 1 issue (before/after パッチペア) を、等価検証・pruning が食える **`(setup, slow, fast)` candidate** に変換するパイプラインの最前段。[ADR-0011](../../../ai-guide/adr/0011-preprocessing-tier-structure.md) の二層構成:
+データセットの 1 issue (before/after パッチペア) を、等価検証・pruning が食える **`(setup, before, after)` candidate** に変換するパイプラインの最前段。[ADR-0011](../../../ai-guide/adr/0011-preprocessing-tier-structure.md) の二層構成:
 
 - **`common/`** = Tier 1 — dataset 非依存の AST primitive (subtree diff / minimal enclosure / setup 分割)。
 - **`selakovic/`** = Tier 2 — Selakovic 2016 dataset 固有の adapter。`selakovic.preprocess()` が公開エントリポイント。
@@ -31,8 +31,8 @@ interface PreprocessingResult {
   id?: string;                  // 入力 id をエコーバック (複数 candidate なら "<id>#0", "<id>#1", ...)
   layout: "client" | "server" | "unknown";
   setup?: string;               // 両側共通の事前定義コード (excluded のとき undefined)
-  slow?: string;                // before 側 candidate (検証対象)
-  fast?: string;                // after  側 candidate
+  before?: string;                // before 側 candidate (検証対象)
+  after?: string;                // after  側 candidate
   enclosure_type?: string;      // 収束した構文単位 ("f1-body" / "lib-file" / "angular-controller-wrapper" /
                                 //   "server-test-case" / AST ノード型名 "FunctionDeclaration" 等) — threats 集計用
   before_node_count?: number;
@@ -100,7 +100,7 @@ src/preprocessing/
     │   ├── aspect.ts            ← routeAspect (lib 変化×body 変化 → A/B/A+B/fallback) + statementsChanged (body の AST diff が空でないか)
     │   ├── lib-diff.ts          ← diffLibPair (行ベース multiset 差分で license/version/整形 noise を除いて実コード行が残るか + 近傍関数名を近似)
     │   └── case-split.ts        ← isIndependent (ADR-0014: body の参照 identifier ∩ lib 変更関数名が空なら independent → 2 candidate)
-    └── assemble/            ← (setup, slow, fast) を組み立てる (pure)
+    └── assemble/            ← (setup, before, after) を組み立てる (pure)
         ├── angular.ts           ← buildAngularRunnable (Angular controller-wrapper: lib load → module/controller 再構成 → f1() 1 回実行 → 観測値 return の自己完結 IIFE)
         ├── client.ts            ← buildClient{Lib,Body,Combined}Candidate (top-level f1 の作用点別組み立て。body は `(function(){ ... })()` で包む)
         ├── server.ts            ← buildServerRunnable (test_case_*.js を module/exports/require 込みで包んで init()/setupTest()/test() を実行)
@@ -123,7 +123,7 @@ src/preprocessing/
 
 1. **段1 (役割分解 + 計測ハーネス除去)** — `decompose/`: ① `<lib>_before/after` ペア (CLI が `io/lib-pair.ts` で dir scan 済) + ② ベンチマーク関数 body ペア (client: `f1` body / server: `test()` body)。`var a = execute(f1, n)` 以降 / `$.ajax({mark,mean})` / `init`/`setupTest` 等の計測ハーネスは setup に回すか破棄。**body 内のループ反復回数 (`for (i<50000)`) は書き換えない** — 復元可能性のため、反復縮小は等価検証側の transform に委ねる (ADR-0013)。
 2. **段2 (作用点ルーティング)** — `route/`: ①② の実コード差で **A** (lib のみ) / **B** (body のみ) / **A+B** (両方) / **fallback** に振り分け。A/B → candidate 1 個。A+B → ADR-0014 の identifier 交差判定で independent なら 2 candidate (`lib` / `body`)、co-evolution の疑いなら 1 candidate。fallback → `assemble/fallback.ts` の Tier 1 素の top-level diff。
-3. **組み立て** — `assemble/`: 作用点 × wrapper kind で `(setup, slow, fast)` を作る (Angular controller-wrapper / top-level f1 / server test_case / fallback)。
+3. **組み立て** — `assemble/`: 作用点 × wrapper kind で `(setup, before, after)` を作る (Angular controller-wrapper / top-level f1 / server test_case / fallback)。
 
 詳細 (enclosure の 3 段優先順位 / setup 構築規約 / レイアウト判定 / 除外理由の意味論) は [code-map.md §Selakovic 前処理器](../../../ai-guide/code-map.md#selakovic-前処理器)。
 
