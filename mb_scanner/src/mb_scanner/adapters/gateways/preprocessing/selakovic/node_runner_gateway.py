@@ -3,10 +3,9 @@
 `mb-analyzer/dist/cli.js` をサブプロセスで起動し、stdin に JSON を流し込んで
 stdout から JSONL (1 行 = 1 IssueResult) を受け取る (ADR-0024)。
 
-**1 入力 → 1 IssueResult モデル**:
-旧モデル (1 入力 → N flat result) を、ADR-0024 の階層構造 (1 IssueResult が
-``candidates: list[PreprocessingCandidate]`` を内包) に変更。1 issue 単位で id
-を直接対応させるため、prefix-match による集約ロジックは廃止。
+**1 入力 → 1 IssueResult モデル** (ADR-0024):
+1 IssueResult が ``candidates: list[PreprocessingCandidate]`` を内包し、
+1 issue 単位で id を直接対応させる。
 """
 
 from collections.abc import Sequence

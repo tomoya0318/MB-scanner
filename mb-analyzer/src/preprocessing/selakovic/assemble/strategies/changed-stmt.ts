@@ -34,7 +34,7 @@ import type { F1Decomposition } from "../../decompose/f1";
  * 同じ値を push するので false not_equal は生まない)。「変更が workload に伝播しないなら equal verdict」のは正しい。
  *
  * before↔after の stmt 対応は binding 名 + occurrence 番号 (`unit.bindingsOccurrence`) で一意化する
- * (同名 binding が複数あっても誤マッチしない、Copilot review #2)。
+ * (同名 binding が複数あっても誤マッチしない)。
  *
  * 関連: fallback 経路 (`fallback.ts:extractFromScripts/extractFromServerFiles`) は f1 / test が規約外の
  * issue 用安全弁で、target_side=both / is_workload_reachable=false の degenerate 経路。
@@ -155,7 +155,7 @@ function nodeSpan(n: Node): { start: number; end: number } | null {
  * `bindings` と sorted equal な文のうち **`occurrence` 番目 (0-based)** を返す。見つからなければ null。
  *
  * `change-units.ts:computeStmtOccurrences` と同じ走査順・filter を使うので、before で k 番目だった文は
- * after でも k 番目で対応する (同名 binding 複数でも誤マッチしない、Copilot review #2)。before/after で
+ * after でも k 番目で対応する (同名 binding 複数でも誤マッチしない)。before/after で
  * 同名 binding 文の数が違って k 番目が存在しない場合は null (= rename/削除相当の DROP)。
  */
 function findAfterStmtByBindingsAndOccurrence(
@@ -258,7 +258,7 @@ if (import.meta.vitest) {
       expect(r.setup).toBeUndefined();
     });
 
-    it("同名 binding 複数: occurrence 番号で正しい after stmt を選ぶ (Copilot review #2)", () => {
+    it("同名 binding 複数: occurrence 番号で正しい after stmt を選ぶ", () => {
       // var X が 2 回宣言され、2 回目だけ変更。before の occurrence=1 の文に対応する after の 2 回目を hole すべき。
       const before = `var X = 1;\nvar X = 'foo';\nvar lib = {};\nlib.foo = function () { return X; };`;
       const after = `var X = 1;\nvar X = 'bar';\nvar lib = {};\nlib.foo = function () { return X; };`;

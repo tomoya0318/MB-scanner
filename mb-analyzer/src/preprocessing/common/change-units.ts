@@ -344,7 +344,7 @@ if (import.meta.vitest) {
       expect(r.units.some((u) => u.kind === "fn")).toBe(false);
     });
 
-    it("同名 binding が複数: 変更された方の occurrence 番号が付く (Copilot #2 対策)", () => {
+    it("同名 binding が複数: 変更された方の occurrence 番号が付く", () => {
       // var X が 2 回宣言され、2 回目 (occurrence=1) だけ変更されるケース。
       const before = wrap("var X = 1; function noop() {} var X = 'a'; function foo() { return X; }");
       const after = wrap("var X = 1; function noop() {} var X = 'b'; function foo() { return X; }");

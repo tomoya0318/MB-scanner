@@ -14,7 +14,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-# 0022 (workload-reachability) の changed-fn candidate は ``slow``/``fast`` は小さい (= 変更関数本体 + workload)
+# ADR-0022 (workload-reachability) の changed-fn candidate は ``slow``/``fast`` は小さい (= 変更関数本体 + workload)
 # が ``setup`` に lib 全文 (Ember 1.x ≈ 1.5MB + 依存 lib jquery/handlebars) を丸ごと残すので上限は大きめに取る。
 # ``EquivalenceInput.MAX_CODE_LENGTH`` (= 20MB) と揃える — equiv を通った candidate は prune にも回せるべき。
 MAX_CODE_LENGTH = 20_000_000

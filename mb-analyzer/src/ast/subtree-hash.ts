@@ -6,17 +6,12 @@ import { walkNodes } from "./walk";
 /**
  * AST ノードのサブツリー同型判定用ハッシュと所属判定器。
  *
- * 機能間で重複していた subtree-hash ユーティリティをここに集約する (旧
- * `pruning/ast/subtrees.ts` の `FastSubtreeSet` / `preprocessing/common/subtree-hash.ts` を
- * 統合し、ここで `SubtreeSet` として再エクスポートしている)。
- *
  * 「同型」はハッシュによる厳密一致で、タイプ・子・識別子名・リテラル値・演算子が
  * すべて揃って初めて同型と扱う。例えば `arr[0]` と `arr[1]` は別物。loc / start /
  * end / コメントなどの表示系メタデータは無視する。
  *
- * 採用判断 (top-down subtree hash 自作 / bottom-up は非採用):
- *   - ai-guide/adr/0002-babel-topdown-subtree-hash.md
- *   - ai-guide/adr/0003-bottom-up-mapping-deferred.md
+ * 判断: ai-guide/adr/0002-babel-topdown-subtree-hash.md
+ * 判断: ai-guide/adr/0003-bottom-up-mapping-deferred.md
  */
 export class SubtreeSet {
   private readonly hashes: Set<string>;

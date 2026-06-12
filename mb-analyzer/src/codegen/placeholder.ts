@@ -98,10 +98,6 @@ export function replaceFunctionBody(
  *  - 異常ケース (source のコメント / 文字列リテラルに `$BODY$` が紛れている): 戻り値の `$BODY$` 個数は 2 個以上に
  *    なり、`substituteBody` が `count !== 1` で **fail-loud に throw**。silent な誤 substitution は起きない
  *
- * 旧実装 (`replaceFunctionBody` 出力に対する `.replace(PLACEHOLDER, ...)` の first match) では、source 側に
- * 既存の `$BODY$` があると観測ハーネスが誤った位置に挿入されつつ `substituteBody` の count check を通過する
- * silent bug の余地があった。span slicing への変更でこのリスクを除去 (Copilot review 指摘、2026-05-18)。
- *
  * 戻り値のままでは構文として valid でないので、呼び出し側は `substituteBody` で裸 body を差し込んでから
  * `declareObservationGlobal` で `__OBS__` 宣言を prepend し、実行コンテキストに投入する。
  */

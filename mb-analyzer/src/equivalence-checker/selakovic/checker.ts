@@ -220,7 +220,7 @@ if (import.meta.vitest) {
       }
     });
 
-    it("workload == null (旧経路) は setup が原文のまま + slow/fast が executor の workload に流れる", async () => {
+    it("workload == null は setup が原文のまま + slow/fast が executor の workload に流れる", async () => {
       const sandbox = await import("../common/sandbox");
       const calls: Array<{ setup: string; workload: string }> = [];
       const spy = vi
@@ -242,7 +242,7 @@ if (import.meta.vitest) {
           setup: "var lib = { f: function (x) { return x; } };",
           slow: "lib.f(1); lib.f(2);",
           fast: "lib.f(3); lib.f(4);",
-          // workload 省略 = 旧経路
+          // workload 省略 = slow/fast 素通し経路
           timeout_ms: 1000,
         });
         expect(calls.length).toBe(2);

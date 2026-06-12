@@ -8,15 +8,12 @@ from mb_scanner.adapters.cli.pruning import pruning_app
 
 app = Typer(help="MB-Scanner CLI - マイクロベンチマーク研究パイプライン (preprocess / equivalence / pruning)")
 
-# 新 check-equivalence サブコマンド (Node ランナー経由)
 app.registered_commands.extend(equivalence_app.registered_commands)
 app.registered_groups.extend(equivalence_app.registered_groups)
 
-# pruning サブコマンド (Node ランナー経由、PR #3)
 app.registered_commands.extend(pruning_app.registered_commands)
 app.registered_groups.extend(pruning_app.registered_groups)
 
-# preprocessing (Selakovic dataset 前処理) サブコマンド (Node ランナー経由、PR #4)
 app.registered_commands.extend(preprocessing_app.registered_commands)
 app.registered_groups.extend(preprocessing_app.registered_groups)
 

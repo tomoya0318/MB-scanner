@@ -132,7 +132,7 @@ export async function runPrune(): Promise<number> {
 
 // バッチ API は単発と異なり `timeout_ms` を **必須** とする。
 // Python→Node への受け渡しで timeout_ms が落ちて DEFAULT にサイレントフォールバック
-// する事故を防ぐため (equivalence 側と同じ判断、本 PR でも踏襲)。
+// する事故を防ぐため (equivalence 側と同じ判断)。
 // `max_iterations` は optional のまま (engine が default を解決)。
 function parseBatchLine(raw: string): PruningInput | { id: string | undefined; error: string } {
   let parsed: unknown;

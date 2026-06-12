@@ -1,7 +1,7 @@
 """Selakovic 前処理の Use Case 層
 
 1 issue または複数 issue に対して ``PreprocessorPort`` を呼び出し、結果を
-そのまま返す。ADR-0024 で 1 入力 → 1 IssueResult モデル (内部に candidates: list)。
+そのまま返す。1 入力 → 1 IssueResult モデル (内部に candidates: list、ADR-0024)。
 """
 
 from collections.abc import Sequence

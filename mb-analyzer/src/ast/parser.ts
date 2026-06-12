@@ -5,9 +5,6 @@ import type { File, Node } from "@babel/types";
 /**
  * Babel parse / generate の汎用ラッパー。
  *
- * 機能間で重複していた AST ユーティリティをここに集約する (旧 `pruning/ast/parser.ts` /
- * `preprocessing/common/parser.ts`)。
- *
  * `plugins` は optional で、各機能が必要な構文 plugin を渡せる:
  * - `pruning` 側は `pruning/rules/whitelist.ts` の `PARSER_PLUGINS` を渡す (ADR-0006 一元管理)
  * - `preprocessing` 側は素 JS のみで plugins=[] (デフォルト)

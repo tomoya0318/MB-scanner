@@ -12,11 +12,12 @@ import type { ExecutionCapture } from "../../sandbox/capture/types";
  *   に丸めると Ember 級 lib で `globalThis.Ember` が循環していて常に `error` → 候補全体が捨てられる。
  *   観測できないことと壊れていることは別。observe できる key だけで判定し、ゼロなら N/A にして他 oracle に委ねる。
  *   ADR-0018 の保守化 (positive evidence が無ければ全体 `inconclusive`) はこの後段で効くので健全性は保たれる。
- *   TODO(v2): serializer.ts 側で循環参照を throw でなく `<circular>` sentinel に丸めれば、循環オブジェクトも
- *   「巨大だが有限の文字列」として比較できる (要 maxDepth デフォルト設定で文字列サイズを抑える)。そうすればここの除外も不要に。
  * - key 集合と各 post が一致 → equal
  * - いずれか差分 → not_equal
  */
+// TODO(v2): serializer.ts 側で循環参照を throw でなく `<circular>` sentinel に丸めれば、循環オブジェクトも
+// 「巨大だが有限の文字列」として比較できる (要 maxDepth デフォルト設定で文字列サイズを抑える)。
+// そうすればここのシリアライズ不能 key 除外も不要になる。
 export function checkArgumentMutation(
   slow: ExecutionCapture,
   fast: ExecutionCapture,

@@ -16,10 +16,10 @@ import { LAYOUT_KIND } from "../../../contracts/preprocessing-contracts";
  * - `<lib>_before.js` 単一ファイルがある → `server` (clientServerIssues 系の単一ファイル lib)
  * - どちらでもない → `unknown`
  *
- * **fallback 用の追加情報**: `v_*.html` と `<lib>_*.js` 単一ファイルが共存する場合
+ * **追加情報**: `v_*.html` と `<lib>_*.js` 単一ファイルが共存する場合
  * (= clientIssues / clientServerIssues の物理構造的混在) には、両方のパスを記録する。
- * 呼び出し側は client モードで `no-changed-nodes` が返れば server-single-file に
- * フォールバックできる。
+ * 呼び出し側 (CLI) は client として処理しつつ、`serverFiles` を `loadLibPair` で
+ * lib ペアとして併用する。
  *
  * 注意: layout 規則は Selakovic データセットの物理レイアウトに依存する。論文 §6 の
  * 10 パターン分類や precondition 体系には依存しない。
@@ -137,7 +137,8 @@ if (import.meta.vitest) {
     };
 
     it("v_*.html + <lib>_*.js + test_case_*.js が同居しても、lib は <lib>_*.js を選ぶ (test_case_* を除外)", () => {
-      // `underscore_before.js` はアルファベット順で `test_case_before.js` より後ろ → 旧実装は test_case を誤検出していた
+      // `underscore_before.js` はアルファベット順で `test_case_before.js` より後ろに来るため、
+      // 名前順の先頭採用だと test_case 側を lib と誤検出しうる並び
       const d = mkIssue(["v_before.html", "v_after.html", "underscore_before.js", "underscore_after.js", "test_case_before.js", "test_case_after.js"]);
       const layout = detectLayout(d);
       expect(layout.kind).toBe(LAYOUT_KIND.CLIENT);

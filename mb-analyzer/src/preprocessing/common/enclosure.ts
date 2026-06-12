@@ -95,7 +95,7 @@ export function findMinimalEnclosure(
     if (MODULE_TYPES.has(node.type)) break;
   }
 
-  // 第 3 ループ (改良 3): Top-level statement 系にフォールバック。
+  // 第 3 ループ: Top-level statement 系にフォールバック。
   // 「関数全体に変更が散在」「ExpressionStatement の代入式が変更」など、関数/Block で
   // 拾えないが top-level statement 全体を抽出単位にすれば救えるケースを救済する。
   for (const node of fromInnermost) {

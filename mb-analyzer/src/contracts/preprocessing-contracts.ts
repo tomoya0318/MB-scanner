@@ -10,15 +10,7 @@
  *     candidates[].before/after_node_count, candidates[].enclosure_node_type, candidates[].candidate_excluded)
  *  - **adapter extension**: dataset 固有情報は `issue_meta` / `candidate_meta` (discriminated union)
  *  - **issue 階層化**: jsonl 1 行 = 1 issue、`candidates: list[PreprocessingCandidate]`
- *  - 旧 `candidate_kind` / `enclosure_type` (戦略ラベル含む) / `aspect` / `layout` (issue level) /
- *    `environment` は廃止 or adapter_meta へ移動
- *  - `excluded` フィールドは旧フラット契約名。新契約では `issue_excluded` / `candidate_excluded` の
- *    2 レベル (issue level と candidate level) に分離
  */
-
-// ============================================================================
-// Base contract (dataset 非依存)
-// ============================================================================
 
 /**
  * 抽出が成立しなかった場合の汎用理由コード。任意 dataset で意味を持つ集合。
@@ -88,10 +80,6 @@ export interface PreprocessingIssueResult {
   /** issue 全体が gateway error で処理できなかった場合は省略可。それ以外は adapter が必ず付与する。 */
   issue_meta?: IssueMeta;
 }
-
-// ============================================================================
-// Selakovic adapter (dataset 固有)
-// ============================================================================
 
 /**
  * 1 issue ディレクトリの物理レイアウト判定結果 (Selakovic dataset 構造)。
@@ -199,10 +187,6 @@ export interface SelakovicCandidateMeta {
   /** changed_fn 抽出由来かどうか (= workload-reachable な変更関数を lambda-lift した小候補) */
   is_workload_reachable: boolean;
 }
-
-// ============================================================================
-// Discriminated union (adapter 拡張ポイント)
-// ============================================================================
 
 /** issue level の adapter 拡張。新 dataset 追加時は `| OtherIssueMeta` で union を広げる。 */
 export type IssueMeta = SelakovicIssueMeta;

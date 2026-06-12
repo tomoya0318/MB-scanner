@@ -58,7 +58,7 @@ class ExecutionEnvironment(StrEnum):
 
     - ``VM``: 素の ``node:vm`` + 非決定 API stub。純粋計算向け。
     - ``JSDOM``: jsdom window/document + 相対 ``require`` 解決。browser ライブラリ
-      (AngularJS / jQuery 等) / server ``test_case`` 向け (Phase 2a の最小版)。
+      (AngularJS / jQuery 等) / server ``test_case`` 向け。
     """
 
     VM = "vm"
@@ -79,8 +79,8 @@ class EquivalenceInput(BaseModel):
     ``workload`` は ADR-0023 D-β の placeholder substitution + 4 値契約フィールド。非 ``None``
     のとき (= changed-fn 経路) は checker が ``setup`` の ``$BODY$`` プレースホルダを
     ``slow`` / ``fast`` で差し替え + 観測配列 ``__OBS__`` を宣言してから本フィールドを
-    executor の workload 引数として渡す。``None`` のとき (= 旧経路) は ``slow`` / ``fast`` が
-    そのまま executor の workload に流れる (executor 側は無改修)。
+    executor の workload 引数として渡す。``None`` のときは ``slow`` / ``fast`` が
+    そのまま executor の workload に流れる。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -111,9 +111,8 @@ class OracleObservation(BaseModel):
 class EquivalenceCheckResult(BaseModel):
     """(setup, slow, fast) の 1 トリプルに対する最終判定
 
-    ``effective_timeout_ms`` は Node の checker が実際に使った timeout_ms。
-    過去に Python→Node への timeout_ms 受け渡しが機能せずサイレントに DEFAULT=5000 で
-    実行される事例があったため、Node 側がエコーバックした値を Python 側で検証可能にする。
+    ``effective_timeout_ms`` は Node の checker が実際に使った timeout_ms のエコーバック。
+    Python 側が timeout_ms の受け渡しがサイレントに失われていないかを検証するために使う。
     """
 
     model_config = ConfigDict(extra="ignore")

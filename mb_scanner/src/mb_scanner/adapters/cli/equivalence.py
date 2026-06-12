@@ -31,10 +31,6 @@ from mb_scanner.domain.ports.equivalence_checker import EquivalenceCheckerPort
 from mb_scanner.infrastructure.config import settings
 from mb_scanner.use_cases.equivalence_verification import EquivalenceVerificationUseCase
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 equivalence_app = typer.Typer(help="Equivalence verification commands")
 
 EXIT_EQUAL = 0
@@ -45,11 +41,6 @@ EXIT_ERROR = 3
 
 EXIT_BATCH_OK = 0
 EXIT_BATCH_ERROR = 2
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _verdict_to_exit_code(verdict: Verdict) -> int:
@@ -199,11 +190,6 @@ def _run_batch(
     for idx in range(total_batches):
         out.extend(batch_results[idx])
     return out
-
-
-# ---------------------------------------------------------------------------
-# Commands
-# ---------------------------------------------------------------------------
 
 
 @equivalence_app.command("check-equivalence")

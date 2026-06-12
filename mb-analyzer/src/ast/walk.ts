@@ -4,10 +4,7 @@ import type { Node } from "@babel/types";
 /**
  * Babel AST を `VISITOR_KEYS` ベースで深さ優先に走査する共通機構。
  *
- * 機能間で重複していた walk ユーティリティをここに集約する (旧 `pruning/ast/walk.ts` /
- * `preprocessing/common/walk.ts`)。
- *
- * 判断: ai-guide/adr/0001-pruning-ast-traversal.md (旧場所だが内容は基盤層に共通)
+ * 判断: ai-guide/adr/0001-pruning-ast-traversal.md
  */
 
 export interface VisitContext {

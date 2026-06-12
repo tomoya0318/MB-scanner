@@ -28,7 +28,7 @@ const EXIT_BATCH_IO_FAILURE = 2;
  * 1 入力 → 1 IssueResult モデル (ADR-0024):
  * - `preprocess()` は `PreprocessingIssueResult` (内部に candidates: list) を返す
  * - CLI は出力を **常に JSONL** (1 issue = 1 行) で統一する
- * - id は input.id をそのまま設定 (旧 `<original_id>#<index>` の suffix 付与は廃止)
+ * - id は input.id をそのまま設定 (issue 単位で 1 対 1)
  *
  * ファイル I/O は CLI に閉じ込め、`preprocess()` は文字列内容のみを受け取る純関数に保つ。
  */

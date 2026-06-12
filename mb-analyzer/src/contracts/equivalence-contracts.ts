@@ -52,8 +52,7 @@ export const ALL_ORACLES: readonly Oracle[] = [
  * 実行環境 (ADR-0012)。
  * - `vm`: `node:vm` の素 context (非決定 API stub のみ)。純粋計算向け。
  * - `jsdom`: jsdom の window/document を持つ context + 相対 `require` 解決。
- *   browser ライブラリ (AngularJS / jQuery 等) / server `test_case` 向け (Phase 2a の最小版 —
- *   Playwright fallback・channel ルーティングは Phase 2b)。
+ *   browser ライブラリ (AngularJS / jQuery 等) / server `test_case` 向け。
  */
 export const EXECUTION_ENVIRONMENT = {
   VM: "vm",
@@ -81,8 +80,8 @@ export interface EquivalenceInput {
    *   2. 観測配列 `__OBS__` を `setup` 最先頭に `let __OBS__ = [];` で宣言
    *   3. 結果を executor の `setup` 引数として、本フィールドを executor の `workload` 引数として渡す
    *
-   * `null` / `undefined` のとき (= client embedded / fallback / server 等の旧経路) は既存通り
-   * `slow` / `fast` がそのまま executor の workload に流れる (executor 側は無改修)。
+   * `null` / `undefined` のとき (= client embedded / fallback / server 等の経路) は
+   * `slow` / `fast` がそのまま executor の workload に流れる。
    * Python `EquivalenceInput.workload=None` は JSON 経由で `null` として届くので、checker 側の
    * 経路判定は `input.workload != null` (loose) で書く。
    */
