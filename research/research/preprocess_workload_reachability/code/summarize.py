@@ -6,10 +6,13 @@ equivalence-checker / pruning では preprocess hint (旧 candidate_kind / enclo
 は廃止予定。旧 by_encl / by_kind の集計は extracted.jsonl から直接 join して計算する。
 
 集計対象:
-  - 削減率 = 1 - node_count_after / node_count_before
+  - 削減率 = 1 - node_count_pruned / node_count_initial
   - verdict 別の内訳
   - iterations が cap (= max_iterations) に張り付いてないか
   - extracted.jsonl から派生: enclosure_node_type / target_side / is_workload_reachable 別の削減率
+
+注意: slow/fast → before/after + node_count_before/after → node_count_initial/pruned の
+契約キーリネーム以前に保存した JSONL (brain-2 等のバッチ出力) とは互換がない。以後の集計は再走が前提。
 
 usage: python research/research/preprocess_workload_reachability/code/summarize.py [prune-results.jsonl]
 """
@@ -35,7 +38,7 @@ PREV = [
 
 
 def reduction(r: dict) -> float | None:
-    b, a = r.get("node_count_before"), r.get("node_count_after")
+    b, a = r.get("node_count_initial"), r.get("node_count_pruned")
     if not b or a is None:
         return None
     return 1.0 - a / b

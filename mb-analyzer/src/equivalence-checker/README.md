@@ -1,6 +1,6 @@
 # equivalence-checker
 
-`(setup, slow, fast)` トリプルを sandbox 実行し、出力を複数の直交軸 (oracle) で観測して
+`(setup, before, after)` トリプルを sandbox 実行し、出力を複数の直交軸 (oracle) で観測して
 **`equal` / `not_equal` / `error` / `inconclusive`** verdict を返す。`checkEquivalence()` が公開エントリポイント
 (ルート `index.ts` 経由)。
 
@@ -25,8 +25,8 @@
 interface EquivalenceInput {
   id?: string;                  // バッチ API での順序追跡用 (省略可)
   setup?: string;               // 両側共通の事前定義コード (preprocess の setup をそのまま渡す)
-  slow: string;                 // before 側 candidate (検証対象)
-  fast: string;                 // after  側 candidate
+  before: string;                 // before 側 candidate (検証対象)
+  after: string;                 // after  側 candidate
   timeout_ms?: number;          // 1 実行あたりの上限。単発 API は省略時 DEFAULT (=5000)、batch API は必須
   environment?: "vm" | "jsdom"; // 省略時 "vm"。jsdom = browser ライブラリ / server test_case で DOM・require が要る (ADR-0012)
   module_base_dir?: string;     // jsdom 環境で相対 require('./x') を解決する基準ディレクトリ (= 通常 issue ディレクトリの絶対パス)
@@ -34,7 +34,7 @@ interface EquivalenceInput {
 }
 ```
 
-通常 `(id, setup, slow, fast, environment)` は preprocess の `PreprocessingResult` をそのままマップしたもの。`timeout_ms` / `module_base_dir` / `mount_html` は呼び出し側 (pruning エンジン / CLI) が補う。
+通常 `(id, setup, before, after, environment)` は preprocess の `PreprocessingResult` をそのままマップしたもの。`timeout_ms` / `module_base_dir` / `mount_html` は呼び出し側 (pruning エンジン / CLI) が補う。
 
 ### `EquivalenceCheckResult`
 
@@ -52,8 +52,8 @@ interface OracleObservation {
   oracle: "return_value" | "argument_mutation" | "exception" |
           "external_observation" | "dom_mutation" | "interaction_trace";
   verdict: "equal" | "not_equal" | "not_applicable" | "error";
-  slow_value?: string | null;   // 観測値の canonical 文字列 (差分提示用)
-  fast_value?: string | null;
+  before_value?: string | null;   // 観測値の canonical 文字列 (差分提示用)
+  after_value?: string | null;
   detail?: string | null;       // 人間可読な補足
 }
 ```
@@ -75,7 +75,7 @@ interface OracleObservation {
 ```
 src/equivalence-checker/
 ├── common/
-│   ├── sandbox/                       (setup, slow, fast) を実行して ExecutionCapture ×2 を作る
+│   ├── sandbox/                       (setup, before, after) を実行して ExecutionCapture ×2 を作る
 │   │   ├── transforms/
 │   │   │   ├── non-determinism.ts        Math.random / Date / timer / performance.now の凍結 (ADR-0012)
 │   │   │   └── iteration-cap.ts          計測ループ (for(...;<n>;..) / Array(n)) の上限を縮める実行前 AST pass (ADR-0017)
@@ -89,7 +89,7 @@ src/equivalence-checker/
 │   │   │   └── recording-proxy.ts        汎用記録 Proxy (C6 interaction-trace の取得側)。境界オブジェクトを get/set/apply/construct トラップで包み TraceEntry[] を蓄積。runnable 側が globalThis.__recorder 経由で wrap
 │   │   └── index.ts                     sandbox 層の barrel
 │   ├── comparison/                     2 つの ExecutionCapture を比較 → OracleObservation[] → Verdict
-│   │   ├── oracles/                      channel ごとの比較器 (各 (slow, fast, profile?) → OracleObservation の純関数)
+│   │   ├── oracles/                      channel ごとの比較器 (各 (before, after, profile?) → OracleObservation の純関数)
 │   │   │   ├── return-value.ts           C1: 戻り値 deep equal (片側 exception なら N/A — C5 に委譲)
 │   │   │   ├── argument-mutation.ts      C4: setup 由来 object/array の pre/post snapshot 差分
 │   │   │   ├── exception.ts              C5: 例外 ctor + message (ExceptionProfile で message 正規化)

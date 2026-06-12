@@ -7,7 +7,7 @@
  *   - max_iterations は optional (engine が default 解決)
  *   - effective_timeout_ms でユーザ指定の timeout_ms が engine に届いたかを検証可能
  *   - setup (string) は engine に届き、非 string は error verdict
- *   - slow/fast が非 string、非 object 行、JSON parse 失敗行 → error verdict で他行は処理継続
+ *   - before/after が非 string、非 object 行、JSON parse 失敗行 → error verdict で他行は処理継続
  *   - id 欠落時は id フィールド無しで返す
  *   - 空入力は exit 0 + 空出力
  *
@@ -56,12 +56,12 @@ describe("runPruneBatch", () => {
 
   it("3 トリプルを順序保持で処理し id をエコーバックする", async () => {
     const payload = [
-      JSON.stringify({ id: "a", slow: "1 + 1", fast: "2", timeout_ms: 1000, max_iterations: 10 }),
-      JSON.stringify({ id: "b", slow: "1", fast: "2", timeout_ms: 1000, max_iterations: 10 }),
+      JSON.stringify({ id: "a", before: "1 + 1", after: "2", timeout_ms: 1000, max_iterations: 10 }),
+      JSON.stringify({ id: "b", before: "1", after: "2", timeout_ms: 1000, max_iterations: 10 }),
       JSON.stringify({
         id: "c",
-        slow: "[1,2,3]",
-        fast: "[1,2,3]",
+        before: "[1,2,3]",
+        after: "[1,2,3]",
         timeout_ms: 1000,
         max_iterations: 10,
       }),
@@ -82,8 +82,8 @@ describe("runPruneBatch", () => {
     restoreStdin = feedStdin(
       JSON.stringify({
         id: "x",
-        slow: "1",
-        fast: "1",
+        before: "1",
+        after: "1",
         timeout_ms: 3000,
         max_iterations: 10,
       }) + "\n",
@@ -97,7 +97,7 @@ describe("runPruneBatch", () => {
 
   it("max_iterations 省略時もデフォルトで動作", async () => {
     restoreStdin = feedStdin(
-      JSON.stringify({ id: "no_iter", slow: "1 + 1", fast: "2", timeout_ms: 1000 }) + "\n",
+      JSON.stringify({ id: "no_iter", before: "1 + 1", after: "2", timeout_ms: 1000 }) + "\n",
     );
 
     const code = await runPruneBatch();
@@ -109,7 +109,7 @@ describe("runPruneBatch", () => {
   });
 
   it("timeout_ms 欠落行は error verdict で id 付きで返す", async () => {
-    restoreStdin = feedStdin(JSON.stringify({ id: "no_timeout", slow: "1", fast: "1" }) + "\n");
+    restoreStdin = feedStdin(JSON.stringify({ id: "no_timeout", before: "1", after: "1" }) + "\n");
 
     const code = await runPruneBatch();
 
@@ -122,9 +122,9 @@ describe("runPruneBatch", () => {
 
   it("JSON parse 失敗行は他行に波及しない", async () => {
     const payload = [
-      JSON.stringify({ id: "ok1", slow: "1", fast: "1", timeout_ms: 1000, max_iterations: 10 }),
+      JSON.stringify({ id: "ok1", before: "1", after: "1", timeout_ms: 1000, max_iterations: 10 }),
       "this is not json",
-      JSON.stringify({ id: "ok2", slow: "2", fast: "2", timeout_ms: 1000, max_iterations: 10 }),
+      JSON.stringify({ id: "ok2", before: "2", after: "2", timeout_ms: 1000, max_iterations: 10 }),
     ].join("\n");
     restoreStdin = feedStdin(payload);
 
@@ -152,7 +152,7 @@ describe("runPruneBatch", () => {
 
   it("id 欠落時は id を持たない結果を返す", async () => {
     restoreStdin = feedStdin(
-      JSON.stringify({ slow: "1", fast: "1", timeout_ms: 1000, max_iterations: 10 }) + "\n",
+      JSON.stringify({ before: "1", after: "1", timeout_ms: 1000, max_iterations: 10 }) + "\n",
     );
 
     await runPruneBatch();
@@ -167,8 +167,8 @@ describe("runPruneBatch", () => {
       JSON.stringify({
         id: "with_setup",
         setup: "const base = 100;",
-        slow: "base + 1",
-        fast: "101",
+        before: "base + 1",
+        after: "101",
         timeout_ms: 1000,
         max_iterations: 10,
       }) + "\n",
@@ -186,8 +186,8 @@ describe("runPruneBatch", () => {
     restoreStdin = feedStdin(
       JSON.stringify({
         id: "bad_setup",
-        slow: "1",
-        fast: "1",
+        before: "1",
+        after: "1",
         timeout_ms: 1000,
         max_iterations: 10,
         setup: 42,
@@ -205,7 +205,7 @@ describe("runPruneBatch", () => {
 
   it("timeout_ms が非 number の行は error verdict", async () => {
     restoreStdin = feedStdin(
-      JSON.stringify({ id: "bad_to", slow: "1", fast: "1", timeout_ms: "5000" }) + "\n",
+      JSON.stringify({ id: "bad_to", before: "1", after: "1", timeout_ms: "5000" }) + "\n",
     );
 
     const code = await runPruneBatch();
@@ -221,8 +221,8 @@ describe("runPruneBatch", () => {
     restoreStdin = feedStdin(
       JSON.stringify({
         id: "bad_iter",
-        slow: "1",
-        fast: "1",
+        before: "1",
+        after: "1",
         timeout_ms: 1000,
         max_iterations: "50",
       }) + "\n",
@@ -241,8 +241,8 @@ describe("runPruneBatch", () => {
     restoreStdin = feedStdin(
       JSON.stringify({
         id: "zero_iter",
-        slow: "1",
-        fast: "1",
+        before: "1",
+        after: "1",
         timeout_ms: 1000,
         max_iterations: 0,
       }) + "\n",
@@ -261,8 +261,8 @@ describe("runPruneBatch", () => {
     restoreStdin = feedStdin(
       JSON.stringify({
         id: "neg_iter",
-        slow: "1",
-        fast: "1",
+        before: "1",
+        after: "1",
         timeout_ms: 1000,
         max_iterations: -1,
       }) + "\n",
@@ -281,8 +281,8 @@ describe("runPruneBatch", () => {
     restoreStdin = feedStdin(
       JSON.stringify({
         id: "frac_iter",
-        slow: "1",
-        fast: "1",
+        before: "1",
+        after: "1",
         timeout_ms: 1000,
         max_iterations: 0.5,
       }) + "\n",
@@ -299,7 +299,7 @@ describe("runPruneBatch", () => {
 
   it("timeout_ms=0 の行は error verdict", async () => {
     restoreStdin = feedStdin(
-      JSON.stringify({ id: "zero_to", slow: "1", fast: "1", timeout_ms: 0 }) + "\n",
+      JSON.stringify({ id: "zero_to", before: "1", after: "1", timeout_ms: 0 }) + "\n",
     );
 
     const code = await runPruneBatch();
@@ -311,9 +311,9 @@ describe("runPruneBatch", () => {
     expect(result.error_message).toContain("timeout_ms");
   });
 
-  it("slow が非 string の行は error verdict", async () => {
+  it("before が非 string の行は error verdict", async () => {
     restoreStdin = feedStdin(
-      JSON.stringify({ id: "bad_slow", slow: 1, fast: "1", timeout_ms: 1000 }) + "\n",
+      JSON.stringify({ id: "bad_before", before: 1, after: "1", timeout_ms: 1000 }) + "\n",
     );
 
     const code = await runPruneBatch();
@@ -321,7 +321,7 @@ describe("runPruneBatch", () => {
     expect(code).toBe(0);
     const result = getResult(parseOutput(spy.writes), 0);
     expect(result.verdict).toBe("error");
-    expect(result.error_message).toContain("slow");
+    expect(result.error_message).toContain("before");
   });
 
   it("非 object 行は error verdict (id は undefined)", async () => {

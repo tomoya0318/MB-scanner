@@ -11,7 +11,7 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field
 
 # Selakovic preprocess は作用点 A の clientIssue で bundled ライブラリ (AngularJS 665KB / Ember 2MB 等)
-# を slow/fast に丸ごと埋め込むので、上限は大きめに取る (ADR-0011)。
+# を before/after に丸ごと埋め込むので、上限は大きめに取る (ADR-0011)。
 MAX_CODE_LENGTH = 20_000_000
 MIN_TIMEOUT_MS = 1
 MAX_TIMEOUT_MS = 60_000
@@ -78,8 +78,8 @@ class EquivalenceInput(BaseModel):
 
     ``workload`` は ADR-0023 D-β の placeholder substitution + 4 値契約フィールド。非 ``None``
     のとき (= changed-fn 経路) は checker が ``setup`` の ``$BODY$`` プレースホルダを
-    ``slow`` / ``fast`` で差し替え + 観測配列 ``__OBS__`` を宣言してから本フィールドを
-    executor の workload 引数として渡す。``None`` のときは ``slow`` / ``fast`` が
+    ``before`` / ``after`` で差し替え + 観測配列 ``__OBS__`` を宣言してから本フィールドを
+    executor の workload 引数として渡す。``None`` のときは ``before`` / ``after`` が
     そのまま executor の workload に流れる。
     """
 
@@ -87,8 +87,8 @@ class EquivalenceInput(BaseModel):
 
     id: str | None = None
     setup: str = Field(default="", max_length=MAX_CODE_LENGTH)
-    slow: str = Field(max_length=MAX_CODE_LENGTH)
-    fast: str = Field(max_length=MAX_CODE_LENGTH)
+    before: str = Field(max_length=MAX_CODE_LENGTH)
+    after: str = Field(max_length=MAX_CODE_LENGTH)
     timeout_ms: int = Field(default=DEFAULT_TIMEOUT_MS, ge=MIN_TIMEOUT_MS, le=MAX_TIMEOUT_MS)
     environment: ExecutionEnvironment | None = None
     module_base_dir: str | None = None
@@ -103,13 +103,13 @@ class OracleObservation(BaseModel):
 
     oracle: Oracle
     verdict: OracleVerdict
-    slow_value: str | None = None
-    fast_value: str | None = None
+    before_value: str | None = None
+    after_value: str | None = None
     detail: str | None = None
 
 
 class EquivalenceCheckResult(BaseModel):
-    """(setup, slow, fast) の 1 トリプルに対する最終判定
+    """(setup, before, after) の 1 トリプルに対する最終判定
 
     ``effective_timeout_ms`` は Node の checker が実際に使った timeout_ms のエコーバック。
     Python 側が timeout_ms の受け渡しがサイレントに失われていないかを検証するために使う。

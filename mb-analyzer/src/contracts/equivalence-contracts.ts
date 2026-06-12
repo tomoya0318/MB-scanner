@@ -63,8 +63,8 @@ export type ExecutionEnvironment = (typeof EXECUTION_ENVIRONMENT)[keyof typeof E
 export interface EquivalenceInput {
   id?: string;
   setup?: string;
-  slow: string;
-  fast: string;
+  before: string;
+  after: string;
   timeout_ms?: number;
   /** 実行環境。省略時は `vm`。 */
   environment?: ExecutionEnvironment;
@@ -76,12 +76,12 @@ export interface EquivalenceInput {
    * placeholder substitution + 4 値契約 (ADR-0023 D-β) の workload。
    *
    * 定義されているとき (= changed-fn 経路) は checker が:
-   *   1. `setup` に含まれる `$BODY$` プレースホルダを `slow` / `fast` の body 文で差し替え
+   *   1. `setup` に含まれる `$BODY$` プレースホルダを `before` / `after` の body 文で差し替え
    *   2. 観測配列 `__OBS__` を `setup` 最先頭に `let __OBS__ = [];` で宣言
    *   3. 結果を executor の `setup` 引数として、本フィールドを executor の `workload` 引数として渡す
    *
    * `null` / `undefined` のとき (= client embedded / fallback / server 等の経路) は
-   * `slow` / `fast` がそのまま executor の workload に流れる。
+   * `before` / `after` がそのまま executor の workload に流れる。
    * Python `EquivalenceInput.workload=None` は JSON 経由で `null` として届くので、checker 側の
    * 経路判定は `input.workload != null` (loose) で書く。
    */
@@ -91,8 +91,8 @@ export interface EquivalenceInput {
 export interface OracleObservation {
   oracle: Oracle;
   verdict: OracleVerdict;
-  slow_value?: string | null;
-  fast_value?: string | null;
+  before_value?: string | null;
+  after_value?: string | null;
   detail?: string | null;
 }
 

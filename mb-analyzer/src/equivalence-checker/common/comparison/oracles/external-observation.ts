@@ -18,30 +18,30 @@ const EMPTY_PROFILE: ExternalObservationProfile = {};
  * - いずれか差分 → not_equal
  */
 export function checkExternalObservation(
-  slow: ExecutionCapture,
-  fast: ExecutionCapture,
+  before: ExecutionCapture,
+  after: ExecutionCapture,
   profile: ExternalObservationProfile = EMPTY_PROFILE,
 ): OracleObservation {
   const oracle = ORACLE.EXTERNAL_OBSERVATION;
   const ignorePatterns = profile.ignoreNewGlobalPatterns ?? [];
   const keepGlobal = (k: string): boolean => !ignorePatterns.some((re) => re.test(k));
-  const slowGlobalsRaw = slow.new_globals.filter(keepGlobal);
-  const fastGlobalsRaw = fast.new_globals.filter(keepGlobal);
+  const beforeGlobalsRaw = before.new_globals.filter(keepGlobal);
+  const afterGlobalsRaw = after.new_globals.filter(keepGlobal);
 
   const noSideEffects =
-    slow.console_log.length === 0 &&
-    fast.console_log.length === 0 &&
-    slowGlobalsRaw.length === 0 &&
-    fastGlobalsRaw.length === 0;
+    before.console_log.length === 0 &&
+    after.console_log.length === 0 &&
+    beforeGlobalsRaw.length === 0 &&
+    afterGlobalsRaw.length === 0;
   if (noSideEffects) {
     return { oracle, verdict: ORACLE_VERDICT.NOT_APPLICABLE };
   }
 
-  let slowConsoleSig: string;
-  let fastConsoleSig: string;
+  let beforeConsoleSig: string;
+  let afterConsoleSig: string;
   try {
-    slowConsoleSig = serializeConsoleCalls(slow.console_log);
-    fastConsoleSig = serializeConsoleCalls(fast.console_log);
+    beforeConsoleSig = serializeConsoleCalls(before.console_log);
+    afterConsoleSig = serializeConsoleCalls(after.console_log);
   } catch (e) {
     if (e instanceof SerializationError) {
       return {
@@ -57,23 +57,23 @@ export function checkExternalObservation(
     throw e;
   }
 
-  const consoleEqual = slowConsoleSig === fastConsoleSig;
+  const consoleEqual = beforeConsoleSig === afterConsoleSig;
 
-  const slowGlobals = [...new Set(slowGlobalsRaw)].sort();
-  const fastGlobals = [...new Set(fastGlobalsRaw)].sort();
+  const beforeGlobals = [...new Set(beforeGlobalsRaw)].sort();
+  const afterGlobals = [...new Set(afterGlobalsRaw)].sort();
   const globalsEqual =
-    slowGlobals.length === fastGlobals.length &&
-    slowGlobals.every((k, i) => k === fastGlobals[i]);
+    beforeGlobals.length === afterGlobals.length &&
+    beforeGlobals.every((k, i) => k === afterGlobals[i]);
 
-  const slowSummary = JSON.stringify({ console: slowConsoleSig, new_globals: slowGlobals });
-  const fastSummary = JSON.stringify({ console: fastConsoleSig, new_globals: fastGlobals });
+  const beforeSummary = JSON.stringify({ console: beforeConsoleSig, new_globals: beforeGlobals });
+  const afterSummary = JSON.stringify({ console: afterConsoleSig, new_globals: afterGlobals });
 
   if (consoleEqual && globalsEqual) {
     return {
       oracle,
       verdict: ORACLE_VERDICT.EQUAL,
-      slow_value: slowSummary,
-      fast_value: fastSummary,
+      before_value: beforeSummary,
+      after_value: afterSummary,
     };
   }
   const differs: string[] = [];
@@ -82,8 +82,8 @@ export function checkExternalObservation(
   return {
     oracle,
     verdict: ORACLE_VERDICT.NOT_EQUAL,
-    slow_value: slowSummary,
-    fast_value: fastSummary,
+    before_value: beforeSummary,
+    after_value: afterSummary,
     detail: `differs in: ${differs.join(", ")}`,
   };
 }

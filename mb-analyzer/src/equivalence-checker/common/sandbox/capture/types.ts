@@ -17,7 +17,7 @@ export interface ExceptionCapture {
 
 /**
  * setup で定義された object/array 1 つ分のスナップショット。
- * pre/post は body 実行前後の時間軸 (slow/fast のサイド軸とは別概念)。
+ * pre/post は body 実行前後の時間軸 (before/after のサイド軸とは別概念)。
  */
 export interface ArgumentSnapshot {
   key: string;

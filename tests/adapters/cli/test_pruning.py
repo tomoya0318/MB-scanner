@@ -32,7 +32,7 @@ class TestPruneCLI:
     def test_with_inline_flags_pruned(self) -> None:
         with patch(GATEWAY_CLS) as gw_cls:
             gw_cls.return_value.prune.return_value = _stub_result(PruningVerdict.PRUNED)
-            res = self.runner.invoke(app, ["prune", "--slow", "1+1", "--fast", "2"])
+            res = self.runner.invoke(app, ["prune", "--before", "1+1", "--after", "2"])
         assert res.exit_code == 0
         payload = json.loads(res.stdout)
         assert payload["verdict"] == "pruned"
@@ -40,38 +40,38 @@ class TestPruneCLI:
     def test_initial_mismatch_exit_code_1(self) -> None:
         with patch(GATEWAY_CLS) as gw_cls:
             gw_cls.return_value.prune.return_value = _stub_result(PruningVerdict.INITIAL_MISMATCH)
-            res = self.runner.invoke(app, ["prune", "--slow", "1", "--fast", "2"])
+            res = self.runner.invoke(app, ["prune", "--before", "1", "--after", "2"])
         assert res.exit_code == 1
 
     def test_error_exit_code_2(self) -> None:
         with patch(GATEWAY_CLS) as gw_cls:
             gw_cls.return_value.prune.return_value = _stub_result(PruningVerdict.ERROR)
-            res = self.runner.invoke(app, ["prune", "--slow", "1", "--fast", "1"])
+            res = self.runner.invoke(app, ["prune", "--before", "1", "--after", "1"])
         assert res.exit_code == 2
 
-    def test_missing_slow_fast_without_input_is_error(self) -> None:
+    def test_missing_before_after_without_input_is_error(self) -> None:
         res = self.runner.invoke(app, ["prune"])
         assert res.exit_code != 0
         assert "--input" in res.stdout or "--input" in res.stderr or "--input" in (res.output or "")
 
     def test_with_input_file(self, tmp_path: Path) -> None:
         input_file = tmp_path / "trip.json"
-        input_file.write_text(json.dumps({"setup": "const x = 1;", "slow": "x", "fast": "x"}))
+        input_file.write_text(json.dumps({"setup": "const x = 1;", "before": "x", "after": "x"}))
         with patch(GATEWAY_CLS) as gw_cls:
             gw_cls.return_value.prune.return_value = _stub_result(PruningVerdict.PRUNED)
             res = self.runner.invoke(app, ["prune", "--input", str(input_file)])
         assert res.exit_code == 0
         call_input = gw_cls.return_value.prune.call_args.args[0]
         assert call_input.setup == "const x = 1;"
-        assert call_input.slow == "x"
-        assert call_input.fast == "x"
+        assert call_input.before == "x"
+        assert call_input.after == "x"
 
     def test_max_iterations_passed_to_gateway(self) -> None:
         with patch(GATEWAY_CLS) as gw_cls:
             gw_cls.return_value.prune.return_value = _stub_result(PruningVerdict.PRUNED)
             self.runner.invoke(
                 app,
-                ["prune", "--slow", "1", "--fast", "1", "--max-iterations", "30"],
+                ["prune", "--before", "1", "--after", "1", "--max-iterations", "30"],
             )
         call_input = gw_cls.return_value.prune.call_args.args[0]
         assert call_input.max_iterations == 30
@@ -82,7 +82,7 @@ class TestPruneCLI:
             gw_cls.return_value.prune.return_value = _stub_result(PruningVerdict.PRUNED)
             res = self.runner.invoke(
                 app,
-                ["prune", "--slow", "1", "--fast", "1", "--output", str(out)],
+                ["prune", "--before", "1", "--after", "1", "--output", str(out)],
             )
         assert res.exit_code == 0
         written = json.loads(out.read_text())
@@ -90,7 +90,7 @@ class TestPruneCLI:
 
     def test_inline_flags_override_input_file(self, tmp_path: Path) -> None:
         input_file = tmp_path / "trip.json"
-        input_file.write_text(json.dumps({"setup": "var a = 1;", "slow": "a", "fast": "a"}))
+        input_file.write_text(json.dumps({"setup": "var a = 1;", "before": "a", "after": "a"}))
         with patch(GATEWAY_CLS) as gw_cls:
             gw_cls.return_value.prune.return_value = _stub_result(PruningVerdict.PRUNED)
             self.runner.invoke(
@@ -99,15 +99,15 @@ class TestPruneCLI:
                     "prune",
                     "--input",
                     str(input_file),
-                    "--slow",
+                    "--before",
                     "1",
-                    "--fast",
+                    "--after",
                     "2",
                 ],
             )
         call_input = gw_cls.return_value.prune.call_args.args[0]
-        assert call_input.slow == "1"
-        assert call_input.fast == "2"
+        assert call_input.before == "1"
+        assert call_input.after == "2"
         assert call_input.setup == "var a = 1;"  # setup は file のまま
 
     def test_invalid_json_input(self, tmp_path: Path) -> None:
@@ -139,9 +139,9 @@ class TestPruneBatchCLI:
         input_path = self._write_jsonl(
             tmp_path,
             [
-                {"id": "a", "slow": "1", "fast": "1"},
-                {"id": "b", "slow": "1", "fast": "2"},
-                {"id": "c", "slow": "3", "fast": "3"},
+                {"id": "a", "before": "1", "after": "1"},
+                {"id": "b", "before": "1", "after": "2"},
+                {"id": "c", "before": "3", "after": "3"},
             ],
         )
         output_path = tmp_path / "results.jsonl"
@@ -150,7 +150,7 @@ class TestPruneBatchCLI:
             return [
                 _stub_batch_result(
                     item.id or "?",
-                    PruningVerdict.PRUNED if item.slow == item.fast else PruningVerdict.INITIAL_MISMATCH,
+                    PruningVerdict.PRUNED if item.before == item.after else PruningVerdict.INITIAL_MISMATCH,
                 )
                 for item in items
             ]
@@ -184,7 +184,7 @@ class TestPruneBatchCLI:
         """
         input_path = self._write_jsonl(
             tmp_path,
-            [{"id": f"item-{i}", "slow": "1", "fast": "1"} for i in range(7)],
+            [{"id": f"item-{i}", "before": "1", "after": "1"} for i in range(7)],
         )
         output_path = tmp_path / "results.jsonl"
 
@@ -193,7 +193,7 @@ class TestPruneBatchCLI:
         chunk_call_count = 0
         chunk_lock = threading.Lock()
 
-        def slow_first_prune_batch(items: Sequence[PruningInput]) -> list[PruningResult]:
+        def before_first_prune_batch(items: Sequence[PruningInput]) -> list[PruningResult]:
             nonlocal chunk_call_count
             with chunk_lock:
                 chunk_call_count += 1
@@ -206,7 +206,7 @@ class TestPruneBatchCLI:
             return [_stub_batch_result(item.id or "?") for item in items]
 
         with patch(GATEWAY_CLS) as gw_cls:
-            gw_cls.return_value.prune_batch.side_effect = slow_first_prune_batch
+            gw_cls.return_value.prune_batch.side_effect = before_first_prune_batch
             res = self.runner.invoke(
                 app,
                 [
@@ -230,7 +230,7 @@ class TestPruneBatchCLI:
     def test_workers_minus_one_resolves(self, tmp_path: Path) -> None:
         input_path = self._write_jsonl(
             tmp_path,
-            [{"id": "a", "slow": "1", "fast": "1"}],
+            [{"id": "a", "before": "1", "after": "1"}],
         )
         with patch(GATEWAY_CLS) as gw_cls, patch("os.cpu_count", return_value=4):
             gw_cls.return_value.prune_batch.return_value = [_stub_batch_result("a")]
@@ -255,7 +255,7 @@ class TestPruneBatchCLI:
     def test_stdout_output_when_no_output_path(self, tmp_path: Path) -> None:
         input_path = self._write_jsonl(
             tmp_path,
-            [{"id": "a", "slow": "1", "fast": "1"}],
+            [{"id": "a", "before": "1", "after": "1"}],
         )
         with patch(GATEWAY_CLS) as gw_cls:
             gw_cls.return_value.prune_batch.return_value = [_stub_batch_result("a")]
@@ -276,8 +276,8 @@ class TestPruneBatchCLI:
         input_path = self._write_jsonl(
             tmp_path,
             [
-                {"id": "a", "slow": "1", "fast": "1", "timeout_ms": 1500, "max_iterations": 25},
-                {"id": "b", "slow": "1", "fast": "1"},  # 両方なし
+                {"id": "a", "before": "1", "after": "1", "timeout_ms": 1500, "max_iterations": 25},
+                {"id": "b", "before": "1", "after": "1"},  # 両方なし
             ],
         )
         captured: list[PruningInput] = []
@@ -336,7 +336,7 @@ class TestPruneBatchCLI:
     def test_id_auto_filled_when_missing_in_jsonl(self, tmp_path: Path) -> None:
         input_path = self._write_jsonl(
             tmp_path,
-            [{"slow": "1", "fast": "1"}, {"slow": "2", "fast": "2"}],
+            [{"before": "1", "after": "1"}, {"before": "2", "after": "2"}],
         )
         captured: list[PruningInput] = []
 
@@ -362,8 +362,8 @@ class TestPruneBatchCLI:
         input_path = self._write_jsonl(
             tmp_path,
             [
-                {"id": "ok", "slow": "1", "fast": "1"},
-                {"id": f"{INTERNAL_KEY_PREFIX}foo", "slow": "1", "fast": "1"},
+                {"id": "ok", "before": "1", "after": "1"},
+                {"id": f"{INTERNAL_KEY_PREFIX}foo", "before": "1", "after": "1"},
             ],
         )
         with patch(GATEWAY_CLS) as gw_cls:

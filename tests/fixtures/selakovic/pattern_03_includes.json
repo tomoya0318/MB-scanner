@@ -4,6 +4,6 @@
   "expected_verdict": "equal",
   "expected_primary_oracles": ["return_value"],
   "setup": "const arr = [1, 2, 3, 4, 5];",
-  "slow": "arr.indexOf(3) !== -1",
-  "fast": "arr.includes(3)"
+  "before": "arr.indexOf(3) !== -1",
+  "after": "arr.includes(3)"
 }

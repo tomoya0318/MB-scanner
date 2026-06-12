@@ -16,7 +16,7 @@ import { statementToCode, statementsToCode } from "../../../common/setup-cleanup
 
 /**
  * 段2 が「①にも②にも実質差がない / `f1`・`test` が規約外フォーマット」と判定した issue 用の安全弁 —
- * Tier 1 の素の top-level statement AST diff だけで `(setup, slow, fast)` を切り出す (`assemble/` の
+ * Tier 1 の素の top-level statement AST diff だけで `(setup, before, after)` を切り出す (`assemble/` の
  * degenerate 版、ADR-0011 §段2)。
  *
  * **statement 対応付け戦略**: top-level statement の canonical hash で greedy match → matched
@@ -122,8 +122,8 @@ export function extractFromScripts(beforeScript: string, afterScript: string): F
     const setupStatements = beforeBody.filter((_, idx) => idx !== c.beforeIndex);
     return {
       setup: statementsToCode(setupStatements),
-      slow: statementToCode(c.beforeStmt),
-      fast: statementToCode(c.afterStmt),
+      before: statementToCode(c.beforeStmt),
+      after: statementToCode(c.afterStmt),
       enclosure_node_type: c.enclosureType,
       before_node_count: beforeNodeCount,
       after_node_count: afterNodeCount,

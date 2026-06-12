@@ -141,13 +141,13 @@ CandidateMeta = Annotated[SelakovicCandidateMeta, Field(discriminator="adapter")
 class PreprocessingCandidate(BaseModel):
     """1 candidate の出力 (equivalence-checker の入力単位)
 
-    ``candidate_excluded`` が指定されている場合 ``slow`` / ``fast`` / ``setup`` は ``None``。
+    ``candidate_excluded`` が指定されている場合 ``before`` / ``after`` / ``setup`` は ``None``。
     ``enclosure_node_type`` は抽出した最小 enclosure の AST ノード型名 (Babel ノード型、
     "FunctionDeclaration" / "BlockStatement" 等)。threats to validity 集計で「どの粒度に
     収束したか」を見るため (ADR-0010)。
 
     ``workload`` は ADR-0023 D-β の placeholder substitution + 4 値契約フィールド。
-    ``setup`` に ``$BODY$`` プレースホルダを 1 個含み、``slow`` / ``fast`` を ``setup`` の
+    ``setup`` に ``$BODY$`` プレースホルダを 1 個含み、``before`` / ``after`` を ``setup`` の
     ``$BODY$`` に差し込んで sandbox に渡す経路 (= changed-fn 経路) でのみ非 ``None``。
     それ以外の経路 (client embedded / fallback / server 等) では ``None``。
     """
@@ -155,8 +155,8 @@ class PreprocessingCandidate(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     setup: str | None = None
-    slow: str | None = None
-    fast: str | None = None
+    before: str | None = None
+    after: str | None = None
     workload: str | None = None
     before_node_count: int | None = None
     after_node_count: int | None = None

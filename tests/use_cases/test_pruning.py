@@ -38,7 +38,7 @@ class TestPruningUseCase:
         stub = _StubPruner(expected)
         use_case = PruningUseCase(stub)
 
-        input_ = PruningInput(slow="1+1", fast="2")
+        input_ = PruningInput(before="1+1", after="2")
         result = use_case.prune(input_)
 
         assert stub.last_input == input_
@@ -49,7 +49,7 @@ class TestPruningUseCase:
         """UseCase は verdict を再計算せず Port 結果を素通しで返す"""
         stub_result = PruningResult(verdict=PruningVerdict.INITIAL_MISMATCH)
         use_case = PruningUseCase(_StubPruner(stub_result))
-        result = use_case.prune(PruningInput(slow="1", fast="2"))
+        result = use_case.prune(PruningInput(before="1", after="2"))
         assert result.verdict is PruningVerdict.INITIAL_MISMATCH
 
     def test_passthrough_error(self) -> None:
@@ -58,7 +58,7 @@ class TestPruningUseCase:
             error_message="node runner crashed",
         )
         use_case = PruningUseCase(_StubPruner(err))
-        result = use_case.prune(PruningInput(slow="1", fast="1"))
+        result = use_case.prune(PruningInput(before="1", after="1"))
         assert result.verdict is PruningVerdict.ERROR
         assert result.error_message == "node runner crashed"
 
@@ -68,7 +68,7 @@ class TestPruningUseCase:
             effective_timeout_ms=3000,
         )
         use_case = PruningUseCase(_StubPruner(result_with_echo))
-        result = use_case.prune(PruningInput(slow="1", fast="1", timeout_ms=3000))
+        result = use_case.prune(PruningInput(before="1", after="1", timeout_ms=3000))
         assert result.effective_timeout_ms == 3000
 
 
@@ -79,8 +79,8 @@ class TestPruneBatch:
         use_case = PruningUseCase(stub)
 
         inputs = [
-            PruningInput(id="a", slow="1", fast="1"),
-            PruningInput(id="b", slow="2", fast="2"),
+            PruningInput(id="a", before="1", after="1"),
+            PruningInput(id="b", before="2", after="2"),
         ]
         results = use_case.prune_batch(inputs)
 
@@ -95,6 +95,6 @@ class TestPruneBatch:
             error_message="subprocess crashed",
         )
         use_case = PruningUseCase(_StubPruner(err))
-        results = use_case.prune_batch([PruningInput(id="a", slow="1", fast="1")])
+        results = use_case.prune_batch([PruningInput(id="a", before="1", after="1")])
         assert results[0].verdict is PruningVerdict.ERROR
         assert results[0].error_message == "subprocess crashed"

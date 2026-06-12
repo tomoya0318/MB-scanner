@@ -173,11 +173,11 @@ describe("SelakovicCandidateMeta", () => {
 });
 
 describe("PreprocessingCandidate", () => {
-  it("setup / slow / fast / candidate_meta を含む candidate を表現できる", () => {
+  it("setup / before / after / candidate_meta を含む candidate を表現できる", () => {
     const c: PreprocessingCandidate = {
       setup: "const arr = [1, 2, 3];",
-      slow: "arr[0]",
-      fast: "arr[1]",
+      before: "arr[0]",
+      after: "arr[1]",
       enclosure_node_type: "FunctionExpression",
       before_node_count: 12,
       after_node_count: 10,
@@ -191,7 +191,7 @@ describe("PreprocessingCandidate", () => {
     expect(c.candidate_meta.target_side).toBe("workload");
   });
 
-  it("candidate_excluded のみで成立する (setup / slow / fast 省略可)", () => {
+  it("candidate_excluded のみで成立する (setup / before / after 省略可)", () => {
     const c: PreprocessingCandidate = {
       candidate_excluded: SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED,
       candidate_meta: {
@@ -201,14 +201,14 @@ describe("PreprocessingCandidate", () => {
       },
     };
     expect(c.candidate_excluded).toBe("change-not-exercised");
-    expect(c.slow).toBeUndefined();
+    expect(c.before).toBeUndefined();
   });
 
   it("workload (ADR-0023 D-β placeholder substitution + 4 値契約) は任意で changed-fn 経路でのみ定義", () => {
     const changedFn: PreprocessingCandidate = {
       setup: "var lib = { f: function () { $BODY$ } };",
-      slow: "__OBS__.push(1); return 1;",
-      fast: "__OBS__.push(2); return 2;",
+      before: "__OBS__.push(1); return 1;",
+      after: "__OBS__.push(2); return 2;",
       workload: "(function(){ __OBS__ = []; lib.f(); return JSON.stringify(__OBS__); })()",
       candidate_meta: {
         adapter: "selakovic",
@@ -221,8 +221,8 @@ describe("PreprocessingCandidate", () => {
     // 旧経路の candidate は workload 未定義
     const embedded: PreprocessingCandidate = {
       setup: "var x=1;",
-      slow: "x",
-      fast: "x",
+      before: "x",
+      after: "x",
       candidate_meta: {
         adapter: "selakovic",
         target_side: TARGET_SIDE.WORKLOAD,
@@ -240,8 +240,8 @@ describe("PreprocessingIssueResult", () => {
       candidates: [
         {
           setup: "var x=1;",
-          slow: "x",
-          fast: "x",
+          before: "x",
+          after: "x",
           candidate_meta: {
             adapter: "selakovic",
             target_side: TARGET_SIDE.WORKLOAD,

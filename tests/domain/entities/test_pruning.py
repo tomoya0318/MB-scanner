@@ -36,7 +36,7 @@ class TestEnums:
 
 class TestPruningInput:
     def test_minimal_input(self) -> None:
-        inp = PruningInput(slow="arr[0]", fast="arr[1]")
+        inp = PruningInput(before="arr[0]", after="arr[1]")
         assert inp.setup == ""
         assert inp.timeout_ms == 5000
         assert inp.max_iterations == 1000
@@ -45,8 +45,8 @@ class TestPruningInput:
     def test_full_input(self) -> None:
         inp = PruningInput(
             id="case-001",
-            slow="arr[0]",
-            fast="arr[1]",
+            before="arr[0]",
+            after="arr[1]",
             setup="const arr = [1, 2, 3];",
             timeout_ms=3000,
             max_iterations=100,
@@ -57,37 +57,37 @@ class TestPruningInput:
 
     def test_timeout_lower_bound(self) -> None:
         with pytest.raises(ValidationError):
-            PruningInput(slow="x", fast="x", timeout_ms=0)
+            PruningInput(before="x", after="x", timeout_ms=0)
 
     def test_timeout_upper_bound(self) -> None:
         with pytest.raises(ValidationError):
-            PruningInput(slow="x", fast="x", timeout_ms=60_001)
+            PruningInput(before="x", after="x", timeout_ms=60_001)
 
     def test_max_iterations_lower_bound(self) -> None:
         with pytest.raises(ValidationError):
-            PruningInput(slow="x", fast="x", max_iterations=0)
+            PruningInput(before="x", after="x", max_iterations=0)
 
     def test_max_iterations_upper_bound(self) -> None:
         with pytest.raises(ValidationError):
-            PruningInput(slow="x", fast="x", max_iterations=100_001)
+            PruningInput(before="x", after="x", max_iterations=100_001)
 
     def test_code_length_bound(self) -> None:
         # MAX_CODE_LENGTH (= 20MB、EquivalenceInput と同じ) を 1 文字でも超えたら ValidationError。
         # setup にも同じ上限がかかる (0022 の changed-fn candidate は lib 全文を setup に残す)。
         too_long = "x" * (MAX_CODE_LENGTH + 1)
         with pytest.raises(ValidationError):
-            PruningInput(slow=too_long, fast="x")
+            PruningInput(before=too_long, after="x")
         with pytest.raises(ValidationError):
-            PruningInput(slow="x", fast="x", setup=too_long)
+            PruningInput(before="x", after="x", setup=too_long)
         # ちょうど上限なら OK
-        PruningInput(slow="x" * MAX_CODE_LENGTH, fast="x")
+        PruningInput(before="x" * MAX_CODE_LENGTH, after="x")
 
     def test_extra_fields_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            PruningInput.model_validate({"slow": "x", "fast": "x", "unknown": 1})
+            PruningInput.model_validate({"before": "x", "after": "x", "unknown": 1})
 
     def test_id_round_trip(self) -> None:
-        inp = PruningInput(id="case-001", slow="x", fast="y", timeout_ms=3000)
+        inp = PruningInput(id="case-001", before="x", after="y", timeout_ms=3000)
         dumped = json.loads(inp.model_dump_json())
         assert dumped["id"] == "case-001"
         assert dumped["timeout_ms"] == 3000
@@ -96,7 +96,7 @@ class TestPruningInput:
 
     def test_timeout_ms_always_in_json(self) -> None:
         """デフォルト値でも JSON には必ず timeout_ms が含まれる (Python→Node 受け渡し保険)"""
-        inp = PruningInput(slow="x", fast="x")
+        inp = PruningInput(before="x", after="x")
         dumped = json.loads(inp.model_dump_json())
         assert "timeout_ms" in dumped
         assert dumped["timeout_ms"] == 5000
@@ -110,15 +110,15 @@ class TestPruningInputEquivalenceContext:
     """
 
     def test_defaults_are_none(self) -> None:
-        inp = PruningInput(slow="x", fast="x")
+        inp = PruningInput(before="x", after="x")
         assert inp.environment is None
         assert inp.module_base_dir is None
         assert inp.mount_html is None
 
     def test_accepts_and_round_trips(self) -> None:
         payload = {
-            "slow": "x",
-            "fast": "x",
+            "before": "x",
+            "after": "x",
             "timeout_ms": 5000,
             "environment": "jsdom",
             "module_base_dir": "/abs/data/selakovic-2016-issues/serverIssues/ChalkIssues/issues/issue_28",
@@ -133,12 +133,12 @@ class TestPruningInputEquivalenceContext:
 
     def test_workload_default_none_and_round_trip(self) -> None:
         """ADR-0023 D-β: workload は changed-fn 経路の pass-through、旧経路は None"""
-        inp = PruningInput(slow="x", fast="x")
+        inp = PruningInput(before="x", after="x")
         assert inp.workload is None
 
         payload = {
-            "slow": "return 1;",
-            "fast": "return 2;",
+            "before": "return 1;",
+            "after": "return 2;",
             "workload": "(function(){ __OBS__ = []; lib.f(); return JSON.stringify(__OBS__); })()",
         }
         inp2 = PruningInput.model_validate(payload)
@@ -150,7 +150,7 @@ class TestPruningInputEquivalenceContext:
     def test_workload_length_bound(self) -> None:
         too_long = "x" * (MAX_CODE_LENGTH + 1)
         with pytest.raises(ValidationError):
-            PruningInput(slow="x", fast="x", workload=too_long)
+            PruningInput(before="x", after="x", workload=too_long)
 
 
 class TestPlaceholder:
@@ -176,8 +176,8 @@ class TestPruningResult:
                 {"id": "$VAR_1", "kind": "expression", "original_snippet": "arr[0]"},
             ],
             "iterations": 3,
-            "node_count_before": 10,
-            "node_count_after": 3,
+            "node_count_initial": 10,
+            "node_count_pruned": 3,
             "effective_timeout_ms": 5000,
         }
         result = PruningResult.model_validate(payload)
@@ -186,7 +186,7 @@ class TestPruningResult:
         assert result.placeholders[0].kind is PlaceholderKind.EXPRESSION
 
     def test_initial_mismatch_result(self) -> None:
-        """Slow ≢ fast で pruning 前段停止のケースは pattern 系が無くても成立する"""
+        """Before ≢ after で pruning 前段停止のケースは pattern 系が無くても成立する"""
         result = PruningResult.model_validate({"verdict": "initial_mismatch"})
         assert result.verdict is PruningVerdict.INITIAL_MISMATCH
         assert result.pattern_code is None

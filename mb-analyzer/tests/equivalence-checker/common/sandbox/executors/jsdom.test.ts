@@ -43,7 +43,7 @@ describe("executeInJsdom", () => {
     expect(cap.console_log[0]?.args).toEqual(["hello", 42]);
   });
 
-  it("Date.now() / Math.random() が凍結されている (slow/fast で食い違わない)", async () => {
+  it("Date.now() / Math.random() が凍結されている (before/after で食い違わない)", async () => {
     const a = await executeInJsdom({ setup: "", workload: "Date.now()", timeout_ms: TIMEOUT });
     const b = await executeInJsdom({ setup: "", workload: "Date.now()", timeout_ms: TIMEOUT });
     expect(a.return_value).toBe("0");

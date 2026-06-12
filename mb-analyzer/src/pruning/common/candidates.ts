@@ -18,7 +18,7 @@ import { WHITELIST_CATEGORIES } from "./rules/whitelist";
  *   3. 親子 blacklist: 親 field validator が置換後の型 (ExpressionStatement / Identifier /
  *      StringLiteral) を受理しない位置を除外。ルールは `@babel/types` の文法メタ
  *      データから `rules/blacklist.ts` で自動導出 (ADR-0005)
- *   4. SubtreeSet.has: fast に同型が存在する「共通ノード」に絞る
+ *   4. SubtreeSet.has: after に同型が存在する「共通ノード」に絞る
  *      (研究計画 §第 1 段階 で「差分ノードは必須扱い」とするため)
  *   5. リテラルの差分内保護 (ADR-0028): リテラルは「親も共通ノード」の時だけ候補にする。
  *      hash 値衝突で差分内 load-bearing リテラルが共通誤判定されるのを防ぐ
@@ -40,18 +40,18 @@ export interface CandidatePath {
 /**
  * pruning 候補を列挙する。
  *
- * @param slow 対象の File AST
- * @param diff SubtreeSet (fast との共通ノード判定)。undefined なら差分フィルタを
+ * @param before 対象の File AST
+ * @param diff SubtreeSet (after との共通ノード判定)。undefined なら差分フィルタを
  *   適用せず全ての whitelist ノードを候補にする (テスト用)。
  */
 export function enumerateCandidates(
-  slow: File,
+  before: File,
   diff?: SubtreeSet,
 ): CandidatePath[] {
   const candidates: CandidatePath[] = [];
   const blacklist = BLACKLIST_CATEGORIES;
 
-  walkNodes(slow, ({ node, parent, parentKey, listIndex }) => {
+  walkNodes(before, ({ node, parent, parentKey, listIndex }) => {
     if (parent === null || parentKey === null) return;
     if (!isCandidate(node, parent, parentKey, blacklist, diff)) return;
     candidates.push({
@@ -124,14 +124,14 @@ function isCandidate(
   }
 
   if (diff !== undefined) {
-    // 段4: fast に同型が無い差分ノードは必須扱いで候補から外す。
+    // 段4: after に同型が無い差分ノードは必須扱いで候補から外す。
     if (!diff.has(node)) return false;
     // 段5: 差分サブツリー内のリテラル保護 (ADR-0028)。リテラル (符号付き数値等の単項式リテラルを含む) は
     // 親も共通ノードの時のみ候補にする (差分内の load-bearing リテラルが hash 衝突で wildcard 化されるのを防ぐ)。
     // ここに来た時点で node は共通ノード (段4 通過済み)。
-    // TODO(ADR-0028 既知の限界④): diff は fast から 1 回構築され不変なため、prune ループ中に親が
+    // TODO(ADR-0028 既知の限界④): diff は after から 1 回構築され不変なため、prune ループ中に親が
     //   wildcard 化されると ($P < 100000 等) incidental な harness 定数が過保護に skeleton 固定されうる。
-    //   発生は候補の wildcard 順序に依存し dataset 次第。実害が出たら親判定を初期 slow 基準にする等を検討。
+    //   発生は候補の wildcard 順序に依存し dataset 次第。実害が出たら親判定を初期 before 基準にする等を検討。
     if (isLiteralNode(node) && !diff.has(parent)) return false;
   }
 
@@ -277,7 +277,7 @@ if (import.meta.vitest) {
   });
 
   describe("isCandidate (in-source) — 差分内リテラル保護 (ADR-0028)", () => {
-    // diff.has(x) = 「x と同型サブツリーが fast に存在 = 共通ノード」。渡したノードだけを
+    // diff.has(x) = 「x と同型サブツリーが after に存在 = 共通ノード」。渡したノードだけを
     // 共通とみなすスタブで、node / parent の共通性を独立に出し分ける。
     const diffWith = (...common: Node[]): SubtreeSet =>
       ({ has: (n: Node) => common.includes(n) }) as unknown as SubtreeSet;
@@ -315,8 +315,8 @@ if (import.meta.vitest) {
 
   describe("enumerateCandidates (in-source) — whitelist 連携", () => {
     it("WHITELIST_CATEGORIES の 3 カテゴリすべてから候補が拾われる", () => {
-      const slow = parse("if (c) { use(arr[0]); }");
-      const ts = candidateTypes(enumerateCandidates(slow));
+      const before = parse("if (c) { use(arr[0]); }");
+      const ts = candidateTypes(enumerateCandidates(before));
       expect(ts).toContain("IfStatement"); // statement
       expect(ts).toContain("BlockStatement"); // statement
       expect(ts).toContain("CallExpression"); // expression
@@ -326,8 +326,8 @@ if (import.meta.vitest) {
     });
 
     it("WHITELIST_CATEGORIES 外の型 (VariableDeclarator / Program / File) は候補に入らない", () => {
-      const slow = parse("const x = 1;");
-      const ts = candidateTypes(enumerateCandidates(slow));
+      const before = parse("const x = 1;");
+      const ts = candidateTypes(enumerateCandidates(before));
       expect(ts).not.toContain("VariableDeclarator");
       expect(ts).not.toContain("Program");
       expect(ts).not.toContain("File");
@@ -336,8 +336,8 @@ if (import.meta.vitest) {
 
   describe("enumerateCandidates (in-source) — blacklist 連携", () => {
     it("blacklist で除外される位置は候補から消える (代表例: VariableDeclarator.id の Identifier)", () => {
-      const slow = parse("const x = arr[0];");
-      const candidates = enumerateCandidates(slow);
+      const before = parse("const x = arr[0];");
+      const candidates = enumerateCandidates(before);
       const onIdSlot = candidates.filter(
         (c) => c.parent.type === "VariableDeclarator" && c.parentKey === "id",
       );
@@ -345,8 +345,8 @@ if (import.meta.vitest) {
     });
 
     it("blacklist 対象でない位置は同じ型でも通常通り候補化される (init 側)", () => {
-      const slow = parse("const x = arr[0];");
-      const candidates = enumerateCandidates(slow);
+      const before = parse("const x = arr[0];");
+      const candidates = enumerateCandidates(before);
       const onInit = candidates.filter(
         (c) => c.parent.type === "VariableDeclarator" && c.parentKey === "init",
       );
@@ -357,8 +357,8 @@ if (import.meta.vitest) {
     it("discriminator 条件付き blacklist が computed 値で切り替わる (MemberExpression.property)", () => {
       // computed=false: `obj.x` の `x` は blacklist (Identifier-only 位置)
       // computed=true:  `obj[expr]` の `expr` は blacklist 対象外
-      const slow = parse("obj.x + obj[k];");
-      const candidates = enumerateCandidates(slow);
+      const before = parse("obj.x + obj[k];");
+      const candidates = enumerateCandidates(before);
       const onProperty = candidates.filter(
         (c) => c.parent.type === "MemberExpression" && c.parentKey === "property",
       );
@@ -369,15 +369,15 @@ if (import.meta.vitest) {
   });
 
   describe("enumerateCandidates (in-source) — SubtreeSet 連携", () => {
-    const SLOW_CODE = "use(key, flag);";
-    const FAST_CODE = "use(key);";
+    const BEFORE_CODE = "use(key, flag);";
+    const AFTER_CODE = "use(key);";
 
     it("差分ノードは diff 渡し時に除外される", () => {
-      const slow = parse(SLOW_CODE);
-      const fast = parse(FAST_CODE);
-      const diff = new SubtreeSet(fast);
+      const before = parse(BEFORE_CODE);
+      const after = parse(AFTER_CODE);
+      const diff = new SubtreeSet(after);
 
-      const candidates = enumerateCandidates(slow, diff);
+      const candidates = enumerateCandidates(before, diff);
       const flagIdent = candidates.find(
         (c) =>
           c.node.type === "Identifier" && (c.node as { name?: string }).name === "flag",
@@ -386,11 +386,11 @@ if (import.meta.vitest) {
     });
 
     it("共通ノードは diff 渡し時にも候補に入る", () => {
-      const slow = parse(SLOW_CODE);
-      const fast = parse(FAST_CODE);
-      const diff = new SubtreeSet(fast);
+      const before = parse(BEFORE_CODE);
+      const after = parse(AFTER_CODE);
+      const diff = new SubtreeSet(after);
 
-      const candidates = enumerateCandidates(slow, diff);
+      const candidates = enumerateCandidates(before, diff);
       const keyIdents = candidates.filter(
         (c) =>
           c.node.type === "Identifier" && (c.node as { name?: string }).name === "key",
@@ -399,8 +399,8 @@ if (import.meta.vitest) {
     });
 
     it("diff を渡さなければ差分フィルタは無効化される", () => {
-      const slow = parse(SLOW_CODE);
-      const candidates = enumerateCandidates(slow);
+      const before = parse(BEFORE_CODE);
+      const candidates = enumerateCandidates(before);
       const flagIdent = candidates.find(
         (c) =>
           c.node.type === "Identifier" && (c.node as { name?: string }).name === "flag",
@@ -411,8 +411,8 @@ if (import.meta.vitest) {
 
   describe("enumerateCandidates (in-source) — CandidatePath 構造", () => {
     it("配列子は listIndex 付き、スカラ子は listIndex なし", () => {
-      const slow = parse("if (c) { a(); b(); }");
-      const candidates = enumerateCandidates(slow);
+      const before = parse("if (c) { a(); b(); }");
+      const candidates = enumerateCandidates(before);
 
       const blockChildren = candidates.filter(
         (c) => c.parent.type === "BlockStatement" && c.parentKey === "body",
@@ -431,17 +431,17 @@ if (import.meta.vitest) {
   describe("enumerateCandidates (in-source) — placeholder 除外", () => {
     it("入力に既に $Pn Identifier があれば候補から外れる", () => {
       // ユーザーが偶然 `$P0` という名前の変数を書いた想定 (判別不能は ADR-0009 で許容)
-      const slow = parse("$P0; foo();");
-      const ts = candidateTypes(enumerateCandidates(slow));
+      const before = parse("$P0; foo();");
+      const ts = candidateTypes(enumerateCandidates(before));
       // foo, ExpressionStatement(foo()) などは候補化されるが、$P0 の Identifier と
       // それを包む ExpressionStatement は除外される
-      const placeholderIdent = enumerateCandidates(slow).find(
+      const placeholderIdent = enumerateCandidates(before).find(
         (c) =>
           c.node.type === "Identifier" &&
           (c.node as { name?: string }).name === "$P0",
       );
       expect(placeholderIdent).toBeUndefined();
-      const placeholderStmt = enumerateCandidates(slow).find(
+      const placeholderStmt = enumerateCandidates(before).find(
         (c) =>
           c.node.type === "ExpressionStatement" &&
           ((c.node as { expression?: { type?: string; name?: string } }).expression?.name ===
@@ -455,8 +455,8 @@ if (import.meta.vitest) {
 
   describe("enumerateCandidates (in-source) — ソート", () => {
     it("サイズ降順 (start/end 幅) でソートされる", () => {
-      const slow = parse("if (c) { const x = arr[0]; use(x); }");
-      const candidates = enumerateCandidates(slow);
+      const before = parse("if (c) { const x = arr[0]; use(x); }");
+      const candidates = enumerateCandidates(before);
       expect(candidates[0]?.node.type).toBe("IfStatement");
       const sizes = candidates.map((c) => (c.node.end ?? 0) - (c.node.start ?? 0));
       for (let i = 0; i < sizes.length - 1; i++) {

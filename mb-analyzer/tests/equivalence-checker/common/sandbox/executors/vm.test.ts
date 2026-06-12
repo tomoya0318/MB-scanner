@@ -1,5 +1,5 @@
 /**
- * 対象: executeSandboxed (素 node:vm context での slow/fast 実行 + 観測値 (return/exception/console/globals/arg_snapshots) の捕捉)
+ * 対象: executeSandboxed (素 node:vm context での before/after 実行 + 観測値 (return/exception/console/globals/arg_snapshots) の捕捉)
  * 観点: 4 oracle が使う ExecutionCapture を過不足なく生成し、非決定性遮断・host 逃げ道遮断と統合して決定的に動くこと
  * 判定事項:
  *   - 戻り値: 式の serialize、setup 変数参照、文のみなら return_is_undefined=true、NaN/-0 区別

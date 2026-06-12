@@ -4,7 +4,7 @@ import type { ExecutionCapture } from "../../sandbox/capture/types";
 
 /**
  * O2: setup 由来 object/array の pre/post snapshot 差分比較。
- * pre/post は body 実行前後の時間軸 (slow/fast のサイド軸とは別概念)。
+ * pre/post は body 実行前後の時間軸 (before/after のサイド軸とは別概念)。
  *
  * - 両側とも setup で object/array を 1 つも定義していない → not_applicable
  * - snapshot にシリアライズ不能マーカ (循環参照等) を含む key は **比較対象から除外**。残り 0 件 → not_applicable
@@ -19,45 +19,45 @@ import type { ExecutionCapture } from "../../sandbox/capture/types";
 // 「巨大だが有限の文字列」として比較できる (要 maxDepth デフォルト設定で文字列サイズを抑える)。
 // そうすればここのシリアライズ不能 key 除外も不要になる。
 export function checkArgumentMutation(
-  slow: ExecutionCapture,
-  fast: ExecutionCapture,
+  before: ExecutionCapture,
+  after: ExecutionCapture,
 ): OracleObservation {
   const oracle = ORACLE.ARGUMENT_MUTATION;
 
-  if (slow.arg_snapshots.length === 0 && fast.arg_snapshots.length === 0) {
+  if (before.arg_snapshots.length === 0 && after.arg_snapshots.length === 0) {
     return { oracle, verdict: ORACLE_VERDICT.NOT_APPLICABLE };
   }
 
   const serializable = (s: { pre: string; post: string }): boolean =>
     s.pre !== UNSERIALIZABLE_MARKER && s.post !== UNSERIALIZABLE_MARKER;
-  const slowPost = new Map(slow.arg_snapshots.filter(serializable).map((s) => [s.key, s.post]));
-  const fastPost = new Map(fast.arg_snapshots.filter(serializable).map((s) => [s.key, s.post]));
-  if (slowPost.size === 0 && fastPost.size === 0) {
+  const beforePost = new Map(before.arg_snapshots.filter(serializable).map((s) => [s.key, s.post]));
+  const afterPost = new Map(after.arg_snapshots.filter(serializable).map((s) => [s.key, s.post]));
+  if (beforePost.size === 0 && afterPost.size === 0) {
     return { oracle, verdict: ORACLE_VERDICT.NOT_APPLICABLE };
   }
-  const keys = new Set<string>([...slowPost.keys(), ...fastPost.keys()]);
+  const keys = new Set<string>([...beforePost.keys(), ...afterPost.keys()]);
 
   const differingKeys: string[] = [];
   for (const k of keys) {
-    if (slowPost.get(k) !== fastPost.get(k)) differingKeys.push(k);
+    if (beforePost.get(k) !== afterPost.get(k)) differingKeys.push(k);
   }
 
-  const slowSummary = JSON.stringify(Object.fromEntries(slowPost));
-  const fastSummary = JSON.stringify(Object.fromEntries(fastPost));
+  const beforeSummary = JSON.stringify(Object.fromEntries(beforePost));
+  const afterSummary = JSON.stringify(Object.fromEntries(afterPost));
 
   if (differingKeys.length === 0) {
     return {
       oracle,
       verdict: ORACLE_VERDICT.EQUAL,
-      slow_value: slowSummary,
-      fast_value: fastSummary,
+      before_value: beforeSummary,
+      after_value: afterSummary,
     };
   }
   return {
     oracle,
     verdict: ORACLE_VERDICT.NOT_EQUAL,
-    slow_value: slowSummary,
-    fast_value: fastSummary,
+    before_value: beforeSummary,
+    after_value: afterSummary,
     detail: `differing keys: ${differingKeys.sort().join(", ")}`,
   };
 }

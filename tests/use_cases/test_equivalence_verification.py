@@ -163,7 +163,7 @@ class TestEquivalenceVerificationUseCase:
         stub = _StubChecker(expected)
         use_case = EquivalenceVerificationUseCase(stub)
 
-        input_ = EquivalenceInput(slow="1", fast="1")
+        input_ = EquivalenceInput(before="1", after="1")
         result = use_case.verify(input_)
 
         assert stub.last_input == input_
@@ -179,7 +179,7 @@ class TestEquivalenceVerificationUseCase:
             ],
         )
         use_case = EquivalenceVerificationUseCase(_StubChecker(wrong))
-        result = use_case.verify(EquivalenceInput(slow="1", fast="1"))
+        result = use_case.verify(EquivalenceInput(before="1", after="1"))
         assert result.verdict is Verdict.NOT_EQUAL
 
     def test_passthrough_error_without_observations(self) -> None:
@@ -190,7 +190,7 @@ class TestEquivalenceVerificationUseCase:
             error_message="node runner crashed",
         )
         use_case = EquivalenceVerificationUseCase(_StubChecker(err))
-        result = use_case.verify(EquivalenceInput(slow="1", fast="1"))
+        result = use_case.verify(EquivalenceInput(before="1", after="1"))
         assert result.verdict is Verdict.ERROR
         assert result.error_message == "node runner crashed"
         assert result.verdict_reason == "executor-error"
@@ -207,7 +207,7 @@ class TestEquivalenceVerificationUseCase:
             ],
         )
         use_case = EquivalenceVerificationUseCase(_StubChecker(wrong))
-        result = use_case.verify(EquivalenceInput(slow="1", fast="1"))
+        result = use_case.verify(EquivalenceInput(before="1", after="1"))
         assert result.verdict is Verdict.INCONCLUSIVE
         assert result.verdict_reason == "both-sides-threw"
 
@@ -222,8 +222,8 @@ class TestVerifyBatch:
         use_case = EquivalenceVerificationUseCase(stub)
 
         inputs = [
-            EquivalenceInput(id="a", slow="1", fast="1"),
-            EquivalenceInput(id="b", slow="2", fast="2"),
+            EquivalenceInput(id="a", before="1", after="1"),
+            EquivalenceInput(id="b", before="2", after="2"),
         ]
         results = use_case.verify_batch(inputs)
 
@@ -238,7 +238,7 @@ class TestVerifyBatch:
             observations=[obs(OracleVerdict.NOT_EQUAL)],
         )
         use_case = EquivalenceVerificationUseCase(_StubChecker(wrong))
-        results = use_case.verify_batch([EquivalenceInput(id="a", slow="1", fast="1")])
+        results = use_case.verify_batch([EquivalenceInput(id="a", before="1", after="1")])
         assert results[0].verdict is Verdict.NOT_EQUAL
 
     def test_batch_passthrough_error_without_observations(self) -> None:
@@ -248,7 +248,7 @@ class TestVerifyBatch:
             error_message="subprocess crashed",
         )
         use_case = EquivalenceVerificationUseCase(_StubChecker(err))
-        results = use_case.verify_batch([EquivalenceInput(id="a", slow="1", fast="1")])
+        results = use_case.verify_batch([EquivalenceInput(id="a", before="1", after="1")])
         assert results[0].verdict is Verdict.ERROR
         assert results[0].error_message == "subprocess crashed"
 
@@ -260,6 +260,6 @@ class TestVerifyBatch:
         )
         use_case = EquivalenceVerificationUseCase(_StubChecker(result_with_echo))
         results = use_case.verify_batch(
-            [EquivalenceInput(id="a", slow="1", fast="1", timeout_ms=3000)],
+            [EquivalenceInput(id="a", before="1", after="1", timeout_ms=3000)],
         )
         assert results[0].effective_timeout_ms == 3000

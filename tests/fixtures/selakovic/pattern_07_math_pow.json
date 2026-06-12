@@ -4,6 +4,6 @@
   "expected_verdict": "equal",
   "expected_primary_oracles": ["return_value"],
   "setup": "const x = 7;",
-  "slow": "Math.pow(x, 2)",
-  "fast": "x * x"
+  "before": "Math.pow(x, 2)",
+  "after": "x * x"
 }

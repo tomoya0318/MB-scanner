@@ -159,17 +159,17 @@ if (import.meta.vitest) {
     });
 
     it("root の部分式として同型が存在するノードは common (a+b は (a+b)+c の左部分式)", () => {
-      const slow = parse("a + b");
+      const before = parse("a + b");
       const set = new SubtreeSet(parse("a + b + c"));
-      const stmt = slow.program.body[0];
+      const stmt = before.program.body[0];
       if (stmt?.type !== "ExpressionStatement") throw new Error("unexpected");
       expect(set.has(stmt.expression)).toBe(true);
     });
 
     it("root に同型サブツリーが存在しないノードは not-common (演算子違い)", () => {
-      const slow = parse("a - b");
+      const before = parse("a - b");
       const set = new SubtreeSet(parse("a + b"));
-      const stmt = slow.program.body[0];
+      const stmt = before.program.body[0];
       if (stmt?.type !== "ExpressionStatement") throw new Error("unexpected");
       expect(set.has(stmt.expression)).toBe(false);
     });

@@ -5,7 +5,7 @@
  *   - VERDICT / ORACLE_VERDICT / ORACLE: Python 側 StrEnum と同一の文字列値 (runtime)
  *   - Verdict / OracleVerdict / Oracle: union 型が Python と同じ列挙幅 (型レベル)
  *   - ALL_ORACLES: 6 oracle を過不足なく列挙
- *   - EquivalenceInput: slow/fast 必須、id/setup/timeout_ms/environment/module_base_dir/mount_html は任意
+ *   - EquivalenceInput: before/after 必須、id/setup/timeout_ms/environment/module_base_dir/mount_html は任意
  *   - OracleObservation: JSON 往復でフィールド名と値を保持
  *   - EquivalenceCheckResult: equal は observations 必須、error は error_message を伴える
  */
@@ -74,19 +74,19 @@ describe("ORACLE", () => {
 });
 
 describe("EquivalenceInput", () => {
-  it("slow / fast 必須、それ以外 (id / setup / timeout_ms / environment / module_base_dir / mount_html / workload) は任意", () => {
-    const minimal: EquivalenceInput = { slow: "1", fast: "1" };
+  it("before / after 必須、それ以外 (id / setup / timeout_ms / environment / module_base_dir / mount_html / workload) は任意", () => {
+    const minimal: EquivalenceInput = { before: "1", after: "1" };
     const full: EquivalenceInput = {
       id: "case-001",
       setup: "const x = 1;",
-      slow: "x",
-      fast: "x",
+      before: "x",
+      after: "x",
       timeout_ms: 5000,
       environment: "jsdom",
       module_base_dir: "/abs/issue",
       mount_html: "<div id='demo'></div>",
     };
-    expect(minimal.slow).toBe("1");
+    expect(minimal.before).toBe("1");
     expect(minimal.workload).toBeUndefined();
     expect(full.id).toBe("case-001");
     expect(full.timeout_ms).toBe(5000);
@@ -97,8 +97,8 @@ describe("EquivalenceInput", () => {
   it("workload (ADR-0023 D-β placeholder substitution + 4 値契約) を含めて JSON 往復で保持される", () => {
     const inp: EquivalenceInput = {
       setup: "var lib = { f: function () { $BODY$ } };",
-      slow: "__OBS__.push(1); return 1;",
-      fast: "__OBS__.push(2); return 2;",
+      before: "__OBS__.push(1); return 1;",
+      after: "__OBS__.push(2); return 2;",
       workload: "(function(){ __OBS__ = []; lib.f(); return JSON.stringify(__OBS__); })()",
     };
     const parsed = JSON.parse(JSON.stringify(inp)) as EquivalenceInput;
@@ -112,8 +112,8 @@ describe("OracleObservation", () => {
     const obs: OracleObservation = {
       oracle: ORACLE.RETURN_VALUE,
       verdict: ORACLE_VERDICT.NOT_EQUAL,
-      slow_value: "-1",
-      fast_value: "1",
+      before_value: "-1",
+      after_value: "1",
       detail: null,
     };
     const parsed = JSON.parse(JSON.stringify(obs)) as OracleObservation;
@@ -121,8 +121,8 @@ describe("OracleObservation", () => {
     expect(Object.keys(parsed)).toEqual([
       "oracle",
       "verdict",
-      "slow_value",
-      "fast_value",
+      "before_value",
+      "after_value",
       "detail",
     ]);
   });

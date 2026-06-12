@@ -42,10 +42,10 @@ describe("SubtreeSet (property)", () => {
   it("同じソースから作った 2 つの File は全サブツリーが集合に含まれる (再 parse 安定性)", () => {
     fc.assert(
       fc.property(expressionArb, (code) => {
-        const slow = parse(code);
-        const fast = parse(code);
-        const subtrees = new SubtreeSet(fast);
-        for (const node of walkAllNodes(slow)) {
+        const before = parse(code);
+        const after = parse(code);
+        const subtrees = new SubtreeSet(after);
+        for (const node of walkAllNodes(before)) {
           if (!subtrees.has(node)) return false;
         }
         return true;

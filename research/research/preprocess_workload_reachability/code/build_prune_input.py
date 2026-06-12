@@ -3,11 +3,14 @@
 
 0021 版との違い:
 - candidate_kind の絞り込みは `build_inputs.py` で済 (= ここに来るのは {changed-fn, body} だけ)。
-- 「重い候補」の判定を `slow` 長 → **`setup` 長** に変更 (changed-fn の `setup` は Ember 級 lib 全文 + 依存 lib で巨大。
-  1 iter ごとに lib bootstrap が走るので、`setup` がデカい候補は max_iterations を控えめにする。`slow` は changed-fn でも小さい)。
+- 「重い候補」の判定を `before` 長 → **`setup` 長** に変更 (changed-fn の `setup` は Ember 級 lib 全文 + 依存 lib で巨大。
+  1 iter ごとに lib bootstrap が走るので、`setup` がデカい候補は max_iterations を控えめにする。`before` は changed-fn でも小さい)。
 - `timeout_ms` を per-iter 用の小さい値 (3000) に上書き (equiv-input は 15000 を持ってるが、prune の 1 iter 用には別)。
 - 当面 **equal-only** (C2 — `inconclusive` は弱い equal で巨大候補が混ざるので様子見)。
 - `prune` のメモリリーク (別 TODO #2) で数百 iter 回すと OOM するので、収束 cap は控えめ。重い候補ほど小さく。
+
+注意: slow/fast → before/after の契約キーリネーム以前に保存した equiv-results.jsonl /
+equiv-input.jsonl (brain-2 等のバッチ出力) とは互換がない。以後の集計は再走が前提。
 
 usage:
   python tmp/0022_.../build_prune_input.py                       # BIG_MAX_ITER=50  SMALL_MAX_ITER=5000
@@ -52,7 +55,7 @@ def main() -> int:
                 skipped_missing.append(rec_id)
                 continue
             # PruningInput の max_length に引っかかる candidate は除外 (= mbs prune-batch が 1 行でも invalid だとバッチごと abort するため)。
-            if any(len(src.get(k, "") or "") > MAX_CODE_LENGTH for k in ("setup", "slow", "fast", "workload")):
+            if any(len(src.get(k, "") or "") > MAX_CODE_LENGTH for k in ("setup", "before", "after", "workload")):
                 skipped_huge.append(rec_id)
                 continue
             out = dict(src)

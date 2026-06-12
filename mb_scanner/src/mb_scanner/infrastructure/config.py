@@ -23,10 +23,7 @@ class Settings(BaseSettings):
 
     mb_analyzer_cli_path: Path | None = Field(
         default=None,
-        description=(
-            "mb-analyzer の CLI バンドル dist/cli.js のパス。"
-            "未指定なら cwd 基準のデフォルト位置を利用する。"
-        ),
+        description=("mb-analyzer の CLI バンドル dist/cli.js のパス。未指定なら cwd 基準のデフォルト位置を利用する。"),
     )
     mb_analyzer_node_bin: str = Field(
         default="node",

@@ -4,6 +4,6 @@
   "expected_verdict": "equal",
   "expected_primary_oracles": ["return_value"],
   "setup": "const x = 5;",
-  "slow": "x % 2",
-  "fast": "x & 1"
+  "before": "x % 2",
+  "after": "x & 1"
 }

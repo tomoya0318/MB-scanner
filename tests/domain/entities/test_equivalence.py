@@ -47,72 +47,72 @@ class TestEnums:
 
 class TestEquivalenceInput:
     def test_minimal_input(self) -> None:
-        inp = EquivalenceInput(slow="1", fast="2")
+        inp = EquivalenceInput(before="1", after="2")
         assert inp.setup == ""
         assert inp.timeout_ms == 5000
 
     def test_full_input(self) -> None:
-        inp = EquivalenceInput(setup="const x=1;", slow="x", fast="x", timeout_ms=3000)
+        inp = EquivalenceInput(setup="const x=1;", before="x", after="x", timeout_ms=3000)
         assert inp.setup == "const x=1;"
         assert inp.timeout_ms == 3000
 
     def test_timeout_lower_bound(self) -> None:
         with pytest.raises(ValidationError):
-            EquivalenceInput(slow="1", fast="1", timeout_ms=0)
+            EquivalenceInput(before="1", after="1", timeout_ms=0)
 
     def test_timeout_upper_bound(self) -> None:
         with pytest.raises(ValidationError):
-            EquivalenceInput(slow="1", fast="1", timeout_ms=60_001)
+            EquivalenceInput(before="1", after="1", timeout_ms=60_001)
 
     def test_code_length_bound(self) -> None:
         long = "x" * (MAX_CODE_LENGTH + 1)
         with pytest.raises(ValidationError):
-            EquivalenceInput(slow=long, fast="1")
+            EquivalenceInput(before=long, after="1")
 
     def test_bundled_lib_code_within_bound(self) -> None:
-        # Selakovic 作用点 A の clientIssue は bundled ライブラリを slow/fast に丸ごと埋める (数 MB)
+        # Selakovic 作用点 A の clientIssue は bundled ライブラリを before/after に丸ごと埋める (数 MB)
         big = "x" * 3_000_000
-        inp = EquivalenceInput(slow=big, fast=big)
-        assert len(inp.slow) == 3_000_000
+        inp = EquivalenceInput(before=big, after=big)
+        assert len(inp.before) == 3_000_000
 
     def test_extra_fields_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            EquivalenceInput.model_validate({"slow": "1", "fast": "1", "unknown": 1})
+            EquivalenceInput.model_validate({"before": "1", "after": "1", "unknown": 1})
 
     def test_id_default_none(self) -> None:
-        inp = EquivalenceInput(slow="1", fast="1")
+        inp = EquivalenceInput(before="1", after="1")
         assert inp.id is None
 
     def test_environment_and_module_base_dir(self) -> None:
-        inp = EquivalenceInput(slow="1", fast="1", environment=ExecutionEnvironment.JSDOM, module_base_dir="/x/y")
+        inp = EquivalenceInput(before="1", after="1", environment=ExecutionEnvironment.JSDOM, module_base_dir="/x/y")
         assert inp.environment == ExecutionEnvironment.JSDOM
         assert inp.module_base_dir == "/x/y"
 
     def test_environment_defaults_none(self) -> None:
-        inp = EquivalenceInput(slow="1", fast="1")
+        inp = EquivalenceInput(before="1", after="1")
         assert inp.environment is None
         assert inp.module_base_dir is None
 
     def test_environment_string_round_trip(self) -> None:
-        inp = EquivalenceInput.model_validate({"slow": "1", "fast": "1", "environment": "jsdom"})
+        inp = EquivalenceInput.model_validate({"before": "1", "after": "1", "environment": "jsdom"})
         assert inp.environment == ExecutionEnvironment.JSDOM
 
     def test_mount_html_round_trip(self) -> None:
         inp = EquivalenceInput.model_validate(
             {
-                "slow": "1",
-                "fast": "1",
+                "before": "1",
+                "after": "1",
                 "mount_html": "<div id='demo'></div>",
             }
         )
         assert inp.mount_html == "<div id='demo'></div>"
 
     def test_mount_html_default_none(self) -> None:
-        inp = EquivalenceInput(slow="1", fast="1")
+        inp = EquivalenceInput(before="1", after="1")
         assert inp.mount_html is None
 
     def test_id_round_trip(self) -> None:
-        inp = EquivalenceInput(id="case-001", slow="1", fast="1", timeout_ms=3000)
+        inp = EquivalenceInput(id="case-001", before="1", after="1", timeout_ms=3000)
         dumped = json.loads(inp.model_dump_json())
         assert dumped["id"] == "case-001"
         assert dumped["timeout_ms"] == 3000
@@ -121,22 +121,22 @@ class TestEquivalenceInput:
 
     def test_timeout_ms_always_in_json(self) -> None:
         """デフォルト値でも JSON には必ず timeout_ms が含まれる (Python→Node 受け渡し保険)"""
-        inp = EquivalenceInput(slow="1", fast="1")
+        inp = EquivalenceInput(before="1", after="1")
         dumped = json.loads(inp.model_dump_json())
         assert "timeout_ms" in dumped
         assert dumped["timeout_ms"] == 5000
 
     def test_workload_default_none(self) -> None:
         """ADR-0023 D-β: workload は changed-fn 経路でのみ定義、旧経路は None のまま"""
-        inp = EquivalenceInput(slow="1", fast="1")
+        inp = EquivalenceInput(before="1", after="1")
         assert inp.workload is None
 
     def test_workload_round_trip(self) -> None:
         """changed-fn 経路の placeholder substitution + 4 値契約 (ADR-0023 D-β)"""
         inp = EquivalenceInput(
             setup="var lib = { f: function () { $BODY$ } };",
-            slow="__OBS__.push(1); return 1;",
-            fast="__OBS__.push(2); return 2;",
+            before="__OBS__.push(1); return 1;",
+            after="__OBS__.push(2); return 2;",
             workload="(function(){ __OBS__ = []; lib.f(); return JSON.stringify(__OBS__); })()",
         )
         assert inp.workload is not None
@@ -149,7 +149,7 @@ class TestEquivalenceInput:
 
     def test_workload_null_in_json(self) -> None:
         """Workload が None のとき JSON では null として出力される (TS 側の `!= null` 判定の前提)"""
-        inp = EquivalenceInput(slow="1", fast="1")
+        inp = EquivalenceInput(before="1", after="1")
         dumped = json.loads(inp.model_dump_json())
         assert "workload" in dumped
         assert dumped["workload"] is None
@@ -157,7 +157,7 @@ class TestEquivalenceInput:
     def test_workload_length_bound(self) -> None:
         too_long = "x" * (MAX_CODE_LENGTH + 1)
         with pytest.raises(ValidationError):
-            EquivalenceInput(slow="1", fast="1", workload=too_long)
+            EquivalenceInput(before="1", after="1", workload=too_long)
 
 
 class TestOracleObservation:
@@ -165,8 +165,8 @@ class TestOracleObservation:
         obs = OracleObservation(
             oracle=Oracle.RETURN_VALUE,
             verdict=OracleVerdict.NOT_EQUAL,
-            slow_value="-1",
-            fast_value="1",
+            before_value="-1",
+            after_value="1",
             detail=None,
         )
         payload = obs.model_dump_json()
@@ -178,8 +178,8 @@ class TestOracleObservation:
         ts_payload = {
             "oracle": "return_value",
             "verdict": "not_equal",
-            "slow_value": "-1",
-            "fast_value": "1",
+            "before_value": "-1",
+            "after_value": "1",
         }
         obs = OracleObservation.model_validate(ts_payload)
         assert obs.oracle is Oracle.RETURN_VALUE
@@ -191,7 +191,7 @@ class TestEquivalenceCheckResult:
         payload = {
             "verdict": "equal",
             "observations": [
-                {"oracle": "return_value", "verdict": "equal", "slow_value": "2", "fast_value": "2"},
+                {"oracle": "return_value", "verdict": "equal", "before_value": "2", "after_value": "2"},
                 {"oracle": "argument_mutation", "verdict": "not_applicable"},
                 {"oracle": "exception", "verdict": "not_applicable"},
                 {"oracle": "external_observation", "verdict": "not_applicable"},

@@ -34,8 +34,8 @@ import { assembleTopLevelChangedFn } from "../wrappers/top-level";
  *  - それ以外 (将来 server 等) → `buildExcludedChangedFnCandidate(ANGULAR_WRAPPER_SKIP)`
  *
  * いずれも placeholder substitution model (ADR-0023 D-δ §observation): `setup` は穴あき lib (変更関数 body を
- * `replaceFunctionBodyWithObserver` で「観測ハーネス入り `{ $BODY$ }`」に置換、`$BODY$` 厳密 1 個)、`slow`/`fast`
- * は変更前/後 body の裸 statementsToCode 出力。sandbox 投入時は equivalence-checker が `substituteBody(setup, slow)`
+ * `replaceFunctionBodyWithObserver` で「観測ハーネス入り `{ $BODY$ }`」に置換、`$BODY$` 厳密 1 個)、`before`/`after`
+ * は変更前/後 body の裸 statementsToCode 出力。sandbox 投入時は equivalence-checker が `substituteBody(setup, before)`
  * で `$BODY$` (= 観測 IIFE 内側) に裸 body を差し込み、`declareObservationGlobal` で `let __OBS__ = [];` を setup 先頭に
  * prepend してから executor へ渡す。
  *
@@ -84,8 +84,8 @@ export function buildChangedFnCandidate(
 
   const holedLib = replaceFunctionBodyWithObserver(libAfterSrc, { start: afterBody.start, end: afterBody.end });
   const preWorkloadCode = statementsToCode([...f1Decomposition.preWorkloadStatements]);
-  const slow = statementsToCode(beforeBodyStatements);
-  const fast = statementsToCode(afterBody.body as readonly Statement[]);
+  const before = statementsToCode(beforeBodyStatements);
+  const after = statementsToCode(afterBody.body as readonly Statement[]);
   const f1BodyCode = statementsToCode([...f1Decomposition.f1Body.body]);
   const enclosureNodeType = afterFn.type;
   const beforeNodeCount = countNodes(beforeBody as unknown as Node);
@@ -97,8 +97,8 @@ export function buildChangedFnCandidate(
     return assembleTopLevelChangedFn({
       holedLib,
       preWorkloadCode,
-      slow,
-      fast,
+      before,
+      after,
       f1BodyCode,
       enclosureNodeType,
       beforeNodeCount,
@@ -109,8 +109,8 @@ export function buildChangedFnCandidate(
     const a = f1Decomposition.angular;
     return assembleAngularChangedFn({
       holedLib,
-      slow,
-      fast,
+      before,
+      after,
       preWorkloadCode,
       f1BodyCode,
       moduleName: a.moduleName,
@@ -127,7 +127,7 @@ export function buildChangedFnCandidate(
 
 /**
  * changed-fn 経路の excluded marker (ADR-0022 §計装 / ADR-0024 §candidate_excluded / ADR-0023 D-γ §DROP 可視化)。
- * setup/slow/fast を持たず、`candidate_excluded` に reason を立てた candidate を返す。痕跡が extracted.jsonl に
+ * setup/before/after を持たず、`candidate_excluded` に reason を立てた candidate を返す。痕跡が extracted.jsonl に
  * 残り、`funnel.py` / `inspect_candidates.py` で reason 別件数を集計できる。
  * `is_workload_reachable` は excluded marker では常に `false` で固定 — `CHANGE_NOT_EXERCISED` 以外の reason
  * (例: `UNIT_RENAMED_OR_REMOVED`) では本来 workload 到達済の unit を含むが、「真の candidate のみ true」と
@@ -155,8 +155,8 @@ if (import.meta.vitest) {
   const { parse } = await import("../../../../ast/parser");
   const { substituteBody, declareObservationGlobal } = await import("../../../../codegen/placeholder");
   // 観点: workload が呼ぶ変更関数の fn unit から changed-fn candidate を組む (placeholder substitution model)。
-  // ADR-0023 D-δ §observation 仕様: 観測ハーネスは setup 側の関数本体に inline 化、slow/fast は裸 body。
-  // setup に lib 全文 (変更関数の body を「観測ハーネス入り $BODY$」で穴あき)、slow/fast に変更前/後 body を
+  // ADR-0023 D-δ §observation 仕様: 観測ハーネスは setup 側の関数本体に inline 化、before/after は裸 body。
+  // setup に lib 全文 (変更関数の body を「観測ハーネス入り $BODY$」で穴あき)、before/after に変更前/後 body を
   // statementsToCode した裸断片、workload に f1 body を IIFE で包んだ完了値返却形式。
   // param 不一致 / arrow body / angular wrapper は excluded marker (ADR-0023 D-γ §DROP 可視化)。
 
@@ -172,7 +172,7 @@ if (import.meta.vitest) {
   };
 
   describe("buildChangedFnCandidate (in-source)", () => {
-    it("workload が呼ぶ変更関数 → setup に観測ハーネス + $BODY$ 1 個入り穴あき lib / slow・fast は裸 body / workload に IIFE", () => {
+    it("workload が呼ぶ変更関数 → setup に観測ハーネス + $BODY$ 1 個入り穴あき lib / before・after は裸 body / workload に IIFE", () => {
       const f1d = extractF1(inline)!;
       const unit = fnUnitFor(libBefore, libAfter);
       const r = buildChangedFnCandidate(unit, libAfter, f1d);
@@ -197,18 +197,18 @@ if (import.meta.vitest) {
       expect(r.setup).not.toContain("globalThis.__HOLE__");
       expect(r.setup).not.toContain("& 1 === 0");
 
-      // slow: 変更前 body (% 2 === 0) の裸 statement 列 (= 観測ハーネス無し)
-      expect(r.slow).toContain("% 2 === 0");
-      expect(r.slow).not.toContain("__OBS_R__"); // 観測ハーネスは setup 側に移動
-      expect(r.slow).not.toContain("__OBS__.push");
+      // before: 変更前 body (% 2 === 0) の裸 statement 列 (= 観測ハーネス無し)
+      expect(r.before).toContain("% 2 === 0");
+      expect(r.before).not.toContain("__OBS_R__"); // 観測ハーネスは setup 側に移動
+      expect(r.before).not.toContain("__OBS__.push");
       // body 断片なので lib 宣言 / workload 呼び出しは含まれない
-      expect(r.slow).not.toContain("var lib = {};");
-      expect(r.slow).not.toContain("lib.norm(7);");
+      expect(r.before).not.toContain("var lib = {};");
+      expect(r.before).not.toContain("lib.norm(7);");
 
-      // fast: 変更後 body (& 1 === 0) の裸 statement 列
-      expect(r.fast).toContain("& 1 === 0");
-      expect(r.fast).not.toContain("__OBS_R__");
-      expect(r.fast).not.toContain("__OBS__.push");
+      // after: 変更後 body (& 1 === 0) の裸 statement 列
+      expect(r.after).toContain("& 1 === 0");
+      expect(r.after).not.toContain("__OBS_R__");
+      expect(r.after).not.toContain("__OBS__.push");
 
       // workload: __OBS__ = [] 初期化 → workload → JSON.stringify(__OBS__)
       expect(r.workload).toContain("__OBS__ = [];");
@@ -221,8 +221,8 @@ if (import.meta.vitest) {
       expect(r.before_node_count).toBeGreaterThan(0);
       expect(r.before_node_count).toBeLessThan(100);
 
-      // sandbox 投入直前形 (= substituteBody(setup, slow) で観測 IIFE 内側に裸 body を差し込んだ形) が valid JS
-      const substituted = substituteBody(r.setup!, r.slow!);
+      // sandbox 投入直前形 (= substituteBody(setup, before) で観測 IIFE 内側に裸 body を差し込んだ形) が valid JS
+      const substituted = substituteBody(r.setup!, r.before!);
       expect(() => parse(substituted)).not.toThrow();
       // workload は単独で式として valid
       expect(() => parse(`var _ = ${r.workload!};`)).not.toThrow();
@@ -235,14 +235,14 @@ if (import.meta.vitest) {
       const unit = fnUnitFor(before, after);
       const r = buildChangedFnCandidate(unit, after, f1d);
       expect(r.candidate_excluded).toBeUndefined();
-      // slow には after の param 名 y で書き換えられた body が入り、旧 param 名 x は残らない
-      expect(r.slow).toContain("y % 2 === 0");
-      expect(r.slow).not.toMatch(/\bx\b/);
-      // fast は after body そのまま
-      expect(r.fast).toContain("y % 2 === 0");
+      // before には after の param 名 y で書き換えられた body が入り、旧 param 名 x は残らない
+      expect(r.before).toContain("y % 2 === 0");
+      expect(r.before).not.toMatch(/\bx\b/);
+      // after は after body そのまま
+      expect(r.after).toContain("y % 2 === 0");
       // setup の $BODY$ は 1 個、substituteBody 後も valid JS
       expect((r.setup!.match(/\$BODY\$/g) ?? []).length).toBe(1);
-      expect(() => parse(substituteBody(r.setup!, r.slow!))).not.toThrow();
+      expect(() => parse(substituteBody(r.setup!, r.before!))).not.toThrow();
     });
 
     it("param 個数差 (本質変更) → FN_PARAM_NAMES_MISMATCH marker", () => {
@@ -277,7 +277,7 @@ if (import.meta.vitest) {
       expect(r.setup).toBeUndefined();
     });
 
-    it("変更関数本体の leading / trailing コメントは slow/fast から落ちる ($BODY$ には setup 側の文字列が残る)", () => {
+    it("変更関数本体の leading / trailing コメントは before/after から落ちる ($BODY$ には setup 側の文字列が残る)", () => {
       const libBeforeWithComments = `
 var lib = {};
 lib.norm = function (x) {
@@ -297,26 +297,26 @@ lib.norm = function (x) {
       const unit = fnUnitFor(libBeforeWithComments, libAfterWithComments);
       const c = buildChangedFnCandidate(unit, libAfterWithComments, f1d);
       expect(c.candidate_excluded).toBeUndefined();
-      // slow / fast は statementsToCode (comments:false) なので元コメントは落ちる
-      expect(c.slow).not.toContain("before: ascii-rule");
-      expect(c.slow).not.toContain("trailing line");
-      expect(c.slow).not.toContain("/*");
-      expect(c.fast).not.toContain("after: bit-shift");
+      // before / after は statementsToCode (comments:false) なので元コメントは落ちる
+      expect(c.before).not.toContain("before: ascii-rule");
+      expect(c.before).not.toContain("trailing line");
+      expect(c.before).not.toContain("/*");
+      expect(c.after).not.toContain("after: bit-shift");
       // setup には after lib ソース原文がそのまま残っている (= replaceFunctionBody は body span 外を保持)
       // ただし body 内のコメント (after: bit-shift) は body 内なので $BODY$ に置換されて消える
       expect(c.setup).toContain("$BODY$");
       expect(c.setup).not.toContain("after: bit-shift");
     });
 
-    it("buildExcludedChangedFnCandidate: reason 引数を candidate_excluded に伝搬 (setup/slow/fast/workload は undefined)", () => {
+    it("buildExcludedChangedFnCandidate: reason 引数を candidate_excluded に伝搬 (setup/before/after/workload は undefined)", () => {
       const c = buildExcludedChangedFnCandidate(SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED);
       expect(c.candidate_excluded).toBe(SELAKOVIC_EXCLUSION_REASON.CHANGE_NOT_EXERCISED);
       expect(c.candidate_meta.adapter).toBe("selakovic");
       expect(c.candidate_meta.target_side).toBe(TARGET_SIDE.LIB);
       expect(c.candidate_meta.is_workload_reachable).toBe(false);
       expect(c.setup).toBeUndefined();
-      expect(c.slow).toBeUndefined();
-      expect(c.fast).toBeUndefined();
+      expect(c.before).toBeUndefined();
+      expect(c.after).toBeUndefined();
       expect(c.workload).toBeUndefined();
       expect(c.before_node_count).toBeUndefined();
       expect(c.after_node_count).toBeUndefined();
@@ -372,16 +372,16 @@ lib.norm = function (x) {
       expect(r.setup).toContain('.controller("BenchCtrl", function ($scope) {');
       expect(r.setup).toContain("globalThis.__selakovic_f1 = f1;");
       expect(r.setup).toContain("__selakovic_inj.get('$controller')");
-      // slow / fast は top-level と同じ裸 body 断片
-      expect(r.slow).toContain("% 2 === 0");
-      expect(r.slow).not.toContain("__OBS_R__");
-      expect(r.fast).toContain("& 1 === 0");
+      // before / after は top-level と同じ裸 body 断片
+      expect(r.before).toContain("% 2 === 0");
+      expect(r.before).not.toContain("__OBS_R__");
+      expect(r.after).toContain("& 1 === 0");
       // workload = __OBS__ reset → f1 1 回呼び出し → JSON.stringify
       expect(r.workload).toContain("__OBS__ = [];");
       expect(r.workload).toContain("globalThis.__selakovic_f1();");
       expect(r.workload).toContain("return JSON.stringify(__OBS__);");
-      // sandbox 投入直前形 (substituteBody(setup, slow) + __OBS__ 宣言 prepend) が valid JS
-      expect(() => parse(declareObservationGlobal(substituteBody(r.setup!, r.slow!)))).not.toThrow();
+      // sandbox 投入直前形 (substituteBody(setup, before) + __OBS__ 宣言 prepend) が valid JS
+      expect(() => parse(declareObservationGlobal(substituteBody(r.setup!, r.before!)))).not.toThrow();
     });
 
     it("angular-controller-wrapper だが angular 情報が欠落 → ANGULAR_WRAPPER_SKIP marker (dispatch の防御節)", () => {

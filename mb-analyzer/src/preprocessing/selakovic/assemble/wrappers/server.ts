@@ -1,7 +1,7 @@
 import { wrapBoundaryVarsStatement } from "../recorder-hooks";
 
 /**
- * server `test_case_*.js` の `(setup, slow, fast)` の slow/fast 部 (= runnable program) を組み立てる。
+ * server `test_case_*.js` の `(setup, before, after)` の before/after 部 (= runnable program) を組み立てる。
  *
  * `test_case_*.js` の内容を「module/exports/require を与えて評価 → init()/setupTest()/test() を
  * 実行 → 観測値を JSON で return」する自己完結 IIFE に包む。`require('./<lib>_*.js')` は実行環境

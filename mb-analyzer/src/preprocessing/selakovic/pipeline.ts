@@ -153,7 +153,7 @@ function preprocessClient(input: Extract<SelakovicPreprocessInput, { kind: "clie
  * の末尾に push する (fn unit / stmt unit の両方を扱うので関数名は `ChangeUnit` 単位、順 1-d で responsibility
  * 拡大)。fn unit は changed-fn strategy (`buildChangedFnCandidate`)、stmt unit は changed-stmt strategy
  * (`buildChangedStmtCandidate`、ADR-0023 §observation 仕様 の workload-driven 退化形) で組む。真の candidate を
- * 作れない unit は `candidate_excluded` marker として push し、痕跡を残す (setup/slow/fast は持たない、ADR-0022
+ * 作れない unit は `candidate_excluded` marker として push し、痕跡を残す (setup/before/after は持たない、ADR-0022
  * §計装 / ADR-0023 D-γ §DROP 可視化)。早期 return (= lib 全体の DROP) も issue ごとに 1 件 marker。等価検証
  * 本体は embedded `#0` がカバーする。angular controller wrapper の f1 は D-β では skip (D-γ で対応検討)。
  */
@@ -317,8 +317,8 @@ function preprocessServer(input: Extract<SelakovicPreprocessInput, { kind: "serv
   const candidates: PreprocessingCandidate[] = [
     {
       setup: "",
-      slow: buildServerRunnable(input.before_test_case),
-      fast: buildServerRunnable(input.after_test_case),
+      before: buildServerRunnable(input.before_test_case),
+      after: buildServerRunnable(input.after_test_case),
       before_node_count: beforeNodeCount,
       after_node_count: afterNodeCount,
       candidate_meta: { adapter: "selakovic", target_side: targetSide, is_workload_reachable: false },

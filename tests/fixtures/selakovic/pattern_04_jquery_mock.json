@@ -4,6 +4,6 @@
   "expected_verdict": "equal",
   "expected_primary_oracles": ["argument_mutation"],
   "setup": "const $mock = { items: ['a', 'b', 'c'], each(fn) { this.items.forEach(fn); return this; } }; const log = [];",
-  "slow": "$mock.each(x => log.push(x)); log.length",
-  "fast": "$mock.items.forEach(x => log.push(x)); log.length"
+  "before": "$mock.each(x => log.push(x)); log.length",
+  "after": "$mock.items.forEach(x => log.push(x)); log.length"
 }

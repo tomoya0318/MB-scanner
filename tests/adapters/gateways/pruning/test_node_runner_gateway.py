@@ -30,7 +30,7 @@ def _gateway(cli_path: Path | None = None) -> NodeRunnerPrunerGateway:
 class TestNodeRunnerPrunerGatewayMocked:
     def test_returns_error_when_bundle_missing(self, tmp_path: Path) -> None:
         gw = _gateway(tmp_path / "nonexistent.js")
-        result = gw.prune(PruningInput(slow="1", fast="1"))
+        result = gw.prune(PruningInput(before="1", after="1"))
         assert result.verdict is PruningVerdict.ERROR
         assert result.error_message is not None
         assert "not found" in result.error_message
@@ -49,7 +49,7 @@ class TestNodeRunnerPrunerGatewayMocked:
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout_payload, stderr="")
         with patch.object(subprocess, "run", return_value=completed) as run_mock:
             gw = _gateway(fake_cli)
-            result = gw.prune(PruningInput(slow="1+1", fast="2"))
+            result = gw.prune(PruningInput(before="1+1", after="2"))
 
         assert result.verdict is PruningVerdict.PRUNED
         assert result.pattern_code == "2"
@@ -64,7 +64,7 @@ class TestNodeRunnerPrunerGatewayMocked:
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout_payload, stderr="")
         with patch.object(subprocess, "run", return_value=completed) as run_mock:
             gw = _gateway(fake_cli)
-            gw.prune(PruningInput(slow="1", fast="1"))
+            gw.prune(PruningInput(before="1", after="1"))
 
         call_args = run_mock.call_args
         cmd = call_args.args[0]
@@ -91,7 +91,7 @@ class TestNodeRunnerPrunerGatewayMocked:
         with patch.object(subprocess, "run", side_effect=fake_run):
             gw = _gateway(fake_cli)
             gw.prune(
-                PruningInput(slow="1", fast="1", timeout_ms=1000, max_iterations=10),
+                PruningInput(before="1", after="1", timeout_ms=1000, max_iterations=10),
             )
 
         # timeout_ms=1000 × max_iterations=10 = 10s + margin 5s = 15s
@@ -106,7 +106,7 @@ class TestNodeRunnerPrunerGatewayMocked:
             side_effect=subprocess.TimeoutExpired(cmd="node", timeout=5),
         ):
             gw = _gateway(fake_cli)
-            result = gw.prune(PruningInput(slow="1", fast="1"))
+            result = gw.prune(PruningInput(before="1", after="1"))
         assert result.verdict is PruningVerdict.ERROR
         assert result.error_message is not None
         assert "timeout" in result.error_message.lower()
@@ -118,7 +118,7 @@ class TestNodeRunnerPrunerGatewayMocked:
         completed = subprocess.CompletedProcess(args=[], returncode=2, stdout="", stderr="bad input")
         with patch.object(subprocess, "run", return_value=completed):
             gw = _gateway(fake_cli)
-            result = gw.prune(PruningInput(slow="1", fast="1"))
+            result = gw.prune(PruningInput(before="1", after="1"))
         assert result.verdict is PruningVerdict.ERROR
         assert result.error_message is not None
         assert "bad input" in result.error_message
@@ -136,7 +136,7 @@ class TestNodeRunnerPrunerGatewayMocked:
         completed = subprocess.CompletedProcess(args=[], returncode=2, stdout=stdout_payload, stderr="")
         with patch.object(subprocess, "run", return_value=completed):
             gw = _gateway(fake_cli)
-            result = gw.prune(PruningInput(slow="1", fast="1"))
+            result = gw.prune(PruningInput(before="1", after="1"))
         assert result.verdict is PruningVerdict.ERROR
         assert result.error_message == "parse failed: SyntaxError"
 
@@ -148,7 +148,7 @@ class TestNodeRunnerPrunerGatewayMocked:
         completed = subprocess.CompletedProcess(args=[], returncode=1, stdout=stdout_payload, stderr="")
         with patch.object(subprocess, "run", return_value=completed):
             gw = _gateway(fake_cli)
-            result = gw.prune(PruningInput(slow="1", fast="2"))
+            result = gw.prune(PruningInput(before="1", after="2"))
         assert result.verdict is PruningVerdict.INITIAL_MISMATCH
 
     def test_unexpected_exit_code_is_error(self, tmp_path: Path) -> None:
@@ -158,7 +158,7 @@ class TestNodeRunnerPrunerGatewayMocked:
         completed = subprocess.CompletedProcess(args=[], returncode=139, stdout="", stderr="killed")
         with patch.object(subprocess, "run", return_value=completed):
             gw = _gateway(fake_cli)
-            result = gw.prune(PruningInput(slow="1", fast="1"))
+            result = gw.prune(PruningInput(before="1", after="1"))
         assert result.verdict is PruningVerdict.ERROR
         assert result.error_message is not None
         assert "139" in result.error_message
@@ -169,7 +169,7 @@ class TestNodeRunnerPrunerGatewayMocked:
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="not json", stderr="")
         with patch.object(subprocess, "run", return_value=completed):
             gw = _gateway(fake_cli)
-            result = gw.prune(PruningInput(slow="1", fast="1"))
+            result = gw.prune(PruningInput(before="1", after="1"))
         assert result.verdict is PruningVerdict.ERROR
         assert result.error_message is not None
         assert "JSON" in result.error_message
@@ -185,12 +185,12 @@ class TestNodeRunnerPrunerGatewayIntegration:
 
     def test_pruned_verdict(self) -> None:
         result = _gateway().prune(
-            PruningInput(slow="1 + 1", fast="2", timeout_ms=1000, max_iterations=10),
+            PruningInput(before="1 + 1", after="2", timeout_ms=1000, max_iterations=10),
         )
         assert result.verdict is PruningVerdict.PRUNED
 
     def test_initial_mismatch_verdict(self) -> None:
         result = _gateway().prune(
-            PruningInput(slow="1", fast="2", timeout_ms=1000, max_iterations=10),
+            PruningInput(before="1", after="2", timeout_ms=1000, max_iterations=10),
         )
         assert result.verdict is PruningVerdict.INITIAL_MISMATCH

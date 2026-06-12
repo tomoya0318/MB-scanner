@@ -4,6 +4,6 @@
   "expected_verdict": "equal",
   "expected_primary_oracles": ["return_value"],
   "setup": "const src = { 0: 'a', 1: 'b', 2: 'c', length: 3 };",
-  "slow": "Array.prototype.slice.call(src)",
-  "fast": "Array.from(src)"
+  "before": "Array.prototype.slice.call(src)",
+  "after": "Array.from(src)"
 }

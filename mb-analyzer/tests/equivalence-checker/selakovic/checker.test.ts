@@ -1,12 +1,12 @@
 /**
  * 対象: checkEquivalence (top-level 合成: sandbox 実行 + 4 oracle 呼び出し + verdict 合成)
- * 観点: 実機 vm で slow / fast を実行し、全 oracle を並列判定して最終 verdict を導くエンドツーエンド検証
+ * 観点: 実機 vm で before / after を実行し、全 oracle を並列判定して最終 verdict を導くエンドツーエンド検証
  * 判定事項:
  *   - 等価な式 (`1+1` vs `2`) → equal、return_value oracle も equal
  *   - Selakovic 反例 (`x % 2` vs `x & 1`, x=-3) → not_equal
  *   - 両側 throw で ctor+msg 一致 → inconclusive (両側同じくクラッシュ = positive evidence 無し)、片方だけ throw → not_equal
  *   - setup で配列を共有し両側が同じ変異 → equal、異なる変異 → not_equal
- *   - 副作用分離: slow の破壊的変更が fast に伝播しない
+ *   - 副作用分離: before の破壊的変更が after に伝播しない
  *   - console 出力差分 → not_equal
  *   - 片方 timeout → not_equal (例外 oracle で検知)
  *   - 4 oracle (return_value / argument_mutation / exception / external_observation) が必ず observations に揃う
@@ -16,7 +16,7 @@ import { checkEquivalence } from "../../../src/equivalence-checker/selakovic/che
 
 describe("checkEquivalence", () => {
   it("equivalent な式は equal verdict", async () => {
-    const result = await checkEquivalence({ slow: "1 + 1", fast: "2" });
+    const result = await checkEquivalence({ before: "1 + 1", after: "2" });
     expect(result.verdict).toBe("equal");
     const returnValue = result.observations.find((o) => o.oracle === "return_value");
     expect(returnValue?.verdict).toBe("equal");
@@ -25,8 +25,8 @@ describe("checkEquivalence", () => {
   it("x % 2 vs x & 1 は負数で not_equal（Selakovic #8 の反例）", async () => {
     const result = await checkEquivalence({
       setup: "const x = -3;",
-      slow: "x % 2",
-      fast: "x & 1",
+      before: "x % 2",
+      after: "x & 1",
     });
     expect(result.verdict).toBe("not_equal");
     const ret = result.observations.find((o) => o.oracle === "return_value");
@@ -35,8 +35,8 @@ describe("checkEquivalence", () => {
 
   it("両側 throw (ctor + msg 一致) は inconclusive (positive evidence 無し)", async () => {
     const result = await checkEquivalence({
-      slow: `throw new TypeError("boom")`,
-      fast: `throw new TypeError("boom")`,
+      before: `throw new TypeError("boom")`,
+      after: `throw new TypeError("boom")`,
     });
     expect(result.verdict).toBe("inconclusive");
     expect(result.verdict_reason).toBe("both-sides-threw");
@@ -46,8 +46,8 @@ describe("checkEquivalence", () => {
 
   it("片方だけ throw は not_equal", async () => {
     const result = await checkEquivalence({
-      slow: "1",
-      fast: `throw new Error("x")`,
+      before: "1",
+      after: `throw new Error("x")`,
     });
     expect(result.verdict).toBe("not_equal");
   });
@@ -55,42 +55,42 @@ describe("checkEquivalence", () => {
   it("setup で配列 + 両側が等価な変異 → equal", async () => {
     const result = await checkEquivalence({
       setup: "const arr = [1, 2, 3];",
-      slow: "arr.push(4); arr",
-      fast: "arr[arr.length] = 4; arr",
+      before: "arr.push(4); arr",
+      after: "arr[arr.length] = 4; arr",
     });
     expect(result.verdict).toBe("equal");
   });
 
   it("console 出力が異なると not_equal", async () => {
     const result = await checkEquivalence({
-      slow: `console.log("a")`,
-      fast: `console.log("b")`,
+      before: `console.log("a")`,
+      after: `console.log("b")`,
     });
     expect(result.verdict).toBe("not_equal");
   });
 
-  it("slow と fast は副作用を共有しない", async () => {
-    // slow 側が配列を破壊しても、fast 側には伝播しない
+  it("before と after は副作用を共有しない", async () => {
+    // before 側が配列を破壊しても、after 側には伝播しない
     const result = await checkEquivalence({
       setup: "const arr = [1, 2, 3];",
-      slow: "arr.pop(); arr.length",
-      fast: "arr.length",
+      before: "arr.pop(); arr.length",
+      after: "arr.length",
     });
-    // slow は 2, fast は 3
+    // before は 2, after は 3
     expect(result.verdict).toBe("not_equal");
   });
 
   it("timeout → error", async () => {
     const result = await checkEquivalence({
-      slow: "while(true){}",
-      fast: "1",
+      before: "while(true){}",
+      after: "1",
       timeout_ms: 50,
     });
     expect(result.verdict).toBe("not_equal"); // 片方 timeout 例外、片方正常 → O3 で not_equal
   });
 
   it("vm 環境では 4 observation が必ず揃う (C1/C4/C5/C3)", async () => {
-    const result = await checkEquivalence({ slow: "1", fast: "1" });
+    const result = await checkEquivalence({ before: "1", after: "1" });
     expect(result.observations.map((o) => o.oracle)).toEqual([
       "return_value",
       "argument_mutation",
@@ -100,7 +100,7 @@ describe("checkEquivalence", () => {
   });
 
   it("jsdom 環境では 6 observation が揃う (+ C2 dom_mutation / C6 interaction_trace)", async () => {
-    const result = await checkEquivalence({ slow: "1 + 1", fast: "2", environment: "jsdom", timeout_ms: 5000 });
+    const result = await checkEquivalence({ before: "1 + 1", after: "2", environment: "jsdom", timeout_ms: 5000 });
     expect(new Set(result.observations.map((o) => o.oracle))).toEqual(
       new Set(["exception", "return_value", "interaction_trace", "dom_mutation", "argument_mutation", "external_observation"]),
     );
@@ -112,8 +112,8 @@ describe("checkEquivalence", () => {
 
   it("jsdom 環境で DOM を変えると C2 が verdict を出す", async () => {
     const result = await checkEquivalence({
-      slow: "document.body.innerHTML = '<p>A</p>'; 1",
-      fast: "document.body.innerHTML = '<p>B</p>'; 1",
+      before: "document.body.innerHTML = '<p>A</p>'; 1",
+      after: "document.body.innerHTML = '<p>B</p>'; 1",
       environment: "jsdom",
       timeout_ms: 5000,
     });
@@ -129,11 +129,11 @@ describe("checkEquivalence", () => {
       `var o = { f: function (x) { return x * ${mult}; } };` +
       `if (__r) o = __r.wrap(o, 'sut', { recurse: true });` +
       `o.f(3)`;
-    const same = await checkEquivalence({ slow: mkBody(2), fast: mkBody(2), environment: "jsdom", timeout_ms: 5000 });
+    const same = await checkEquivalence({ before: mkBody(2), after: mkBody(2), environment: "jsdom", timeout_ms: 5000 });
     expect(same.observations.find((o) => o.oracle === "interaction_trace")?.verdict).toBe("equal");
     expect(same.verdict).toBe("equal");
 
-    const diff = await checkEquivalence({ slow: mkBody(2), fast: mkBody(5), environment: "jsdom", timeout_ms: 5000 });
+    const diff = await checkEquivalence({ before: mkBody(2), after: mkBody(5), environment: "jsdom", timeout_ms: 5000 });
     expect(diff.observations.find((o) => o.oracle === "interaction_trace")?.verdict).toBe("not_equal");
     expect(diff.verdict).toBe("not_equal");
   });

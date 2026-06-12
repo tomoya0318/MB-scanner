@@ -5,7 +5,7 @@
  *   - PRUNING_VERDICT / PLACEHOLDER_KIND: Python 側 StrEnum と同一の文字列値 (runtime)
  *   - PruningVerdict / PlaceholderKind: union 型が Python と同じ列挙幅 (型レベル)
  *   - Placeholder: JSON 往復でフィールド名 (id / kind / original_snippet) と値を保持
- *   - PruningInput: slow/fast 必須、id/setup/timeout_ms/max_iterations + 等価検証コンテキスト (environment 等) 任意
+ *   - PruningInput: before/after 必須、id/setup/timeout_ms/max_iterations + 等価検証コンテキスト (environment 等) 任意
  *   - ExecutionEnvironmentHint: equivalence/preprocessing 契約と同じ "vm" | "jsdom"
  *   - PruningResult: pruned は pattern_code/placeholders/iterations で表現、initial_mismatch と error は pattern なしで成立
  */
@@ -63,12 +63,12 @@ describe("Placeholder", () => {
 });
 
 describe("PruningInput", () => {
-  it("slow / fast 必須、setup / id / timeout_ms / max_iterations は任意 (EquivalenceInput precedent に揃える)", () => {
-    const minimal: PruningInput = { slow: "x", fast: "x" };
+  it("before / after 必須、setup / id / timeout_ms / max_iterations は任意 (EquivalenceInput precedent に揃える)", () => {
+    const minimal: PruningInput = { before: "x", after: "x" };
     const full: PruningInput = {
       id: "case-01",
-      slow: "arr[0]",
-      fast: "arr[1]",
+      before: "arr[0]",
+      after: "arr[1]",
       setup: "const arr = [1, 2, 3];",
       timeout_ms: 5000,
       max_iterations: 100,
@@ -80,8 +80,8 @@ describe("PruningInput", () => {
 
   it("等価検証コンテキスト (environment / module_base_dir / mount_html) は任意で JSON 往復しても保持される", () => {
     const input: PruningInput = {
-      slow: "x",
-      fast: "x",
+      before: "x",
+      after: "x",
       timeout_ms: 5000,
       environment: "jsdom",
       module_base_dir: "/abs/data/selakovic-2016-issues/serverIssues/ChalkIssues/issues/issue_28",
@@ -90,20 +90,20 @@ describe("PruningInput", () => {
     const parsed = JSON.parse(JSON.stringify(input)) as PruningInput;
     expect(parsed).toStrictEqual(input);
     // 省略時は undefined (= 等価検証側のデフォルトに委ねる)
-    const minimal: PruningInput = { slow: "x", fast: "x" };
+    const minimal: PruningInput = { before: "x", after: "x" };
     expect(minimal.environment).toBeUndefined();
     expect(minimal.module_base_dir).toBeUndefined();
   });
 
   it("workload (ADR-0023 D-β、equivalence-checker への pass-through) は任意で JSON 往復しても保持される", () => {
     const input: PruningInput = {
-      slow: "return 1;",
-      fast: "return 2;",
+      before: "return 1;",
+      after: "return 2;",
       workload: "(function(){ __OBS__ = []; lib.f(); return JSON.stringify(__OBS__); })()",
     };
     const parsed = JSON.parse(JSON.stringify(input)) as PruningInput;
     expect(parsed.workload).toBe(input.workload);
-    const minimal: PruningInput = { slow: "x", fast: "x" };
+    const minimal: PruningInput = { before: "x", after: "x" };
     expect(minimal.workload).toBeUndefined();
   });
 });
@@ -124,8 +124,8 @@ describe("PruningResult", () => {
         { id: "$VAR_1", kind: PLACEHOLDER_KIND.EXPRESSION, original_snippet: "arr[0]" },
       ],
       iterations: 3,
-      node_count_before: 10,
-      node_count_after: 3,
+      node_count_initial: 10,
+      node_count_pruned: 3,
       effective_timeout_ms: 5000,
       error_message: null,
     };
