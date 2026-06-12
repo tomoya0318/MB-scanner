@@ -23,15 +23,6 @@ class Settings(BaseSettings):
         extra="ignore",  # 未定義のフィールドを無視（Docker用の環境変数などを許容）
     )
 
-    # データベース関連
-    data_dir: Path | None = None  # 例: MB_SCANNER_DATA_DIR=/path/to/data
-    db_file: Path | None = None  # 例: MB_SCANNER_DB_FILE=/path/to/data/app.db
-
-    # ログ設定
-    log_level: str = "INFO"  # 例: MB_SCANNER_LOG_LEVEL=DEBUG
-    log_file: Path | None = None  # 例: MB_SCANNER_LOG_FILE=/path/to/logs/app.log
-    log_to_console: bool = True  # 例: MB_SCANNER_LOG_TO_CONSOLE=false
-
     # 新 mb-analyzer CLI 関連設定
     mb_analyzer_cli_path: Path | None = Field(
         default=None,
@@ -44,31 +35,6 @@ class Settings(BaseSettings):
         default="node",
         description="mb-analyzer を起動する Node.js 実行ファイル。PATH 上なら 'node' のままで良い",
     )
-
-    @property
-    def effective_data_dir(self) -> Path:
-        """データディレクトリの有効なパスを返す"""
-        # data_dirが指定されていなければ、現在の作業ディレクトリに 'data' を作成
-        path = self.data_dir or Path.cwd() / "data"
-        path.mkdir(parents=True, exist_ok=True)
-        return path
-
-    @property
-    def effective_db_file(self) -> Path:
-        """データベースファイルの有効なパスを返す"""
-        # db_fileが指定されていればそれを使い、なければデフォルトパスを生成
-        return self.db_file or self.effective_data_dir / "mb_scanner.db"
-
-    @property
-    def effective_log_file(self) -> Path:
-        """ログファイルの有効なパスを返す"""
-        # log_fileが指定されていればそれを使い、なければデフォルトパスを生成
-        return self.log_file or self.effective_data_dir / "mb_scanner.log"
-
-    @property
-    def database_url(self) -> str:
-        """SQLAlchemy用のデータベースURLを返す"""
-        return f"sqlite:///{self.effective_db_file.resolve()}"
 
     @property
     def effective_mb_analyzer_cli_path(self) -> Path:

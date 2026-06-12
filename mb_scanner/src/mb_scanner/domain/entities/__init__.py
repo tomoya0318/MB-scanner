@@ -6,7 +6,6 @@ from mb_scanner.domain.entities.equivalence import (
     OracleVerdict,
     Verdict,
 )
-from mb_scanner.domain.entities.project import Project, Topic
 from mb_scanner.domain.entities.pruning import (
     Placeholder,
     PlaceholderKind,
@@ -23,10 +22,8 @@ __all__ = [
     "OracleVerdict",
     "Placeholder",
     "PlaceholderKind",
-    "Project",
     "PruningInput",
     "PruningResult",
     "PruningVerdict",
-    "Topic",
     "Verdict",
 ]

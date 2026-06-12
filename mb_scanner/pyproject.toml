@@ -10,7 +10,6 @@ requires-python = ">=3.13"
 dependencies = [
     "pydantic-settings",
     "typer",
-    "sqlalchemy",
     "pydantic>=2.11.7",
 ]
 
@@ -46,4 +45,4 @@ ignore_imports = [
 name = "Domain must not depend on infrastructure frameworks"
 type = "forbidden"
 source_modules = ["mb_scanner.domain"]
-forbidden_modules = ["sqlalchemy", "typer"]
+forbidden_modules = ["typer"]

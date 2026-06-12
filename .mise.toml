@@ -155,24 +155,6 @@ pkill -f 'esbuild .*src/index.ts.*--watch' || true
 """
 
 # =============================================================================
-# データベース管理
-# =============================================================================
-
-[tasks.migrate]
-description = "データベースマイグレーションを実行する"
-run = """
-echo "Running database migrations..."
-uv run mb-scanner migrate
-"""
-
-[tasks.migrate-dry-run]
-description = "データベースマイグレーションのドライラン"
-run = """
-echo "Checking pending migrations (dry run)..."
-uv run mb-scanner migrate --dry-run
-"""
-
-# =============================================================================
 # Docker — 日常開発用（dev コンテナ）
 # =============================================================================
 

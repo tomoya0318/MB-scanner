@@ -3,14 +3,10 @@
 from typer import Typer
 
 from mb_scanner.adapters.cli.equivalence import equivalence_app
-from mb_scanner.adapters.cli.migrate import migrate_app
 from mb_scanner.adapters.cli.preprocessing import preprocessing_app
 from mb_scanner.adapters.cli.pruning import pruning_app
 
 app = Typer(help="MB-Scanner CLI - GitHub リポジトリ検索と保存ツール")
-
-app.registered_commands.extend(migrate_app.registered_commands)
-app.registered_groups.extend(migrate_app.registered_groups)
 
 # 新 check-equivalence サブコマンド (Node ランナー経由)
 app.registered_commands.extend(equivalence_app.registered_commands)
