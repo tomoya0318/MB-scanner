@@ -194,7 +194,7 @@ if (import.meta.vitest) {
     });
 
     it("UpdateExpression.argument は identifier/expression では除外されない (文法上 Expression 受理)", () => {
-      // 旧手書き blacklist との意図的 diff (ADR-0005 §既知の diff)
+      // 意図的に除外しない (ADR-0005 §既知の diff)
       expect(ruleAt("identifier", "UpdateExpression", "argument")).toBeUndefined();
       expect(ruleAt("expression", "UpdateExpression", "argument")).toBeUndefined();
       // statement は EmptyStatement 置換できないので除外
@@ -232,7 +232,7 @@ if (import.meta.vitest) {
     });
 
     it("RestElement.argument / ArrayPattern.elements / ObjectPattern.properties も除外 (destructuring LVal)", () => {
-      // 旧手書き blacklist には無かったが、自動導出では除外される
+      // 自動導出では destructuring LVal も除外対象になる
       expect(ruleAt("identifier", "RestElement", "argument")).toBe(true);
       expect(ruleAt("identifier", "ArrayPattern", "elements")).toBe(true);
       expect(ruleAt("identifier", "ObjectPattern", "properties")).toBe(true);

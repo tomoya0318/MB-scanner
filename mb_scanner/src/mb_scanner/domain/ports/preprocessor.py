@@ -14,9 +14,7 @@ class PreprocessorPort(Protocol):
 
     **1 入力 → 1 IssueResult モデル**:
     1 issue から複数 candidate が出る場合は ``PreprocessingIssueResult.candidates: list``
-    で内包する (旧モデルの flat 列ではない)。
-
-    id は issue 単位で 1 対 1 (旧 ``<input.id>#<index>`` 形式の suffix 付与は廃止)。
+    で内包する。id は issue 単位で 1 対 1。
     """
 
     def preprocess(self, input_: PreprocessingInput) -> PreprocessingIssueResult: ...

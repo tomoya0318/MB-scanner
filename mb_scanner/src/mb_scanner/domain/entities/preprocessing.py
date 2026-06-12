@@ -18,10 +18,6 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# ============================================================================
-# Base contract (dataset 非依存)
-# ============================================================================
-
 
 class ExclusionReasonBase(StrEnum):
     """全 dataset で意味を持つ汎用の除外理由
@@ -47,11 +43,6 @@ class PreprocessingInput(BaseModel):
 
     id: str | None = None
     issue_dir: str
-
-
-# ============================================================================
-# Selakovic adapter (dataset 固有)
-# ============================================================================
 
 
 class LayoutKind(StrEnum):
@@ -141,19 +132,10 @@ class SelakovicCandidateMeta(BaseModel):
     is_workload_reachable: bool
 
 
-# ============================================================================
-# Discriminated union (adapter 拡張ポイント)
-# ============================================================================
-
 # 現状 Selakovic adapter のみ。新 dataset 追加時は Union を広げる:
 #   IssueMeta = Annotated[SelakovicIssueMeta | OtherIssueMeta, Field(discriminator="adapter")]
 IssueMeta = Annotated[SelakovicIssueMeta, Field(discriminator="adapter")]
 CandidateMeta = Annotated[SelakovicCandidateMeta, Field(discriminator="adapter")]
-
-
-# ============================================================================
-# Result types (base + adapter_meta)
-# ============================================================================
 
 
 class PreprocessingCandidate(BaseModel):

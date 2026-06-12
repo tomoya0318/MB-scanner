@@ -18,16 +18,16 @@ from mb_scanner.domain.entities.equivalence import (
 )
 from mb_scanner.domain.ports.equivalence_checker import EquivalenceCheckerPort
 
-# positive な等価エビデンスを与える oracle 集合 (ADR-0018 + Phase C-2)。
+# positive な等価エビデンスを与える oracle 集合 (ADR-0018)。
 # これらのいずれかが non-not_applicable のときだけ全体を equal にできる。
-# dom_mutation は Phase C-2 で oracle 側に「両側とも DOM を変更しなかった → N/A」(capture.dom_changed を見る)
-# を入れたので、non-N/A は「少なくとも片側が DOM を実際に変更した」= positive evidence。
+# dom_mutation oracle は「両側とも DOM を変更しなかった → N/A」(capture.dom_changed を見る) ため、
+# non-N/A は「少なくとも片側が DOM を実際に変更した」= positive evidence。
 # exception (両側同じくクラッシュ) / external_observation (scaffolding global ノイズ) は単独では positive と見なさない。
 _POSITIVE_EVIDENCE_ORACLES = frozenset(
     {Oracle.RETURN_VALUE, Oracle.ARGUMENT_MUTATION, Oracle.INTERACTION_TRACE, Oracle.DOM_MUTATION},
 )
 
-# inconclusive verdict の理由文字列 (ADR-0018 + Phase C-2)。equal / not_equal では None。
+# inconclusive verdict の理由文字列 (ADR-0018)。equal / not_equal では None。
 # - no-observable-channel: 全 oracle が not_applicable
 # - both-sides-threw     : exception oracle が equal (= 両側が同じ例外で落ちた)。positive evidence 無し、
 #                          または唯一の positive evidence が dom_mutation だけ (bootstrap 由来とみなす)
@@ -45,7 +45,7 @@ VERDICT_REASON_EXECUTOR_ERROR = "executor-error"
 
 
 def derive_overall_verdict(observations: list[OracleObservation]) -> Verdict:
-    """Oracle observation から全体 verdict を導く純粋関数 (ADR-0018 + Phase C-2)
+    """Oracle observation から全体 verdict を導く純粋関数 (ADR-0018)
 
     優先順位:
         1. not_equal が 1 つでもある → not_equal
@@ -130,6 +130,12 @@ class EquivalenceVerificationUseCase:
 
 def _finalize(result: EquivalenceCheckResult) -> EquivalenceCheckResult:
     """Port から受け取った結果を verdict 再計算して確定する共通処理"""
+    # 観測ゼロの失敗結果 (checker / Gateway / batch CLI が ERROR verdict + setup-failure /
+    # executor-error 分類を直接セットしたもの) は再計算をバイパスする。再計算に通すと
+    # derive_overall_verdict([]) が INCONCLUSIVE を返し、ERROR と理由分類が上書きされてしまう。
+    # AND の両辺が必要: error_message だけでは観測付き error (oracle 段の失敗) まで素通しになり、
+    # observations 空だけでは error_message 無しの不正結果を素通ししてしまう。
+    # 判断: ai-guide/adr/0018-equivalence-verdict-conservative.md
     if result.error_message is not None and not result.observations:
         return result
 

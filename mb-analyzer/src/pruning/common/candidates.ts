@@ -17,7 +17,7 @@ import { WHITELIST_CATEGORIES } from "./rules/whitelist";
  *   2. 型 whitelist: pruning できる可能性のあるノード型 (WHITELIST_CATEGORIES) のみ残す
  *   3. 親子 blacklist: 親 field validator が置換後の型 (ExpressionStatement / Identifier /
  *      StringLiteral) を受理しない位置を除外。ルールは `@babel/types` の文法メタ
- *      データから `rules/blacklist.ts` で自動導出 (ADR 0005)
+ *      データから `rules/blacklist.ts` で自動導出 (ADR-0005)
  *   4. SubtreeSet.has: fast に同型が存在する「共通ノード」に絞る
  *      (研究計画 §第 1 段階 で「差分ノードは必須扱い」とするため)
  *   5. リテラルの差分内保護 (ADR-0028): リテラルは「親も共通ノード」の時だけ候補にする。

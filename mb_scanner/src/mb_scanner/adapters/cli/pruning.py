@@ -34,17 +34,11 @@ from mb_scanner.domain.ports.pruner import PrunerPort
 from mb_scanner.infrastructure.config import settings
 from mb_scanner.use_cases.pruning import PruningUseCase
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 pruning_app = typer.Typer(help="Pruning commands")
 
 # CLI 補完用の実用デフォルト。``entities.pruning`` の ``DEFAULT_*`` は engine 暴走防止の
 # 上限値 (`5_000ms × 1_000` = 1 トリプル worst case 約 83 分) で、実用デフォルトとしては
-# 大きすぎる。Selakovic は 10^2 オーダで収束する想定 (entities/pruning.py のコメント参照)
-# のため、暫定で狭めに設定し、timeout エラーが多発するようなら緩める運用。
-# TODO: Selakovic 実測後に再調整
+# 大きすぎるため狭めに設定している。
 CLI_DEFAULT_TIMEOUT_MS = 2_000
 CLI_DEFAULT_MAX_ITERATIONS = 200
 
@@ -54,11 +48,6 @@ EXIT_ERROR = 2
 
 EXIT_BATCH_OK = 0
 EXIT_BATCH_ERROR = 2
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _verdict_to_exit_code(verdict: PruningVerdict) -> int:
@@ -222,11 +211,6 @@ def _run_batch(
     for idx in range(total_batches):
         out.extend(batch_results[idx])
     return out
-
-
-# ---------------------------------------------------------------------------
-# Commands
-# ---------------------------------------------------------------------------
 
 
 @pruning_app.command("prune")

@@ -193,7 +193,7 @@ if (import.meta.vitest) {
       expect(r.setup).toContain("return __OBS_R__;");
       // 単独参照 (globalThis. プレフィックス無し)
       expect(r.setup).not.toContain("globalThis.__OBS");
-      // v1 残骸 (__HOLE__ ガード / after 本体インライン) が消えている
+      // __HOLE__ ガード / after 本体のインラインは含まれない
       expect(r.setup).not.toContain("globalThis.__HOLE__");
       expect(r.setup).not.toContain("& 1 === 0");
 

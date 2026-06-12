@@ -7,8 +7,6 @@
 
 並列化は pruning と同じく Python 側 ThreadPoolExecutor で chunk を並列に投げる
 (Node 側 1 subprocess = 逐次)。
-
-ADR-0024 で 1 入力 → 1 IssueResult モデルに変更 (旧 1 入力 → N flat result から)。
 """
 
 from collections.abc import Iterator, Sequence
@@ -36,10 +34,6 @@ from mb_scanner.domain.ports.preprocessor import PreprocessorPort
 from mb_scanner.infrastructure.config import settings
 from mb_scanner.use_cases.preprocessing.selakovic import SelakovicPreprocessingUseCase
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 preprocessing_app = typer.Typer(help="Dataset preprocessing commands")
 
 EXIT_OK = 0
@@ -47,11 +41,6 @@ EXIT_ERROR = 2
 
 EXIT_BATCH_OK = 0
 EXIT_BATCH_ERROR = 2
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _write_single_output(result: PreprocessingIssueResult, output_path: Path | None) -> None:
@@ -186,11 +175,6 @@ def _run_batch(
     for idx in range(total_batches):
         out.extend(batch_results[idx])
     return out
-
-
-# ---------------------------------------------------------------------------
-# Commands
-# ---------------------------------------------------------------------------
 
 
 @preprocessing_app.command("preprocess-selakovic")

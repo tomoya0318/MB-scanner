@@ -100,7 +100,7 @@ function isExcluded(type: string): boolean {
  *
  * カテゴリ振り分け規則 (ADR-0006):
  *   - `Identifier` 単独 → identifier (Expression alias にも属するが binding 位置除外を
- *     grammar-blacklist で扱うため独立。ADR-0005:71-77)
+ *     grammar-blacklist で扱うため独立。ADR-0005 §カテゴリ別の alias 要件)
  *   - `FLIPPED_ALIAS_KEYS.Statement` ∖ excluded → statement
  *   - `FLIPPED_ALIAS_KEYS.Expression` ∖ {Identifier} ∖ excluded → expression
  */
