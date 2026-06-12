@@ -70,10 +70,10 @@ class NodeRunnerEquivalenceGateway:
             return _error(f"Failed to spawn Node runner: {e}")
 
         stdout = proc.stdout.strip()
-        # 0=equal, 1=not_equal, 2=error; それ以外は予期しない失敗として扱う。
-        # exit=2 でも stdout に error_message を含む JSON が来るのでパースを試みる
+        # 0=equal, 1=not_equal, 2=inconclusive, 3=error (ADR-0018); それ以外は予期しない失敗として扱う。
+        # exit=2/3 でも stdout に verdict_reason / error_message を含む JSON が来るのでパースを試みる
         # (Node 側の error_message を握りつぶさない)。
-        if proc.returncode not in (0, 1, 2):
+        if proc.returncode not in (0, 1, 2, 3):
             stderr = proc.stderr.strip() or "(no stderr)"
             return _error(
                 f"Node runner exited with code {proc.returncode}: {stderr}",

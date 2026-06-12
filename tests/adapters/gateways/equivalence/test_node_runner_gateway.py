@@ -92,26 +92,47 @@ class TestNodeRunnerGatewayMocked:
         assert result.error_message is not None
         assert "bad input" in result.error_message
 
-    def test_exit_2_with_error_json_preserves_error_message(self, tmp_path: Path) -> None:
-        """Node が exit=2 で error verdict JSON を返した場合、error_message を保持する"""
+    def test_exit_2_with_inconclusive_json_preserves_verdict(self, tmp_path: Path) -> None:
+        """Node が exit=2 (inconclusive) を返した場合、verdict と verdict_reason を保持する"""
         fake_cli = tmp_path / "cli.js"
         fake_cli.write_text("// stub")
         stdout_payload = json.dumps(
             {
-                "verdict": "error",
+                "verdict": "inconclusive",
                 "observations": [],
-                "error_message": "setup code threw: ReferenceError",
+                "verdict_reason": "no-positive-evidence",
             },
         )
         completed = subprocess.CompletedProcess(args=[], returncode=2, stdout=stdout_payload, stderr="")
         with patch.object(subprocess, "run", return_value=completed):
             gw = _gateway(fake_cli)
             result = gw.check(EquivalenceInput(slow="1", fast="1"))
+        assert result.verdict is Verdict.INCONCLUSIVE
+        assert result.verdict_reason == "no-positive-evidence"
+
+    def test_exit_3_with_error_json_preserves_error_message(self, tmp_path: Path) -> None:
+        """Node が exit=3 (error) で error verdict JSON を返した場合、error_message と
+        verdict_reason (setup-failure 等の throw phase 分類) を汎用メッセージで潰さず保持する"""
+        fake_cli = tmp_path / "cli.js"
+        fake_cli.write_text("// stub")
+        stdout_payload = json.dumps(
+            {
+                "verdict": "error",
+                "observations": [],
+                "verdict_reason": "setup-failure",
+                "error_message": "setup code threw: ReferenceError",
+            },
+        )
+        completed = subprocess.CompletedProcess(args=[], returncode=3, stdout=stdout_payload, stderr="")
+        with patch.object(subprocess, "run", return_value=completed):
+            gw = _gateway(fake_cli)
+            result = gw.check(EquivalenceInput(slow="1", fast="1"))
         assert result.verdict is Verdict.ERROR
+        assert result.verdict_reason == "setup-failure"
         assert result.error_message == "setup code threw: ReferenceError"
 
     def test_unexpected_exit_code_is_error(self, tmp_path: Path) -> None:
-        """0/1/2 以外の exit code (例: SIGSEGV=139) は握りつぶさず error 扱い"""
+        """0/1/2/3 以外の exit code (例: SIGSEGV=139) は握りつぶさず error 扱い"""
         fake_cli = tmp_path / "cli.js"
         fake_cli.write_text("// stub")
         completed = subprocess.CompletedProcess(args=[], returncode=139, stdout="", stderr="killed")

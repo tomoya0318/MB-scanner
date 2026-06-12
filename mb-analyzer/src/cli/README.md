@@ -49,7 +49,8 @@ mb-analyzer の subprocess エントリポイント。Python 側 Gateway (`mb_sc
 |---|---|
 | 0 | `verdict === "equal"` |
 | 1 | `verdict === "not_equal"` |
-| 2 | parse 失敗 / 必須フィールド不足 / verdict=error |
+| 2 | `verdict === "inconclusive"` |
+| 3 | parse 失敗 / 必須フィールド不足 / verdict=error |
 
 ---
 
