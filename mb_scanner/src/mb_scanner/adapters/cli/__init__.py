@@ -6,7 +6,7 @@ from mb_scanner.adapters.cli.equivalence import equivalence_app
 from mb_scanner.adapters.cli.preprocessing import preprocessing_app
 from mb_scanner.adapters.cli.pruning import pruning_app
 
-app = Typer(help="MB-Scanner CLI - GitHub リポジトリ検索と保存ツール")
+app = Typer(help="MB-Scanner CLI - マイクロベンチマーク研究パイプライン (preprocess / equivalence / pruning)")
 
 # 新 check-equivalence サブコマンド (Node ランナー経由)
 app.registered_commands.extend(equivalence_app.registered_commands)

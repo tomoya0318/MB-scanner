@@ -149,5 +149,6 @@ reportMissingTypeStubs = false
 # research/ は試行錯誤しやすさを優先して basic モードに緩める (mb_scanner 本体は strict 維持)
 executionEnvironments = [
     { root = "tests", reportPrivateUsage = "none", reportUnknownMemberType = "none", reportUnknownArgumentType = "none", reportUnknownVariableType = "none", reportMissingParameterType = "none", reportUnknownParameterType = "none", reportArgumentType = "none", reportUnknownLambdaType = "none" },
-    { root = "research", reportUnknownVariableType = "none", reportUnknownMemberType = "none", reportUnknownArgumentType = "none", reportUnknownParameterType = "none", reportUnknownLambdaType = "none", reportMissingTypeArgument = "none" },
+    # reportMissingImports: スクリプトはファイル直接実行され同階層モジュール (pattern_map 等) を sys.path で解決するため、pyright の解決規則と恒常的にズレる
+    { root = "research", reportUnknownVariableType = "none", reportUnknownMemberType = "none", reportUnknownArgumentType = "none", reportUnknownParameterType = "none", reportUnknownLambdaType = "none", reportMissingTypeArgument = "none", reportMissingImports = "none" },
 ]

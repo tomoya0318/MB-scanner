@@ -37,6 +37,7 @@ import os
 import re
 import sys
 from collections.abc import Iterable
+from typing import cast
 
 WORK = os.path.abspath(os.path.dirname(__file__))
 DEFAULT_INPUT = os.path.join(WORK, "prune-results.jsonl")
@@ -196,8 +197,8 @@ def _format_md(summary: dict[str, object]) -> str:
             f"- 統合で削減された行数: {summary['n_rows_reduced']}",
             f"- placeholder 個数 (合計): before {summary['total_placeholders_before']} → after {summary['total_placeholders_after']}",
             f"- placeholder 個数 (平均): before {summary['avg_placeholders_before']:.2f} → after {summary['avg_placeholders_after']:.2f}",
-            f"- 全体削減率: {summary['overall_reduction_ratio'] * 100:.1f}%",
-            f"- 最大削減率 (行単位): {summary['max_reduction_ratio'] * 100:.1f}% (id={summary['max_reduction_row_id']})",
+            f"- 全体削減率: {cast(float, summary['overall_reduction_ratio']) * 100:.1f}%",
+            f"- 最大削減率 (行単位): {cast(float, summary['max_reduction_ratio']) * 100:.1f}% (id={summary['max_reduction_row_id']})",
             "",
         ]
     )
