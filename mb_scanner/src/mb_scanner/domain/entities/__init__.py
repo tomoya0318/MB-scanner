@@ -1,9 +1,3 @@
-from mb_scanner.domain.entities.benchmark import (
-    BenchmarkEntry,
-    EquivalenceResult,
-    EquivalenceSummary,
-    StrategyResult,
-)
 from mb_scanner.domain.entities.equivalence import (
     EquivalenceCheckResult,
     EquivalenceInput,
@@ -22,11 +16,8 @@ from mb_scanner.domain.entities.pruning import (
 )
 
 __all__ = [
-    "BenchmarkEntry",
     "EquivalenceCheckResult",
     "EquivalenceInput",
-    "EquivalenceResult",
-    "EquivalenceSummary",
     "Oracle",
     "OracleObservation",
     "OracleVerdict",
@@ -36,7 +27,6 @@ __all__ = [
     "PruningInput",
     "PruningResult",
     "PruningVerdict",
-    "StrategyResult",
     "Topic",
     "Verdict",
 ]

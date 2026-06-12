@@ -32,16 +32,6 @@ class Settings(BaseSettings):
     log_file: Path | None = None  # 例: MB_SCANNER_LOG_FILE=/path/to/logs/app.log
     log_to_console: bool = True  # 例: MB_SCANNER_LOG_TO_CONSOLE=false
 
-    # ベンチマーク関連設定
-    benchmark_dir: Path | None = Field(
-        default=None,
-        description="ベンチマークデータの保存先ディレクトリ",
-    )
-    benchmark_runner_js_path: Path | None = Field(
-        default=None,
-        description="ベンチマークランナーJSファイルのパス（DEPRECATED: 旧 mb-analyzer-legacy 用）",
-    )
-
     # 新 mb-analyzer CLI 関連設定
     mb_analyzer_cli_path: Path | None = Field(
         default=None,
@@ -81,28 +71,9 @@ class Settings(BaseSettings):
         return f"sqlite:///{self.effective_db_file.resolve()}"
 
     @property
-    def effective_benchmark_dir(self) -> Path:
-        """ベンチマークディレクトリを返す（data/benchmarks）"""
-        path = self.benchmark_dir or self.effective_data_dir / "benchmarks"
-        path.mkdir(parents=True, exist_ok=True)
-        return path
-
-    @property
     def effective_mb_analyzer_cli_path(self) -> Path:
         """mb-analyzer CLI バンドルのパスを返す（`mbs check-equivalence` 等が利用）"""
         return self.mb_analyzer_cli_path or Path.cwd() / "mb-analyzer" / "dist" / "cli.js"
-
-    @property
-    def effective_benchmark_runner_js_path(self) -> Path:
-        """ベンチマークランナーJSファイルのパスを返す
-
-        DEPRECATED: 旧 equivalence-check コマンド（`mbs benchmark equivalence-check`）用。
-        新 `mbs check-equivalence` は `mb-analyzer/dist/cli.js` を使用する。
-        """
-        return (
-            self.benchmark_runner_js_path
-            or Path.cwd() / "mb-analyzer-legacy" / "apps" / "equivalence-runner" / "dist" / "index.js"
-        )
 
 
 # シングルトンとしてインスタンスを作成

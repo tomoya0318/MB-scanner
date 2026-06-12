@@ -33,7 +33,6 @@ RUN mise install && \
 # ==============================================================================
 # Stage 2: ts-builder — TypeScript ビルド
 # 現行: mb-analyzer/dist/cli.js を生成 (mbs check-equivalence / check-equivalence-batch が参照)
-# 旧 mb-analyzer-legacy/ も並行ビルドし、legacy コマンドの再現性を保つ
 # ==============================================================================
 FROM mise-base AS ts-builder
 
@@ -41,10 +40,6 @@ WORKDIR /build
 COPY mb-analyzer/ mb-analyzer/
 RUN pnpm --prefix mb-analyzer install --frozen-lockfile && \
     pnpm --prefix mb-analyzer run build
-
-COPY mb-analyzer-legacy/ mb-analyzer-legacy/
-RUN pnpm --prefix mb-analyzer-legacy install --frozen-lockfile && \
-    pnpm --prefix mb-analyzer-legacy run build
 
 # ==============================================================================
 # Stage 3: py-deps — Python 依存解決（venv 生成）
@@ -110,7 +105,6 @@ ENV PATH="/opt/codeql:/opt/node/bin:/opt/venv/bin:${PATH}"
 WORKDIR /app
 COPY codeql/ codeql/
 COPY --from=ts-builder /build/mb-analyzer/dist/ mb-analyzer/dist/
-COPY --from=ts-builder /build/mb-analyzer-legacy/apps/equivalence-runner/dist/ mb-analyzer-legacy/apps/equivalence-runner/dist/
 
 # data/ と outputs/ はホストから bind mount するためのマウントポイント
 RUN mkdir -p data outputs

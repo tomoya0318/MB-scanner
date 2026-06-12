@@ -140,7 +140,6 @@ exclude = [
     ".venv",
     "**/__pycache__",
     "mb-analyzer",            # TypeScript 側の node_modules 等を対象外に
-    "mb-analyzer-legacy",     # 旧 TypeScript 側
     "**/node_modules",
     "tmp",                    # 作業 dir (研究の試行錯誤スクリプト、過去 0001-0021 含む)
 ]
