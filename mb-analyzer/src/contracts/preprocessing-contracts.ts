@@ -194,5 +194,5 @@ export type IssueMeta = SelakovicIssueMeta;
 /** candidate level の adapter 拡張。新 dataset 追加時は `| OtherCandidateMeta` で union を広げる。 */
 export type CandidateMeta = SelakovicCandidateMeta;
 
-/** 失敗理由の Union。base 4 値 + Selakovic 4 値 (= 8 値、enum 値文字列はオーバーラップなし)。 */
+/** 失敗理由の Union。base 4 値 + Selakovic 12 値 (= 16 値、enum 値文字列はオーバーラップなし)。 */
 export type ExclusionReasonAny = ExclusionReasonBase | SelakovicExclusionReason;
