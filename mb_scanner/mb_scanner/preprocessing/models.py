@@ -1,9 +1,8 @@
 """Preprocessing (Selakovic データセット前処理) の入出力 Pydantic モデル
 
-Node.js 側 (``mb-analyzer/src/contracts/preprocessing-contracts.ts``) と JSON シリアライ
-ゼーション互換を保つ。フィールド名は snake_case、列挙値文字列も両言語で完全一致。
-
-paired-change で更新する: ``mb-analyzer/src/contracts/preprocessing-contracts.ts``。
+TypeScript 側の対応 contract との JSON シリアライゼーション契約。
+フィールド名は snake_case、列挙値文字列も両言語で完全一致。
+変更時は TypeScript 側の対応 contract と paired-change で同時に更新する。
 
 構造の方針 (ADR-0024):
     - **base contract**: 全 dataset で意味を持つフィールドのみ

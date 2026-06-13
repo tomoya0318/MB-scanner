@@ -18,7 +18,7 @@ from mb_scanner.equivalence.models import (
 
 
 class TestEnums:
-    """TypeScript 側 (contracts/equivalence-contracts.ts) と文字列値が揃っていること"""
+    """TypeScript 側の対応 contract と文字列値が揃っていること"""
 
     def test_verdict_values(self) -> None:
         assert Verdict.EQUAL.value == "equal"

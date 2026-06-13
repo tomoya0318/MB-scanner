@@ -1,6 +1,6 @@
 """Preprocessing (Selakovic 前処理) モデルの Pydantic バリデーションテスト (ADR-0024)
 
-TypeScript 側 (``mb-analyzer/src/contracts/preprocessing-contracts.ts``) と列挙値文字列・
+TypeScript 側の対応 contract と列挙値文字列・
 フィールド名が揃っていることを確認する。
 """
 
