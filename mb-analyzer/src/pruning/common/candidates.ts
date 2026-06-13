@@ -10,7 +10,7 @@ import { WHITELIST_CATEGORIES } from "./rules/whitelist";
 /**
  * pruning 対象となる候補ノードを列挙する。
  *
- * 候補フィルタは 4 段 (`isCandidate`):
+ * 候補フィルタは 5 段 (`isCandidate`):
  *   1. placeholder 自身の除外: 前 iteration で生成した `$Pn` Identifier や
  *      `ExpressionStatement(Identifier("$Pn"))` を再候補化すると pruning ループが
  *      破綻する (placeholder を別 placeholder で置き換える) ため除外 (ADR-0009)

@@ -1,152 +1,136 @@
-# preprocessing
+# preprocessing/ — 前処理器 (汎用 AST diff + Selakovic adapter)
 
-データセットの 1 issue (before/after パッチペア) を、等価検証・pruning が食える **`(setup, before, after)` candidate** に変換するパイプラインの最前段。[ADR-0011](../../../ai-guide/adr/0011-preprocessing-tier-structure.md) の二層構成:
+> 生成物 — 手編集禁止 (ADR-0029)。再生成: `/generate-approach-spec mb-analyzer/src/preprocessing`
+> 生成時コミット: `d122da9` (2026-06-13)
 
-- **`common/`** = Tier 1 — dataset 非依存の AST primitive (subtree diff / minimal enclosure / setup 分割)。
-- **`selakovic/`** = Tier 2 — Selakovic 2016 dataset 固有の adapter。`selakovic.preprocess()` が公開エントリポイント。
+Selakovic dataset の 1 issue (before/after のファイル群) を、等価検証器 (equivalence-checker) の入力単位である candidate 列に変換する前処理器。計測ハーネス (`execute(f1, n)` / `$.ajax({mark, mean})` / `init`/`setupTest` 等) を剥がし、真の patch がある場所 (lib / workload) を特定して `(setup, before, after, workload)` を組み立てる。出力は 1 issue = 1 `PreprocessingIssueResult` (JSONL 1 行、ADR-0024)。
 
-論文非依存性の境界をコード構造で明文化するための分割: 主軸 (pruning など) は Selakovic 論文 §6/§7 に依存しないが、preprocess / 等価検証は dataset 規約 (`f1` / `init`/`setupTest`/`test` / `execute(f1,n)` / `mark` / `<lib>_*.js`) を積極利用してよい (Tier 2 = その依存を閉じ込める層)。
+## 二層構造 (ADR-0011)
 
-## 入出力契約
-
-公開 API は `selakovic/index.ts` の re-export (`preprocess` / `detectLayout` / `loadLibPair` / `extractInlineScripts` + 型) のみ — 内部構成 (`io/` → `decompose/` → `route/` → `assemble/` → `pipeline.ts`) は外に出さない。Tier 1 (`common/`) は barrel を持たず Tier 2 から個別 import される (dataset 非依存 AST primitive 層、eslint で `common` → `selakovic` の逆 import 禁止)。
-
-`PreprocessingInput` / `PreprocessingResult` は `mb-analyzer/src/contracts/preprocessing-contracts.ts` で定義され、Python 側 (`mb_scanner/domain/entities/preprocessing.py`) と JSON シリアライゼーション互換を保つ (列挙値の文字列・フィールド名 snake_case を両言語で厳密に揃える。変更は paired-change)。CLI ラッパは `mb-analyzer/src/cli/preprocess-selakovic.ts` (`preprocess-selakovic` / `preprocess-selakovic-batch` サブコマンド) で、issue ディレクトリのファイル I/O とレイアウト判定をして純関数 `preprocess()` を呼び、結果を **常に JSONL** で stdout に出す薄い層。Python 側 `mb_scanner/adapters/cli/preprocessing.py` (`mbs preprocess-selakovic[-batch]`) が subprocess 経由で起動し、batch は Python 側 `ThreadPoolExecutor` で並列化 (Node 側 1 subprocess = 逐次)。**入出力データの意味論はここ (本 README) を一次ソースとし、CLI 側には CLI 固有の引数 / stderr 規約 / 終了コードのみ書く**方針。
-
-### `PreprocessingInput`
-
-```ts
-interface PreprocessingInput {
-  id?: string;          // バッチ API での順序追跡用 (省略可)
-  issue_dir: string;    // issue ディレクトリの絶対パス (CLI 側がここからファイルを読む)
-}
-```
-
-ファイル I/O は CLI に閉じ込め、純関数 `preprocess()` には文字列内容のみを渡す (CLI が `detectLayout` でレイアウト判定 → `v_*.html` / `test_case_*.js` を読む / `loadLibPair` で `<lib>_before/after` を読む → `SelakovicPreprocessInput` を組む)。
-
-### `PreprocessingResult` (1 件 = 1 candidate)
-
-```ts
-interface PreprocessingResult {
-  id?: string;                  // 入力 id をエコーバック (複数 candidate なら "<id>#0", "<id>#1", ...)
-  layout: "client" | "server" | "unknown";
-  setup?: string;               // 両側共通の事前定義コード (excluded のとき undefined)
-  before?: string;                // before 側 candidate (検証対象)
-  after?: string;                // after  側 candidate
-  enclosure_type?: string;      // 収束した構文単位 ("f1-body" / "lib-file" / "angular-controller-wrapper" /
-                                //   "server-test-case" / AST ノード型名 "FunctionDeclaration" 等) — threats 集計用
-  before_node_count?: number;
-  after_node_count?: number;
-  aspect?: "A" | "B" | "A+B" | "fallback";          // 作用点ルーティングの結果 (ADR-0011 §段2)
-  candidate_kind?: "lib" | "body" | "single";        // A+B split (ADR-0014) における役割
-  environment?: "vm" | "jsdom";                      // 後段 equivalence-checker への実行環境 hint
-  excluded?: ExclusionReason;   // 抽出不成立のとき (下記表)
-  excluded_detail?: string;     // 人間可読な理由
-}
-```
-
-### 1 入力 → N 結果モデル
-
-同一 PR に独立した最適化が複数同居しうる (例: socket.io 573 = `encodePacket` の case 順入替 + `decodePacket` の if/else→switch 書換が同一 commit) ため、`preprocess()` の戻り値は `PreprocessingResult[]`:
-
-| candidate 数 | 出力 | id 規則 |
+| 層 | ディレクトリ | 知ってよい知識 |
 |---|---|---|
-| 0 (整形差分のみ / enclosure 不成立) | 1 件 (`excluded` 設定) | `<input.id>` (suffix なし) |
-| 1 | 1 件 (抽出成功) | `<input.id>` (suffix なし) |
-| N (≥ 2) | N 件 (各 candidate 独立) | `<input.id>#0`, `<input.id>#1`, ... |
-| 構造的失敗 (parse-error 等) | 1 件 (`excluded`) | `<input.id>` |
+| **Tier 1 (汎用)** | `common/` | 与えられた AST / statement 列だけ。dataset の物理レイアウトも計測ハーネスの識別子規約 (`f1` / `execute` / `init` / `setupTest` / `test`) も一切知らない AST primitive |
+| **Tier 2 (adapter)** | `selakovic/` | Selakovic dataset の物理レイアウト (`v_*.html` / `<lib>_before|after` / `test_case_*.js`) とハーネス規約。「どの statement を before/after の母集団として Tier 1 に渡すか」を決める |
 
-Python 側 Gateway は **prefix-match で id 突き合わせ** (`<batch_key>` または `<batch_key>#X` の全行を集める)。
+依存は Tier 2 → Tier 1 の一方向のみ (ESLint `import/no-restricted-paths` で機械強制)。将来の別 dataset は `preprocessing/<dataset>/` を adapter として追加し、`common/` と contract の base 部は触らない (ADR-0024)。
 
-### `aspect` / `candidate_kind` / `environment` (ADR-0011 §段2 / ADR-0014)
-
-- **`aspect`**: 真 patch がどこにあるか。`A` = `<lib>_*.js` のみ変化 / `B` = ベンチマーク関数 body (`f1.body` / `test()` body) のみ変化 / `A+B` = 両方 / `fallback` = どちらにも実コード差なし or 規約外フォーマット (= Tier 1 素の top-level diff に委ねた)。
-- **`candidate_kind`**: `A+B` を identifier 交差判定で分割したときの役割 (`lib` = lib varies / body fixed@before、`body` = body varies / lib fixed@before)。それ以外 (`A` / `B` / `A+B` co-evolution / `fallback`) は `single`。
-- **`environment`**: preprocess が後段 equivalence-checker に渡す実行環境 hint (`vm` = 純粋計算 / `jsdom` = browser ライブラリ・server `test_case` で `require` 解決・DOM が要る)。値は `equivalence-contracts.ts` の `EXECUTION_ENVIRONMENT` と一致。
-
-### `excluded` — 抽出不成立の理由 (`ExclusionReason`)
-
-`fallback` 経路 (Tier 1 素の diff) でのみ発生する (Tier 2 は `f1`/`test` が規約外なら exclude せず fallback に回す)。集計で内訳を取り、各々を threats to validity に「データセット / 抽出器の限界」として明示する方針:
-
-| reason | 意味 |
-|---|---|
-| `parse-error` | Babel parser が SyntaxError (例: inline `<script>` が JSX を含む) |
-| `no-changed-nodes` | 全 top-level statement が AST hash で matched (整形差分のみ、意味論変更なし) |
-| `module-wide-change` | unmatched 残るが 3 段すべての enclosure 候補型 (関数/Block/top-level statement) に到達できない (設計上ほぼ起きない) |
-| `multi-file-change` | server 系で意味論変更が複数 .js ファイルにまたがる (保守的に除外) |
-| `no-enclosure-candidate` | enclosure 候補型が見つからない |
-| `layout-unknown` | `v_*.html` も `<lib>_*` も無く client / server と判定できない |
-| `missing-files` | 期待するファイル (`v_*.html` / `<lib>_*` 等) が欠落 / ファイル I/O 失敗 |
+公開 API は `selakovic/index.ts:11-19` の 5 つ (`preprocess` / `detectLayout` / `loadLibPair` / `resolveScriptDepSources` / `extractInlineScripts`) のみで、内部構成 (`io/` → `decompose/` → `route/` → `assemble/` → `pipeline.ts`) は外に出さない (`index.ts:9`)。
 
 ## ファイル index
 
+### common/ — Tier 1 (dataset 非依存 AST primitive)
+
+| file | 役割 | 主な依存 |
+|---|---|---|
+| `ast-diff.ts` | GumTree top-down 簡略版の subtree mapping で「最深 unmapped 境界」= changed nodes を返す `findChangedNodes` (`ast-diff.ts:27`) | `ast/subtree-hash` |
+| `change-units.ts` | before/after lib の差分を **fn unit** (変更を含む最寄り named 関数、匿名は飛ばす) と **stmt unit** (ブロック直下の文) に切り分ける `findChangeUnits` (`change-units.ts:205`)。`FnChangeUnit` (`change-units.ts:145`) / `StmtChangeUnit` (`change-units.ts:161`、binding 名 + occurrence 番号で after 側と一意対応) | `ast-diff.ts`, `ast/parser`, `ast/walk` |
+| `enclosure.ts` | changed nodes を内包する最小 enclosure を 3 段優先順位 (関数/メソッド → BlockStatement → top-level statement) で求める `findMinimalEnclosure` (`enclosure.ts:63`、ADR-0010) | `ast/walk` |
+| `reachability.ts` | lib の named 関数 + workload root の名前ベース参照グラフ `buildCallGraph` (`reachability.ts:73`) と到達判定 `isReachedByAnyWorkload` (`reachability.ts:126`) / `isAnyBindingReachedByWorkload` (`reachability.ts:137`)。member-access は末端セグメント照合の over-approximation = KEEP 寄り安全側 | `change-units.ts` (FN_TYPES / functionBindingName) |
+| `setup-cleanup.ts` | enclosure を含む Program 直下 statement で AST を分割する `splitAtEnclosure` (`setup-cleanup.ts:30`)、statement 列 → コード文字列化 `statementsToCode` (`setup-cleanup.ts:70`、コメントは出力しない) | `ast/parser`, `ast/walk` |
+
+### selakovic/ — Tier 2 (Selakovic adapter)
+
+| file | 役割 | 主な依存 |
+|---|---|---|
+| `index.ts` | public API の再 export (上記 5 関数) | `pipeline.ts`, `io/`, `decompose/inline-script` |
+| `pipeline.ts` | 1 issue 分の前処理本体 `preprocess` (`pipeline.ts:60`、**純関数** — FS I/O を持たない)。client / server に分岐し、route 結果に応じて assemble を dispatch。changed-fn / changed-stmt 候補の append (`pipeline.ts:160`) と server 版 (`pipeline.ts:240`) もここ | `common/*`, `decompose/`, `route/`, `assemble/`, contracts |
+
+#### selakovic/io/ — issue ディレクトリの読み出し (selakovic で `fs` に触る唯一の層 — `lib-pair.ts:16-17`)
+
+| file | 役割 | 主な依存 |
+|---|---|---|
+| `layout.ts` | 物理ファイル構造から client (`v_*.html`) / server (`<lib>_before/` dir or `<lib>_before.js`) / unknown を判定する `detectLayout` (`layout.ts:39`)。`test_case_*` を lib 候補から除外 (`layout.ts:99`)、HTML + 単一ファイル lib の共存 (clientServerIssues) は client 優先 (`layout.ts:53-59`) | contracts (`LAYOUT_KIND`), `fs` |
+| `lib-pair.ts` | `<lib>_before|after` (dir / 単一ファイル) を読み出して relative path → ソースの map ペアにする `loadLibPair` (`lib-pair.ts:28`) | `layout.ts`, `fs` |
+| `script-deps.ts` | HTML の `<script src>` を harness / patched-lib / cdn-dep / local-other に分類する `classifyScriptSrcs` (`script-deps.ts:52`) と、CDN 依存 (jquery / handlebars / underscore) を issue 最寄りの `node_modules/` から解決する `resolveScriptDepSources` (`script-deps.ts:119`、ADR-0016 の client 拡張) | `fs` |
+
+#### selakovic/decompose/ — 役割分解 + 計測ハーネス除去 (ADR-0011 §段1)
+
+| file | 役割 | 主な依存 |
+|---|---|---|
+| `inline-script.ts` | `v_*.html` から inline `<script>` 本文を抽出する `extractInlineScripts` (`inline-script.ts:22`、純関数・正規表現実装) | — |
+| `f1.ts` | inline script から `f1` を特定し f1 body / preWorkload / harness statement に分解する `extractF1` (`f1.ts:62`)。wrapper は `top-level` / `angular-controller-wrapper` の 2 種 (`f1.ts:32`)。規約外フォーマットは `null` → fallback | `ast/parser`, `ast/walk` |
+| `test-case.ts` | `test_case_*.js` から `test()` body とパラメタを取り出す `extractTest` (`test-case.ts:34`)。`init`/`setupTest` はハーネス扱い | `ast/parser`, `ast/walk` |
+
+#### selakovic/route/ — 作用点ルーティング (ADR-0011 §段2)
+
+| file | 役割 | 主な依存 |
+|---|---|---|
+| `aspect.ts` | (lib に実コード変化, body に実コード変化) → `lib` / `workload` / `lib+workload` / `fallback` の `routeAspect` (`aspect.ts:15`) と AST 差分有無の `statementsChanged` (`aspect.ts:26`) | `common/ast-diff` |
+| `lib-diff.ts` | lib ペアの行 multiset 差分で license / version / 整形 noise を除いた「実コード変化」と近傍関数名を出す `diffLibPair` (`lib-diff.ts:27`) | — |
+| `case-split.ts` | `lib+workload` の issue を body 参照 identifier × lib 変更関数名の交差で independent (split) / co-evolution (1 candidate) に判定する `isIndependent` (`case-split.ts:17`、ADR-0014。迷ったら 1 candidate に倒す保守的判定) | `ast/walk` |
+
+#### selakovic/assemble/ — candidate の組み立て
+
+| file | 役割 | 主な依存 |
+|---|---|---|
+| `recorder-hooks.ts` | 等価検証器が注入する記録 Proxy (`globalThis.__recorder`、C6 interaction-trace) を runnable 内から使う hook 文の生成 (`recorder-hooks.ts:21,45`)。jQuery のみ `recurse: false` (`recorder-hooks.ts:42`) | — |
+| `strategies/changed-fn.ts` | workload 到達済み fn unit から changed-fn candidate を組む `buildChangedFnCandidate` (`changed-fn.ts:55`、ADR-0023 placeholder substitution model)。hole 化 / body slice / param 検査の共通処理後に wrapperKind で `wrappers/` へ dispatch (`changed-fn.ts:96-123`)。rename-only param は collision guard 付きで救済 (ADR-0027)。excluded marker は `buildExcludedChangedFnCandidate` (`changed-fn.ts:137`) | `wrappers/{top-level,angular}`, `codegen/placeholder`, `ast/inspect`, `common/*` |
+| `strategies/changed-stmt.ts` | stmt unit (モジュール直下の `var VERSION = ...` 等) を candidate 化する `buildChangedStmtCandidate` (`changed-stmt.ts:56`)。changed stmt を `$BODY$` 穴あけ + workload 到達可能な named fn 群を observer 計装する full-observation モデル | `codegen/placeholder`, `common/{change-units,reachability,setup-cleanup}` |
+| `strategies/server-changed-fn.ts` | server (CommonJS) lib の changed-fn candidate `buildServerChangedFnCandidate` (`server-changed-fn.ts:41`、ADR-0025)。in-memory map-require で相対 require を解決し、変更ファイルだけ穴あけ。観測は 2 チャネル (変更関数戻り値 `r` + init 戻り値 post-state `s`) | `changed-fn.ts`, `codegen/placeholder`, `ast/inspect` |
+| `strategies/fallback.ts` | `f1`/`test` 規約外 / 実質差なし issue の安全弁。top-level statement の canonical hash greedy match で素の diff candidate を切り出す `extractFromScripts` (`fallback.ts:47`) / `extractFromServerFiles` (`fallback.ts:136`) | `common/{ast-diff,enclosure,setup-cleanup}`, `ast/subtree-hash` |
+| `wrappers/top-level.ts` | client の embedded candidate 3 種 (`buildClientLibCandidate` `top-level.ts:24` / `buildClientBodyCandidate` `top-level.ts:49` / `buildClientCombinedCandidate` `top-level.ts:78`) と top-level changed-fn の実行容器 `assembleTopLevelChangedFn` (`top-level.ts:167`) | `wrappers/angular`, `recorder-hooks.ts`, `codegen/placeholder` |
+| `wrappers/angular.ts` | Angular controller-wrapper の自己完結 runnable `buildAngularRunnable` (`angular.ts:68`) と changed-fn 容器 `assembleAngularChangedFn` (`angular.ts:120`、bootstrap を setup / workload に分割) | `recorder-hooks.ts`, `codegen/placeholder` |
+| `wrappers/server.ts` | server の embedded runnable `buildServerRunnable` (`server.ts:18`)。test_case を CommonJS wrapper で評価し init/setupTest/test を実行、内部 throw は re-throw して exception oracle に乗せる | `recorder-hooks.ts` |
+
+## 処理フロー (依存方向)
+
 ```
-src/preprocessing/
-├── common/              ← Tier 1 (ADR-0011): dataset 非依存の AST primitive。selakovic から個別 import
-│   ├── ast-diff.ts          ← findChangedNodes (GumTree top-down 流の subtree mapping で「最深 unmapped」)
-│   ├── enclosure.ts         ← findMinimalEnclosure (changed_nodes を内包する最小 syntactic 単位、3 段優先順位 — ADR-0010)
-│   └── setup-cleanup.ts     ← splitAtEnclosure / statementsToCode / statementToCode (enclosure を含む top-level statement で AST を分割)
-└── selakovic/           ← Tier 2 (ADR-0011): Selakovic 2016 dataset 固有の adapter
-    ├── index.ts             ← 薄い barrel (preprocess / SelakovicPreprocessInput / detectLayout / DetectedLayout / loadLibPair / LibPair / extractInlineScripts)
-    ├── pipeline.ts          ← preprocess / preprocessClient / preprocessServer + glue。io → decompose → route → assemble を統括
-    ├── io/                  ← FS I/O 層 (CLI から呼ぶ。selakovic で fs を import するのはここだけ)
-    │   ├── layout.ts            ← detectLayout (物理ファイル構造から client/server/unknown 判定 + ファイルパス収集)
-    │   └── lib-pair.ts          ← loadLibPair (<lib>_before/after を dir scan で読んで Record<path, source> に)
-    ├── decompose/           ← 段1 役割分解: 片側 (before|after) の source → 構造化ピース (pure)
-    │   ├── inline-script.ts     ← extractInlineScripts (v_*.html から inline <script> を抽出)
-    │   ├── f1.ts                ← extractF1 (inline <script> から f1 を特定 → body / preWorkload / 計測ハーネス に分解。top-level / Angular controller-wrapper の 2 種)
-    │   └── test-case.ts         ← extractTest (test_case_*.js から init/setupTest/test を特定 → test() body を切り出し)
-    ├── route/               ← 段2 作用点ルーティング: before×after のピースを比較して分類 (pure)
-    │   ├── aspect.ts            ← routeAspect (lib 変化×body 変化 → A/B/A+B/fallback) + statementsChanged (body の AST diff が空でないか)
-    │   ├── lib-diff.ts          ← diffLibPair (行ベース multiset 差分で license/version/整形 noise を除いて実コード行が残るか + 近傍関数名を近似)
-    │   └── case-split.ts        ← isIndependent (ADR-0014: body の参照 identifier ∩ lib 変更関数名が空なら independent → 2 candidate)
-    └── assemble/            ← (setup, before, after) を組み立てる (pure)
-        ├── angular.ts           ← buildAngularRunnable (Angular controller-wrapper: lib load → module/controller 再構成 → f1() 1 回実行 → 観測値 return の自己完結 IIFE)
-        ├── client.ts            ← buildClient{Lib,Body,Combined}Candidate (top-level f1 の作用点別組み立て。body は `(function(){ ... })()` で包む)
-        ├── server.ts            ← buildServerRunnable (test_case_*.js を module/exports/require 込みで包んで init()/setupTest()/test() を実行)
-        └── fallback.ts          ← extractFromScripts / extractFromServerFiles (Tier 1 素の top-level diff = 規約外 issue の安全弁。assemble の degenerate 版)
+CLI (composition root)                 pipeline.ts (純関数)
+──────────────────────                 ─────────────────────────────────────────
+io/  detectLayout                      decompose/  extractF1 / extractTest
+     loadLibPair              ──→                  (規約外 → fallback)
+     resolveScriptDepSources                │
+     + extractInlineScripts                 ▼
+     = SelakovicPreprocessInput        route/      diffLibPair + statementsChanged
+                                                   → routeAspect (lib / workload /
+                                                     lib+workload / fallback)
+                                                   lib+workload → isIndependent
+                                                │
+                                                ▼
+                                       assemble/   wrappers (embedded #0)
+                                                   + strategies (changed-fn /
+                                                     changed-stmt / server-changed-fn
+                                                     / fallback)
+                                                │
+                                                ▼
+                                       PreprocessingIssueResult
 ```
 
-層の役割分担:
+- FS I/O は `io/` に閉じる。`preprocess()` (`pipeline.ts:60`) はファイル内容を受け取る純関数で、CLI が `io/` の結果から `SelakovicPreprocessInput` (`pipeline.ts:40`) を組んで渡す。
+- client `aspect: lib` (および lib+workload の independent split) では、embedded candidate `#0` に加えて、workload (`f1`) が推移的に exercise する変更 unit ごとに changed-fn / changed-stmt candidate を append する (`pipeline.ts:160-227`)。真の candidate を作れない unit は `candidate_excluded` marker として痕跡を残す (ADR-0023 D-γ §DROP 可視化)。
+- server では embedded `#0` (`buildServerRunnable`) に加え、lib に実変化があれば CommonJS-respecting な server-changed-fn candidate を append する (`pipeline.ts:330-332`、ADR-0025)。
+- `common/` → `selakovic/` の逆方向 import は存在しない。`assemble/` 内も `strategies/` → `wrappers/` の一方向 dispatch。
 
-| 層 | 中身 | dataset 知識 | 入れ替え可能性 |
-|---|---|---|---|
-| `common/` (Tier 1) | AST diff / enclosure / setup 分割 (Babel と `ast/` toolbox のみに依存) | なし | 別 dataset の adapter からも再利用可 |
-| `selakovic/` (Tier 2) | Selakovic 規約 (`f1`/`test`/`<lib>_*`/計測ハーネス) を知る adapter。`io → decompose → route → assemble` の 4 層 + `pipeline.ts` 統括 + `index.ts` barrel | あり | dataset 固有 |
-| `../contracts/preprocessing-contracts` | Python と互換の JSON 型・列挙 (末端層) | なし | 触れない |
+## JSON 契約 (`contracts/preprocessing-contracts.ts`)
 
-モジュール内共有ヘルパ (`extractF1` / `extractTest` / `diffLibPair` / `routeAspect` / `isIndependent` / runnable builder 等 — barrel に出していない) のテストは各ファイル末尾の in-source testing (`if (import.meta.vitest)`)、公開 API `preprocess()` の振る舞いテストは `tests/preprocessing/selakovic.test.ts` — [ADR-0007](../../../ai-guide/adr/0007-in-source-testing-internal-helpers.md)。
+Python 側 `mb_scanner/domain/entities/preprocessing.py` との paired-change 対象 (`preprocessing-contracts.ts:1-13`)。構造は base contract (全 dataset 共通フィールド) + adapter extension (`issue_meta` / `candidate_meta` の discriminated union) + issue 階層化 (ADR-0024)。
 
-## 抽出パイプライン (Tier 2 段1 / 段2 — ADR-0011)
+- **`PreprocessingInput`** (`preprocessing-contracts.ts:37`): CLI の stdin 入力 (1 issue 分)。`{ id?, issue_dir }`。
+- **`PreprocessingIssueResult`** (`preprocessing-contracts.ts:74`): **1 issue = JSONL 1 行 = 1 モデル**。
+  - `issue_excluded?` / `issue_excluded_detail?` — issue 全体の処理失敗理由 (指定時 `candidates` は空でよい)
+  - `candidates: PreprocessingCandidate[]` + `candidate_count` (= `candidates.length` の冗長フィールド、見通し用)
+  - `issue_meta?: SelakovicIssueMeta` (`preprocessing-contracts.ts:176`) = `{ adapter: "selakovic", layout, aspect, wrapper_kind }` — issue level で 1 値。gateway error 以外は adapter が必ず付与
+- **`PreprocessingCandidate`** (`preprocessing-contracts.ts:56`): 等価検証の入力単位。
+  - `setup?` / `before?` / `after?` — 基本 3 値。`candidate_excluded` 指定時は undefined
+  - `workload?` — ADR-0023 の placeholder substitution 用 4 値目。`setup` が `$BODY$` プレースホルダを厳密 1 個含み、`before`/`after` を差し込んで sandbox に渡す経路 (changed-fn 系) でのみ定義。それ以外の経路 (client embedded / fallback / server embedded) では null/undefined
+  - `before_node_count?` / `after_node_count?` — AST ノード数 (changed-fn 系は変更関数本体のサイズ、embedded/fallback は全文サイズ — `pipeline.ts:124-136`)
+  - `enclosure_node_type?` — 抽出した最小 enclosure の Babel ノード型名 (粒度集計用、ADR-0010)
+  - `candidate_excluded?: ExclusionReasonAny` — この candidate を作れなかった理由 (DROP 可視化 marker)
+  - `candidate_meta: SelakovicCandidateMeta` (`preprocessing-contracts.ts:184`) = `{ adapter: "selakovic", target_side, is_workload_reachable }` — candidate level で 1 値
+- **除外理由** = base 4 値 (`preprocessing-contracts.ts:26`: parse-error / no-changed-nodes / multi-file-change / missing-files) + Selakovic 固有 12 値 (`preprocessing-contracts.ts:158`: module-wide-change / no-enclosure-candidate / layout-unknown / change-not-exercised / no-lib-source / angular-wrapper-skip / change-units-parse-fail / empty-diff / no-fn-unit / unit-renamed-or-removed / fn-non-block-body / fn-param-names-mismatch) の union (`preprocessing-contracts.ts:198`)。
+- **`aspect` と `target_side` のレベル差** (`preprocessing-contracts.ts:104,122`): `aspect` は「元 patch がどこにあるか」(1 issue = 1 値)、`target_side` は「この candidate がどっち側を表現するか」(1 candidate = 1 値)。語彙 (`lib`/`workload`) は重なるが意味レベルが違う。
 
-`preprocess(input: SelakovicPreprocessInput)` (`pipeline.ts`) は CLI が読んだファイル内容 (inline `<script>` / `test_case_*.js` / `<lib>_before/after` の map) を受け取り 4 層を順に通す:
-
-1. **段1 (役割分解 + 計測ハーネス除去)** — `decompose/`: ① `<lib>_before/after` ペア (CLI が `io/lib-pair.ts` で dir scan 済) + ② ベンチマーク関数 body ペア (client: `f1` body / server: `test()` body)。`var a = execute(f1, n)` 以降 / `$.ajax({mark,mean})` / `init`/`setupTest` 等の計測ハーネスは setup に回すか破棄。**body 内のループ反復回数 (`for (i<50000)`) は書き換えない** — 復元可能性のため、反復縮小は等価検証側の transform に委ねる (ADR-0013)。
-2. **段2 (作用点ルーティング)** — `route/`: ①② の実コード差で **A** (lib のみ) / **B** (body のみ) / **A+B** (両方) / **fallback** に振り分け。A/B → candidate 1 個。A+B → ADR-0014 の identifier 交差判定で independent なら 2 candidate (`lib` / `body`)、co-evolution の疑いなら 1 candidate。fallback → `assemble/fallback.ts` の Tier 1 素の top-level diff。
-3. **組み立て** — `assemble/`: 作用点 × wrapper kind で `(setup, before, after)` を作る (Angular controller-wrapper / top-level f1 / server test_case / fallback)。
-
-詳細は ADR-0010 (enclosure の 3 段優先順位 — fallback 経路専用) / ADR-0011 (二層化・レイアウト判定) / ADR-0023 (setup 構築・4 値契約) / ADR-0024 (除外理由の意味論・契約分離) を参照。
-
-## 依存方向
-
-```
-selakovic/index.ts (barrel)
- └─ selakovic/pipeline.ts
-     ├─ decompose/{inline-script,f1,test-case}.ts ── ../../ast/{parser,walk}
-     ├─ route/{aspect,lib-diff,case-split}.ts ──┬── ../../common/ast-diff ── ../../ast/{subtree-hash,walk}
-     │                                          └── ../../ast/walk
-     ├─ assemble/{angular,client,server}.ts ──── ../../common/setup-cleanup ── ../../ast/{parser,walk}
-     ├─ assemble/fallback.ts ──── ../../common/{ast-diff,enclosure,setup-cleanup} + ../../ast/{parser,inspect,subtree-hash}
-     ├─ io/{layout,lib-pair}.ts ── node:fs / node:path  (CLI から直接呼ぶ I/O 層)
-     └─ ../../ast/{parser,inspect} + ../../contracts/preprocessing-contracts (末端層)
-```
-
-`preprocessing/` は `ast/` と `contracts/` (+ `io/` の node builtins) しか import せず、`equivalence-checker/` / `pruning/` 等の他機能は import 禁止 (eslint `import/no-restricted-paths`)。Tier 1 `common/` は Tier 2 `selakovic/` を import してはならない (`@angular/common` 流のドメイン非依存層、こちらも eslint で機械強制)。CLI (`cli/preprocess-selakovic.ts`) のみが composition root として `selakovic/index.ts` を import する。
+CLI / equivalence-checker 側の使われ方は [`../cli/README.md`](../cli/README.md) / [`../equivalence-checker/README.md`](../equivalence-checker/README.md) 参照。
 
 ## 関連 ADR
 
-- [ADR-0007](../../../ai-guide/adr/0007-in-source-testing-internal-helpers.md): 内部ヘルパとモジュール内共有ヘルパは in-source testing、公開 API は `tests/` ツリーで分離する
-- [ADR-0010](../../../ai-guide/adr/0010-preprocessing-enclosure-3-tier.md): Selakovic 前処理器の enclosure 候補型に 3 段優先順位 (関数/メソッド → ブロック → top-level statement) を採用 (`common/enclosure.ts`、fallback 経路の粒度を決める)
-- [ADR-0011](../../../ai-guide/adr/0011-preprocessing-tier-structure.md): preprocess を Tier 1 (汎用 AST diff = `common/`) + Tier 2 (Selakovic adapter = `selakovic/`) の二層に分ける。Tier 2 は段1 役割分解 / 段2 作用点ルーティング (A·B·A+B·fallback) の構成
-- [ADR-0014](../../../ai-guide/adr/0014-case-split-for-both-changed.md): inline+lib 両方変化した issue は identifier 交差判定で independent なら 2 candidate に分割する (`route/case-split.ts`、`PreprocessingResult.candidate_kind`)
-- [ADR-0013](../../../ai-guide/adr/0013-equivalence-operational-definition.md): 「意味論的等価」の operational definition — 反復回数は非観測 = preprocess は loop bound を書き換えない (`for (i<50000)` をそのまま残す)。`environment` hint の受け手 (equivalence-checker) 側の規約は [ADR-0012](../../../ai-guide/adr/0012-equivalence-checker-execution-environment.md)
+- ADR-0010: Selakovic 前処理器の enclosure 候補型に 3 段優先順位 (関数 / Block / Top-level statement) を採用
+- ADR-0011: preprocess を Tier 1 (汎用 AST diff) + Tier 2 (Selakovic adapter) の二層に分ける
+- ADR-0014: inline+lib 両方変化した issue は identifier 交差判定で independent なら 2 candidate に分割する
+- ADR-0016: SUT lib の npm dep を dataset fork に lockfile で宣言して解決する (`script-deps.ts` の client 拡張の前提)
+- ADR-0017: ループ反復回数は preprocess では書き換えず sandbox の iteration-cap に委ねる
+- ADR-0023: preprocess を placeholder substitution + 4 値契約に書き直す (v2) — ADR-0022 (v1) を supersede
+- ADR-0024: preprocess contract を base / adapter 分離 + issue 階層化に再設計する
+- ADR-0025: server SUT を CommonJS-respecting holed lib で扱う (server-changed-fn / map-require)
+- ADR-0027: changed-fn rename-only 救済の collision guard (scope-aware rename 不採用)
+- ADR-0029: ai-guide の Reference 軸を生成型へ移行 (この README の生成根拠)
