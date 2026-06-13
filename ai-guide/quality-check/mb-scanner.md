@@ -13,21 +13,17 @@ Python 側コードベース `mb_scanner/` のテスト詳細。共通原則は 
 
 ## ディレクトリ構成と命名
 
-`tests/` 以下に Clean Architecture の 4 層構造をミラーした形で配置する。
+`mb_scanner/tests/` 以下に feature-first の段構造をミラーした形で配置する (ADR-0030)。各段ディレクトリは `__init__.py` を持つ (テストモジュール名の衝突回避)。
 
 ```
-tests/
-├── domain/entities/          # ドメインモデルのテスト
-├── use_cases/                # Use Case のテスト
-├── adapters/
-│   ├── cli/                  # CLI コマンドのテスト
-│   └── gateways/             # Gateway 実装のテスト
-│       ├── equivalence/      # TS 側との subprocess integration test (Selakovic fixture 回帰含む)
-│       ├── preprocessing/selakovic/
-│       └── pruning/
-├── fixtures/selakovic/       # 等価性検証の Selakovic 10 パターン fixture
-└── infrastructure/           # 設定のテスト
+mb_scanner/tests/
+├── equivalence/              # test_cli / test_gateway(_batch) / test_models / test_verdict / test_selakovic_fixtures
+├── pruning/                  # test_cli / test_gateway(_batch) / test_models
+├── preprocessing/            # test_gateway(_batch) / test_models
+└── fixtures/selakovic/       # 等価性検証の Selakovic 10 パターン fixture
 ```
+
+- `test_gateway.py` / `test_gateway_batch.py` には TS 側との subprocess integration test (`-m integration`、Selakovic fixture 回帰含む) も同居する。
 
 - **関数名**: `test_` プレフィックス + 条件 + 期待結果（例: `test_parses_stdout_into_domain_model`、`test_subprocess_timeout_becomes_error_verdict`）
 
@@ -37,15 +33,15 @@ tests/
 
 ## フィクスチャ
 
-- 現在 `tests/conftest.py` は無い (旧 DB 用 conftest は legacy へ随伴)
+- 現在 `mb_scanner/tests/conftest.py` は無い (旧 DB 用 conftest は legacy へ随伴)
 - **原則**: Arrange フェーズを簡潔に保つため、複数ファイルで共通化できるセットアップが生じたら conftest.py に集約すること
 
 ---
 
 ## カバレッジ基準
 
-- **Use Cases 層**: `mb_scanner/use_cases/` 配下の public メソッドは **100% テスト**
-- **Gateway 層**: `mb_scanner/adapters/gateways/` は subprocess 呼び出し部をモックした上で、エラーハンドリング分岐も含めてテスト
+- **verdict 導出**: `mb_scanner/equivalence/verdict.py` の public 関数・メソッドは **100% テスト**
+- **gateway**: 各段 `mb_scanner/<段>/gateway.py` は subprocess 呼び出し部をモックした上で、エラーハンドリング分岐も含めてテスト
 - **ケース網羅**: 各メソッドに対し、正常系・異常系・境界系を確認（詳細は [`index.md`](index.md) 共通原則）
 - **エッジケース**: 文字列処理や配列操作ではパターンの違いを網羅
   - 例: JSON フォーマット処理 → プリミティブ配列、オブジェクト配列、ネスト配列の各ケース
@@ -66,7 +62,7 @@ mise run test-cov
 
 ### モックすべき対象
 
-- **Gateway 層**: `mb_scanner/adapters/gateways/` 配下のクラス（equivalence / preprocessing / pruning の NodeRunner gateway）
+- **gateway**: 各段 `mb_scanner/<段>/gateway.py` の NodeRunner gateway クラス（equivalence / preprocessing / pruning）
 - **外部コマンド実行**: `subprocess` による `node dist/cli.js` の実行（integration マーク付きテストのみ実 Node を起動する）
 
 ### モックしてはいけない対象

@@ -158,9 +158,9 @@ mb-analyzer-legacy/           # [DEPRECATED] 旧 pnpm workspace monorepo
 ### 1. 新しい oracle の追加
 
 1. `mb-analyzer/src/equivalence-checker/common/comparison/oracles/` に新 oracle を作成 (`check*(before, after, profile?): OracleObservation` を export) し `oracles/index.ts` に re-export
-2. `mb_scanner/domain/entities/equivalence.py` の `Oracle` 列挙値に対応する文字列を追加 (Python ↔ TS で完全一致; TS 側は `contracts/equivalence-contracts.ts` の `ORACLE`)
+2. `mb_scanner/mb_scanner/equivalence/models.py` の `Oracle` 列挙値に対応する文字列を追加 (Python ↔ TS で完全一致; TS 側は `contracts/equivalence-contracts.ts` の `ORACLE`)
 3. `selakovic/oracle-routing.ts` の環境別 oracle 集合 + `selakovic/checker.ts` の `runOracle` switch に追加。dataset 固有の正規化値は `selakovic/profiles.ts` に置いて `common/` に直書きしない
-4. positive evidence にするか / verdict 合成への影響を `common/comparison/verdict.ts` と `use_cases/equivalence_verification.py` (`derive_overall_verdict` / `derive_verdict_reason`、両者ミラー) で見直し
+4. positive evidence にするか / verdict 合成への影響を `common/comparison/verdict.ts` と `mb_scanner/mb_scanner/equivalence/verdict.py` (`derive_overall_verdict` / `derive_verdict_reason`、両者ミラー) で見直し
 5. テスト追加: oracle 関数の単発判定は新 oracle ファイル末尾の `if (import.meta.vitest)` ブロックに (ADR-0007)、合成への影響は `tests/equivalence-checker/common/comparison/verdict.test.ts` と Python 側 use case テストに
 
 ### 2. サンドボックス環境のカスタマイズ
@@ -180,7 +180,7 @@ mb-analyzer-legacy/           # [DEPRECATED] 旧 pnpm workspace monorepo
 1. `mb-analyzer/src/<feature-name>/` に新ディレクトリを作成
 2. `eslint.config.js` の `DEPENDENCY_ZONES` に新ゾーンを追加し、依存方向を機械強制する
 3. CLI ハンドラを `mb-analyzer/src/cli/<feature>.ts` に追加、`cli/index.ts` の `SUBCOMMANDS` に登録
-4. Python 側は `mb_scanner/adapters/gateways/` に新 Gateway、`domain/ports/` に新 Protocol、`use_cases/` に新 Use Case を追加
+4. Python 側は `mb_scanner/mb_scanner/<新段>/` を作り、`gateway.py` に Protocol + 新 Gateway を同居、`models.py` に入出力モデル、`cli.py` を追加し、ルート `cli.py` に register (feature-first、ADR-0030)
 
 ---
 
@@ -244,4 +244,4 @@ mb-analyzer-legacy/           # [DEPRECATED] 旧 pnpm workspace monorepo
 - in-source / `tests/` の振り分けは ADR-0007 のルール (モジュールの `index.ts` に乗るか) — oracle / `routeOracles` / serializer / 各 transform 等の内部ヘルパは各 src ファイル末尾の `if (import.meta.vitest)` に置く。詳細は [`quality-check/mb-analyzer.md`](../quality-check/mb-analyzer.md)
 - サンドボックス実行の E2E (stdin/stdout 含む) は `tests/cli/` に置く
 - `tests/equivalence-checker/` に置くのは公開 API (`checkEquivalence`)、verdict 合成 (`deriveOverallVerdict` / `deriveVerdictReason` — 論文 audit trail として外仕様化)、および real vm/jsdom/FS を叩く executor (`vm` / `jsdom`) — 後者は in-source に置くと実装本体が肥大するため `tests/` 側に残す
-- Python 側 integration test (`tests/adapters/gateways/equivalence/test_selakovic_fixtures.py`) と役割分担: TS 側テストは型レベル・単体の責務、言語をまたぐ subprocess 契約は Python 側で実機確認
+- Python 側 integration test (`mb_scanner/tests/equivalence/test_selakovic_fixtures.py`) と役割分担: TS 側テストは型レベル・単体の責務、言語をまたぐ subprocess 契約は Python 側で実機確認

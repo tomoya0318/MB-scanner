@@ -11,7 +11,7 @@ const EXIT_ERROR = 2;
 const EXIT_BATCH_OK = 0;
 const EXIT_BATCH_IO_FAILURE = 2;
 
-// Python 側 contract (`mb_scanner.domain.entities.pruning`) と整合させる値域。
+// Python 側 contract (Pydantic モデル) と整合させる値域。
 // ここで弾かないと engine は 0/負/小数の max_iterations でループをスキップして
 // silently `verdict="pruned"` を返してしまう。
 const MIN_TIMEOUT_MS = 1;

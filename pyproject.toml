@@ -79,8 +79,8 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "**/__init__.py" = ["F401"]  # 未使用import (re-exportの場合)
-"mb_scanner/mb_scanner/adapters/cli/**/*.py" = ["B008"]  # typer.Optionをデフォルト引数で使用 (Typerの正しい使い方)
-"mb_scanner/mb_scanner/domain/ports/**/*.py" = ["D102"]  # Protocolメソッドはクラスdocstringで代替
+"mb_scanner/mb_scanner/**/cli.py" = ["B008"]  # typer.Optionをデフォルト引数で使用 (Typerの正しい使い方)
+"mb_scanner/mb_scanner/**/gateway.py" = ["D102"]  # Protocolメソッドはクラスdocstringで代替 (gateway.py に Port を同居)
 "mb_scanner/tests/**/*.py" = ["D101", "D102", "D103"]  # テストのクラス/メソッド/関数の docstring 強制は過剰
 
 [tool.ruff.lint.isort]

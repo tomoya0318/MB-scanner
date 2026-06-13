@@ -1,8 +1,7 @@
 /**
- * Python 側 (`mb_scanner.domain.entities.preprocessing`) との JSON シリアライゼーション契約。
+ * Python 側 Pydantic モデルとの JSON シリアライゼーション契約。
  * 列挙値の文字列とフィールド名 (snake_case) を両言語で厳密に揃える。
- *
- * 変更時は paired-change で `mb_scanner/domain/entities/preprocessing.py` も同時に更新。
+ * 変更時は Python 側の対応モデルと paired-change で同時に更新する。
  *
  * 構造の方針 (ADR-0024):
  *  - **base contract**: 全 dataset で意味を持つフィールドのみ

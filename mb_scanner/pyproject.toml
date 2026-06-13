@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-mbs = "mb_scanner.adapters.cli:main"
+mbs = "mb_scanner.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -27,22 +27,28 @@ packages = ["mb_scanner"]
 root_packages = ["mb_scanner"]
 include_external_packages = true
 
+# パイプライン段 (equivalence / pruning / preprocessing) は互いに import しない (ADR-0030)。
+# 共通基盤 (mb_scanner._utils / config / cli) への依存は段間 import ではないので許可される。
 [[tool.importlinter.contracts]]
-name = "Clean Architecture layer dependencies"
-type = "layers"
-layers = [
-    "mb_scanner.infrastructure",
-    "mb_scanner.adapters",
-    "mb_scanner.use_cases",
-    "mb_scanner.domain",
-]
-# adapters は infrastructure を参照する（CLI=composition root）
-ignore_imports = [
-    "mb_scanner.adapters.** -> mb_scanner.infrastructure.**",
+name = "Pipeline components are independent"
+type = "independence"
+modules = [
+    "mb_scanner.equivalence",
+    "mb_scanner.pruning",
+    "mb_scanner.preprocessing",
 ]
 
+# 型契約 (models) と gateway (Protocol + 実装) は CLI フレームワークに依存しない。
+# cli.py は Typer commands なので対象外 (ADR-0030 §import-linter)。
 [[tool.importlinter.contracts]]
-name = "Domain must not depend on infrastructure frameworks"
+name = "Models and gateways must not depend on the CLI framework"
 type = "forbidden"
-source_modules = ["mb_scanner.domain"]
+source_modules = [
+    "mb_scanner.equivalence.models",
+    "mb_scanner.equivalence.gateway",
+    "mb_scanner.pruning.models",
+    "mb_scanner.pruning.gateway",
+    "mb_scanner.preprocessing.models",
+    "mb_scanner.preprocessing.gateway",
+]
 forbidden_modules = ["typer"]
