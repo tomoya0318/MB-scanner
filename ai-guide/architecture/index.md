@@ -12,7 +12,7 @@ MB-Scanner は、マイクロベンチマーク由来のパフォーマンスパ
 
 本プロジェクトは **Python 側 (`mb_scanner/`)** と **TypeScript 側 (`mb-analyzer/`)** の 2 つのコードベースから成ります。言語ごとに依存方向ルールと静的解析の体系が異なるため、以下の 2 文書で個別に詳細を扱います。
 
-- [`mb-scanner.md`](mb-scanner.md) — Python 側の Clean Architecture 4 層、ドメインモデル、DB 設計、Python コーディング規約
+- [`mb-scanner.md`](mb-scanner.md) — Python 側の feature-first 構成 (段 = ディレクトリ)、independence 契約、モデル、Python コーディング規約
 - [`mb-analyzer.md`](mb-analyzer.md) — TypeScript 側の依存方向ゾーン、ESLint 機械強制、サンドボックス、TS 新機能の追加
 
 本 index.md では両コードベースにまたがる **共通概念** のみを扱います。
@@ -21,11 +21,11 @@ MB-Scanner は、マイクロベンチマーク由来のパフォーマンスパ
 
 ## 共通のアーキテクチャ原則
 
-### Clean Architecture (依存方向は常に内側に向かう)
+### 依存方向の機械強制 (言語ごとに体系は異なる)
 
-両コードベースとも Clean Architecture を採用し、依存方向が外側 → 内側に向かう構造を取ります。
+両コードベースとも依存方向を静的解析で機械強制しますが、切り口は異なります。
 
-- **Python 側**: `domain → use_cases → adapters → infrastructure` の 4 層を `import-linter` で機械強制
+- **Python 側**: feature-first 構成 (ADR-0030)。パイプライン段 (`equivalence` / `pruning` / `preprocessing`) を `import-linter` の **independence 契約**で相互不可侵にする (段は互いに import しない)。加えて **forbidden 契約**で各段の `models.py` / `gateway.py` が `typer` に依存しないことを保証する。
 - **TypeScript 側**: `{contracts, ast} (末端層) → preprocessing → equivalence-checker → pruning → … → cli (composition root)` のゾーン構造を ESLint `import/no-restricted-paths` で機械強制 (各機能の `common/` は `selakovic/` を import 禁止 = dataset 非依存層)
 
 詳細な契約は言語別ドキュメント参照。
@@ -87,7 +87,7 @@ MB-Scanner は、マイクロベンチマーク由来のパフォーマンスパ
 
 代表例:
 - TS: `mb-analyzer/src/pruning/rules/whitelist.ts`, `blacklist.ts`
-- Python: `mb_scanner/domain/entities/*.py`
+- Python: `mb_scanner/mb_scanner/*/models.py`
 
 ---
 
