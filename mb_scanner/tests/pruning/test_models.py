@@ -1,7 +1,7 @@
 """Pruning モデル (Hydra 式 AST 差分フィルタ) の Pydantic バリデーションテスト
 
 対象: mb_scanner.pruning.models
-観点: TypeScript 側 (contracts/pruning-contracts.ts) と JSON 契約が揃っていること、
+観点: TypeScript 側の対応 contract と JSON 契約 (列挙値文字列・フィールド名) が揃っていること、
       ``PruningInput`` の境界バリデーション + 等価検証コンテキスト (environment 等) の pass-through、
       ``PruningResult`` の verdict 別表現、``extra`` 設定 (input=forbid / result=ignore) が期待通り機能すること
 """
