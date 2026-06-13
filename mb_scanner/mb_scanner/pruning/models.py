@@ -15,6 +15,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
+from mb_scanner._runner import BatchItemModel
+
 # ADR-0022 (workload-reachability) の changed-fn candidate は ``before``/``after`` は小さい (= 変更関数本体 + workload)
 # が ``setup`` に lib 全文 (Ember 1.x ≈ 1.5MB + 依存 lib jquery/handlebars) を丸ごと残すので上限は大きめに取る。
 # ``EquivalenceInput.MAX_CODE_LENGTH`` (= 20MB) と揃える — equiv を通った candidate は prune にも回せるべき。
@@ -58,10 +60,9 @@ class Placeholder(BaseModel):
     original_snippet: str
 
 
-class PruningInput(BaseModel):
+class PruningInput(BatchItemModel):
     """Node ランナーへ送る pruning 入力
 
-    ``id`` はバッチ API で Python ↔ Node 間の順序暗黙依存を避ける optional マーカー。
     ``setup`` を単数 string にした採用判断は ai-guide/adr/0004-pruning-setup-single.md 参照。
 
     ``environment`` / ``module_base_dir`` / ``mount_html`` は後段の等価検証
@@ -76,7 +77,6 @@ class PruningInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str | None = None
     before: str = Field(max_length=MAX_CODE_LENGTH)
     after: str = Field(max_length=MAX_CODE_LENGTH)
     setup: str = Field(default="", max_length=MAX_CODE_LENGTH)
@@ -93,7 +93,7 @@ class PruningInput(BaseModel):
     workload: str | None = Field(default=None, max_length=MAX_CODE_LENGTH)
 
 
-class PruningResult(BaseModel):
+class PruningResult(BatchItemModel):
     """1 (before, after, setup) トリプルに対する pruning 最終結果
 
     verdict ごとに Node 側実装が **付与する想定** のフィールドは以下（スキーマでは任意）:
@@ -113,7 +113,6 @@ class PruningResult(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    id: str | None = None
     verdict: PruningVerdict
     pattern_ast: JsonValue = None
     pattern_code: str | None = None
