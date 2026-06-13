@@ -99,7 +99,7 @@ mise run fix
 ## プロジェクト構造
 
 ```
-mb_scanner/src/mb_scanner/    # Python 側（薄いオーケストレータ）
+mb_scanner/mb_scanner/        # Python 側（薄いオーケストレータ）
 ├── domain/
 │   ├── entities/             # equivalence / preprocessing / pruning（Pydantic、TS 契約のミラー）
 │   └── ports/                # equivalence_checker / preprocessor / pruner（Protocol）

@@ -93,11 +93,11 @@ pnpm --prefix mb-analyzer run lint
 
 [tasks.test]
 description = "テストを実行する"
-run = "uv run pytest tests/"
+run = "uv run pytest mb_scanner/tests/"
 
 [tasks.test-cov]
 description = "カバレッジ付きでテストを実行する"
-run = "uv run pytest tests/ --cov=mb_scanner --cov-report=term-missing"
+run = "uv run pytest mb_scanner/tests/ --cov=mb_scanner --cov-report=term-missing"
 
 [tasks.test-analyzer]
 description = "mb-analyzer (新 TypeScript 実装) の vitest を実行する"

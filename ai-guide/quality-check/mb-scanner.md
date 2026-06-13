@@ -55,7 +55,7 @@ tests/
 
 ```bash
 mise run test-cov
-# 内部で uv run pytest tests/ --cov=mb_scanner --cov-report=term-missing を実行
+# 内部で uv run pytest mb_scanner/tests/ --cov=mb_scanner --cov-report=term-missing を実行
 ```
 
 `term-missing` で未到達行が表示されるため、数値ではなく **どの分岐が落ちているか** を見て埋めること。
@@ -94,8 +94,8 @@ def test_equivalence_verification(mocker):
 
 ```bash
 uv run pytest                                     # 全テスト
-uv run pytest tests/path/to/test.py              # 特定ファイル
-uv run pytest tests/path/to/test.py::func_name   # 特定関数
+uv run pytest mb_scanner/tests/path/to/test.py              # 特定ファイル
+uv run pytest mb_scanner/tests/path/to/test.py::func_name   # 特定関数
 uv run pytest -k "keyword"                       # キーワード一致テスト
 mise run test-cov                                # カバレッジ計測
 mise run lint                                    # ruff check
