@@ -1,9 +1,8 @@
 """等価性検証器の入出力 Pydantic モデル
 
-Node.js 側 (`mb-analyzer/src/contracts/equivalence-contracts.ts`) と JSON シリアライゼーション
-互換を保つ。フィールド名は snake_case、列挙値文字列も両言語で完全一致。
-
-paired-change で更新する: ``mb-analyzer/src/contracts/equivalence-contracts.ts``。
+TypeScript 側の対応 contract との JSON シリアライゼーション契約。
+フィールド名は snake_case、列挙値文字列も両言語で完全一致。
+変更時は TypeScript 側の対応 contract と paired-change で同時に更新する。
 """
 
 from enum import StrEnum

@@ -1,7 +1,8 @@
 """Pruning (Hydra 式 AST 差分フィルタ) の入出力 Pydantic モデル
 
-Node.js 側 (`mb-analyzer/src/contracts/pruning-contracts.ts`) と JSON シリアライゼーション互換を保つ。
+TypeScript 側の対応 contract との JSON シリアライゼーション契約。
 フィールド名は snake_case、列挙値文字列も両言語で完全一致。
+変更時は TypeScript 側の対応 contract と paired-change で同時に更新する。
 
 - ``PruningInput`` は外部入力 (CLI/JSONL) のため ``extra="forbid"`` で典型ミスを弾く
 - ``PruningResult`` は Node 側の将来フィールド追加に備えて ``extra="ignore"``
