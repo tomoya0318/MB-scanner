@@ -8,6 +8,8 @@ dependencies = [
     "scipy>=1.11.0",
     "matplotlib>=3.9.0",
     "scikit-learn>=1.5.0",
+    # 現状 import 実体は 0 件だが意図的に維持する: research スクリプトから
+    # mb_scanner の entities / CLI を将来 import する計画があるため (Q4 確定)。
     "mb-scanner",
 ]
 

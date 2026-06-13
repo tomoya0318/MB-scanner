@@ -201,14 +201,6 @@ run = "docker compose --profile archive run --rm scanner"
 # サーバ同期 (rsync)
 # =============================================================================
 
-[tasks."sync:brain1"]
-description = "brain-1 サーバへ rsync で同期する"
-run = """
-echo "📤 Syncing files to brain-1..."
-rsync -av --exclude-from=exclude-list.txt . brain-1:/mnt/data1/tomoya-n/MB-Scanner
-echo "✅ Sync to brain-1 completed!"
-"""
-
 [tasks."sync:brain2"]
 description = "brain-2 サーバへ rsync で同期する"
 run = """

@@ -18,8 +18,10 @@
 # 例（セットアップ不要な場合）:
 #   SETUP_COMMANDS=""
 # ──────────────────────────────────────────────────────────────────────────
-# submodule update は mise run setup 内に統合済 (.mise.toml [tasks.setup])。
-SETUP_COMMANDS="mise run setup"
+# setup-dataset は setup に depends するので submodule update + Python/mb-analyzer 依存も内包する
+# (.mise.toml [tasks.setup-dataset] → [tasks.setup])。dataset vendor の node_modules を再生成しないと
+# integration テスト (server-changed-fn 等) が setup-failure → error になるため worktree 新設時から含める。
+SETUP_COMMANDS="mise run setup-dataset"
 
 set -euo pipefail
 
