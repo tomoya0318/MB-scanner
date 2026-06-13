@@ -64,7 +64,7 @@ index.ts ─ selakovic/checker.ts ─ selakovic/{oracle-routing, profiles}
                                 │                   └ verdict.ts
                                 └ common/sandbox ─ executors/{vm,jsdom} ─ capture/* ─ serializer.ts
                                                  └ transforms/{non-determinism, iteration-cap ─ src/ast/*}
-contracts/equivalence-contracts.ts (型 + 列挙定数のみ、全層から参照される leaf)
+../contracts/equivalence-contracts.ts (型 + 列挙定数のみ、全層から参照される leaf)
 ```
 
 - `common/` は `selakovic/` を import しない (一方向 DI、ADR-0015)。

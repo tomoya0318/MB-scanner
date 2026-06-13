@@ -101,7 +101,7 @@ io/  detectLayout                      decompose/  extractF1 / extractTest
 - server では embedded `#0` (`buildServerRunnable`) に加え、lib に実変化があれば CommonJS-respecting な server-changed-fn candidate を append する (`pipeline.ts:330-332`、ADR-0025)。
 - `common/` → `selakovic/` の逆方向 import は存在しない。`assemble/` 内も `strategies/` → `wrappers/` の一方向 dispatch。
 
-## JSON 契約 (`contracts/preprocessing-contracts.ts`)
+## JSON 契約 (`../contracts/preprocessing-contracts.ts`)
 
 Python 側 `mb_scanner/domain/entities/preprocessing.py` との paired-change 対象 (`preprocessing-contracts.ts:1-13`)。構造は base contract (全 dataset 共通フィールド) + adapter extension (`issue_meta` / `candidate_meta` の discriminated union) + issue 階層化 (ADR-0024)。
 

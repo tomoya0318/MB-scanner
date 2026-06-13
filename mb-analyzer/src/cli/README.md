@@ -46,7 +46,7 @@ mb-analyzer の subprocess エントリポイント。Python 側 Gateway (`mb_sc
 `id` は単発モードでは受理しない (echo もされない)。
 
 ### stdout
-1 つの JSON object (1 行 + 末尾改行) — `EquivalenceCheckResult` (`verdict` / `observations` / `verdict_reason` / `error_message` / `effective_timeout_ms`、`contracts/equivalence-contracts.ts:99-114`)。意味論は [`../equivalence-checker/README.md`](../equivalence-checker/README.md)。
+1 つの JSON object (1 行 + 末尾改行) — `EquivalenceCheckResult` (`verdict` / `observations` / `verdict_reason` / `error_message` / `effective_timeout_ms`、`../contracts/equivalence-contracts.ts:99-114`)。意味論は [`../equivalence-checker/README.md`](../equivalence-checker/README.md)。
 
 ### stderr
 - stdin の JSON parse 失敗 / 非 object / フィールド型違いのときに人間可読メッセージ 1 行 (`check-equivalence.ts:83-85`)
@@ -119,12 +119,12 @@ JSONL (1 行 1 結果、**入力順**)。行単位の parse 失敗は `{"verdict
 
 値域チェックは Python 側 contract (`mb_scanner.domain.entities.pruning`) との整合用 — 弾かないと 0 / 負 / 小数の `max_iterations` で engine がループをスキップして silently `pruned` を返す (`prune.ts:14-16`)。`environment` / `module_base_dir` / `mount_html` は pruning 本体が解釈しない pass-through で、内部の等価検証にそのまま渡る (`prune.ts:45-55`)。
 
-契約型 `PruningInput` には `workload` フィールドが定義されているが (`contracts/pruning-contracts.ts:51-57`)、prune CLI の parse (`prune.ts:83-115`, `prune.ts:137-179`) は **`workload` を転記しない** (受理フィールドは上表が全て)。
+契約型 `PruningInput` には `workload` フィールドが定義されているが (`../contracts/pruning-contracts.ts:51-57`)、prune CLI の parse (`prune.ts:83-115`, `prune.ts:137-179`) は **`workload` を転記しない** (受理フィールドは上表が全て)。
 
 `id` は単発モードでは受理しない。
 
 ### stdout
-1 つの JSON object (1 行 + 末尾改行) — `PruningResult` (`verdict` / `pattern_ast` / `pattern_code` / `placeholders` / `iterations` / `node_count_initial` / `node_count_pruned` / `effective_timeout_ms` / `error_message`、`contracts/pruning-contracts.ts:60-71`)。意味論は [`../pruning/README.md`](../pruning/README.md)。
+1 つの JSON object (1 行 + 末尾改行) — `PruningResult` (`verdict` / `pattern_ast` / `pattern_code` / `placeholders` / `iterations` / `node_count_initial` / `node_count_pruned` / `effective_timeout_ms` / `error_message`、`../contracts/pruning-contracts.ts:60-71`)。意味論は [`../pruning/README.md`](../pruning/README.md)。
 
 ### stderr
 - stdin の JSON parse 失敗 / 非 object / フィールド型・値域違いのときに人間可読メッセージ 1 行 (`prune.ts:120-122`)
@@ -193,7 +193,7 @@ Selakovic dataset の 1 issue ディレクトリを前処理して candidate 群
 | `id` | optional、string。`null` は未指定扱い。あれば出力にエコーバック (`preprocess-selakovic.ts:57-60`, `preprocess-selakovic.ts:166-170`) |
 
 ### stdout
-1 行の JSON — `PreprocessingIssueResult` (`candidates` / `candidate_count` / `issue_excluded` / `issue_excluded_detail` / `issue_meta`、`contracts/preprocessing-contracts.ts:74-82`)。出力は batch と合わせて **常に JSONL 形式 (1 issue = 1 行)** で統一 (`preprocess-selakovic.ts:29-30`)。
+1 行の JSON — `PreprocessingIssueResult` (`candidates` / `candidate_count` / `issue_excluded` / `issue_excluded_detail` / `issue_meta`、`../contracts/preprocessing-contracts.ts:74-82`)。出力は batch と合わせて **常に JSONL 形式 (1 issue = 1 行)** で統一 (`preprocess-selakovic.ts:29-30`)。
 
 issue 単位の失敗は exit code ではなく結果 JSON の `issue_excluded` で表現する:
 - レイアウト判定不能 → `issue_excluded: "layout-unknown"` (`preprocess-selakovic.ts:88-101`)
