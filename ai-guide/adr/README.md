@@ -94,3 +94,4 @@ export function collectSubtreeHashes(file: File): Set<string> { ... }
 | [0027](0027-changed-fn-rename-collision-guard.md) | changed-fn rename-only 救済の collision guard (scope-aware rename 不採用、ADR-0023 D-γ §順 1-b の安全弁) | accepted | `mb-analyzer/src/ast/`, `mb-analyzer/src/preprocessing/` |
 | [0028](0028-pruning-protect-diff-literals.md) | pruning 差分フィルタで差分サブツリー内のリテラルを保護 (親も共通な時のみ wildcard 候補)。既知の限界 2 件 (繰り返し式の hash 衝突 / 挿入型最適化) を併記 | accepted | `mb-analyzer/src/pruning/` |
 | [0029](0029-generated-reference-docs.md) | ai-guide の Reference 軸を維持型から生成型へ移行 (code-map 廃止 + README/仕様書の skill 生成 + 実測の二段運用) | accepted | `ai-guide/`, in-tree README |
+| [0030](0030-python-feature-first-layout.md) | Python 側を layer-first 4 層 CA から feature-first + flat layout + independence contract へ移行 | accepted | `mb_scanner/` |
