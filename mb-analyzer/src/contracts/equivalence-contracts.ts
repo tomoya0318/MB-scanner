@@ -1,8 +1,7 @@
 /**
- * Python 側 (`mb_scanner.domain.entities.equivalence`) との JSON シリアライゼーション
- * 契約。列挙値の文字列とフィールド名の snake_case を両言語で厳密に揃える。
- *
- * 変更時は paired-change で `mb_scanner/domain/entities/equivalence.py` も同時に更新。
+ * Python 側 Pydantic モデルとの JSON シリアライゼーション契約。
+ * 列挙値の文字列とフィールド名の snake_case を両言語で厳密に揃える。
+ * 変更時は Python 側の対応モデルと paired-change で同時に更新する。
  */
 
 export const VERDICT = {
