@@ -22,7 +22,7 @@ export const PLACEHOLDER_NAME_PATTERN = /^\$P\d+$/;
  * 置換先 AST ノードを生成する `buildNode` の組を 1 行で対応付ける。
  * 新しい placeholder kind を追加する際の drift 面を 1 箇所に集約する目的。
  *
- * 判断: ai-guide/code-map.md (Pruning エンジン §置換操作の粒度)
+ * 判断: ai-guide/adr/0009-statement-placeholder-visibility.md
  */
 export interface CategoryReplacement {
   readonly placeholderKind: PlaceholderKind;

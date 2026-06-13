@@ -2,7 +2,7 @@
 
 - **Status**: accepted。前提の実証ステータスは `tmp/phase2b-adr-assumption-audit.md` §B 参照（C6 の取得方法 = 汎用記録 Proxy で実装可能であることを spike で実証 — `tmp/0005_phase2b-c6-proxy-spike/spike-results.md`。Proxy は `get`/`set`/`apply`/`construct` トラップ + 戻り値の再帰 wrap の形が要る、を ADR-0015 §interaction-trace に反映済）。
 - **Date**: 2026-05-10
-- **Related**: ADR-0011 (preprocess 段1 の SUT 特定が interaction trace の「包む対象」を決める入力), ADR-0012 (実行環境 — DOM/trace の生成経路は executor 側), ADR-0015 (oracle 層の構造 + DOM oracle + interaction-trace oracle + adapter config), ADR-0017 (実行前 transform — 反復回数を非観測と決めたのは本 ADR、その帰結の iteration-cap 機構が 0017), **ADR-0018 (verdict 合成の改修 — 旧 4 規則 → 新 5 規則 + `inconclusive` verdict + positive-evidence ルール。本 ADR の「verdict の合成規則」§ を上書き)**, `mb-analyzer/src/equivalence-checker/`, `ai-guide/code-map.md` §等価性検証器, `tmp/oracle-mapping.md` §2/§4/§6/§7, `tmp/dataset-conventions.md` §1.3/§6, `tmp/phase2b-adr-assumption-audit.md` §B
+- **Related**: ADR-0011 (preprocess 段1 の SUT 特定が interaction trace の「包む対象」を決める入力), ADR-0012 (実行環境 — DOM/trace の生成経路は executor 側), ADR-0015 (oracle 層の構造 + DOM oracle + interaction-trace oracle + adapter config), ADR-0017 (実行前 transform — 反復回数を非観測と決めたのは本 ADR、その帰結の iteration-cap 機構が 0017), **ADR-0018 (verdict 合成の改修 — 旧 4 規則 → 新 5 規則 + `inconclusive` verdict + positive-evidence ルール。本 ADR の「verdict の合成規則」§ を上書き)**, `mb-analyzer/src/equivalence-checker/`, `tmp/oracle-mapping.md` §2/§4/§6/§7, `tmp/dataset-conventions.md` §1.3/§6, `tmp/phase2b-adr-assumption-audit.md` §B
 
 ## このADRの守備範囲
 
@@ -13,7 +13,7 @@
 - 非決定性 API の固定 / iteration-cap transform の*アルゴリズム* → **ADR-0017 (実行前 transform)**
 - SUT lib (`<lib>_*.js`) の npm dep 解決 (= 上流が宣言しない dep を dataset fork に lockfile で宣言) → **ADR-0016**
 - equivalence-checker の `common`/`selakovic` 二層化 / C2・C6 oracle のファイル配置と I/F / adapter が `common/` に渡す config (iteration-cap の値・DOM 正規化プロファイル・包む対象リスト等) → **ADR-0015 (構造 + adapter config)**
-- 既存 oracle (O1–O4) の実装意味論 → `ai-guide/code-map.md` §等価性検証器 + `equivalence-checker/README.md`
+- 既存 oracle (O1–O4) の実装意味論 → `mb-analyzer/src/equivalence-checker/common/comparison/oracles/` の各実装 + `equivalence-checker/README.md`
 
 > iteration-cap・npm dep のように 1 つの話題が複数 ADR にまたがるときの分界: *なぜ等価判定がそれを無視するか/構成要素に入れるか* → 0013（ここ） / *sandbox がそれをどう処理するか（アルゴリズム・方式）* → 実行環境=0012・実行前 transform=0017・依存解決=0016 / *Selakovic の場合の具体値・どの adapter フィールドで渡すか* → 0015。
 
@@ -32,7 +32,7 @@ Selakovic & Pradel (ICSE 2016) は性能修正パッチが "semantic-preserving"
 | C5 | exception | 投げられた例外の constructor + message |
 | C6 | **interaction trace** | **作用点 A のとき: workload (`f1`/`test()` = 不変側) が変わった SUT (`<lib>_*.js`) に投げた呼び出しに対し、SUT が*返した答え* — 戻り値・例外 (順序や SUT 内部は見ない)** |
 
-加えて timing / iteration 回数 / memory profile / stack trace / body 同期終了**後**の非同期タスク副作用 / 非決定性 API (`Date.now()` / `Math.random()`) の生値 がある。Selakovic の性能パッチは **timing が変わるのが目的**であり、また patch を当てれば**行番号・内部関数名は必ず変わる**ので stack trace も必然的に変わる。これらを「等価」の構成要素に入れると全パッチが `not_equal` になり検証器として成立しない (`ai-guide/code-map.md` §等価性検証器)。
+加えて timing / iteration 回数 / memory profile / stack trace / body 同期終了**後**の非同期タスク副作用 / 非決定性 API (`Date.now()` / `Math.random()`) の生値 がある。Selakovic の性能パッチは **timing が変わるのが目的**であり、また patch を当てれば**行番号・内部関数名は必ず変わる**ので stack trace も必然的に変わる。これらを「等価」の構成要素に入れると全パッチが `not_equal` になり検証器として成立しない。
 
 **C6 (interaction trace) を追加した理由 (Phase 1.0 スパイクの発見)**: C1〜C5 だけだと workload が*捨てる*中間計算結果を見逃す。`clientIssues/Angular/issue_10351` で、`f1` が `$scope.$eval("null.a", {null:{a:42}})` 等を呼ぶが戻り値を捨てる → C1 (= `f1` の戻り値) は両側 `undefined` で「等価」に見える。だが `$scope.$eval(...)` の*戻り値*は patch (= angular の式パーサ変更) で `42` → `undefined` に変わっている = workload-observable に非等価。`f1` の計算の本体は `$eval(...)` の評価なので、それを観測しないと計算を観測したことにならない。`f1`/`test()` が SUT に投げた呼び出しの**戻り値**をトレース (= C6) すれば捕まる。SUT の*内部*や*呼び出し順序*は見ない (workload からは見えない = 内部 bookkeeping や一時変数の違いで誤 `not_equal` にならない); 比較前に dataset 固有の正規化 (angular の `$$hashKey` 等) をかける (ADR-0015)。詳細は `tmp/0002_phase1-adr-and-spike/spike-results.md` §5.1。
 
@@ -77,8 +77,8 @@ Selakovic & Pradel (ICSE 2016) は性能修正パッチが "semantic-preserving"
 - **timing / 実行時間**: Selakovic の性能測定軸。パッチで変わるのが目的なので等価判定からは除外 (`tmp/dataset-conventions.md` §2.6)。
 - **iteration 回数 / ループ反復回数**: 等価判定の観測対象外 (timing と同じ理由 — loop bound を縮小しても等価判定の結果は変わらない、`spike-results.md` §7 で実測確認)。preprocess は `f1`/`test()` body 内のループ反復回数を書き換えず原文を残す (= 復元可能性、ADR-0011)。loop-heavy な body を tractable に走らせるための **iteration-cap transform は sandbox 側の機構 = ADR-0017** (*アルゴリズム* も 0017、*値* = 既定 N・on/off の config は ADR-0015 の adapter config)。本 ADR が言うのは「反復回数は等価の構成要素に入れない」というこの 1 点だけ。
 - **memory profile**: 同上。
-- **stack trace**: パッチ適用で行番号・内部関数名は必ず変わる。比較すると全パッチが `not_equal` になる。「**意味論的等価性の定義に stack を含めない**」は設計要件であり妥協ではない (`ai-guide/code-map.md` §等価性検証器)。
-- **body 同期終了後の非同期タスクの副作用**: sandbox は body の同期完了で観測を打ち切る。`setTimeout` / `queueMicrotask` / 未解決 Promise の後続副作用は見ない。本 dataset は同期コード主体 + 計測ハーネス除去後は `$.ajax` の async も消えるので実害は低い (`ai-guide/code-map.md` §等価性検証器の穴 3)。
+- **stack trace**: パッチ適用で行番号・内部関数名は必ず変わる。比較すると全パッチが `not_equal` になる。「**意味論的等価性の定義に stack を含めない**」は設計要件であり妥協ではない。
+- **body 同期終了後の非同期タスクの副作用**: sandbox は body の同期完了で観測を打ち切る。`setTimeout` / `queueMicrotask` / 未解決 Promise の後続副作用は見ない。本 dataset は同期コード主体 + 計測ハーネス除去後は `$.ajax` の async も消えるので実害は低い (`ai-guide/current-research.md` §妥当性の脅威の観測外事象 ③)。
 - **非決定性 API の生値**: `Date.now()` / `Math.random()` / `process.hrtime()` 等は sandbox の実行前 transform で固定または遮断する (ADR-0017)。固定後の値は両側同一なので等価判定に影響しない = 実質非観測。
 
 ### verdict の合成規則 (旧 4 規則 — **ADR-0018 で新 5 規則に上書きされた**。以下は履歴)
@@ -87,7 +87,7 @@ Selakovic & Pradel (ICSE 2016) は性能修正パッチが "semantic-preserving"
 
 各 oracle は `equal` / `not_equal` / `not_applicable` / `error` のいずれかを返す。全体 verdict は:
 
-1. **`not_equal` が 1 つでもあれば → `not_equal`**。実際に観測できた非等価は、他軸で `error` / `not_applicable` が出ていても優先する (「観測できた非等価」> 「観測できなかった軸」 — `ai-guide/code-map.md` §verdict)。
+1. **`not_equal` が 1 つでもあれば → `not_equal`**。実際に観測できた非等価は、他軸で `error` / `not_applicable` が出ていても優先する (「観測できた非等価」> 「観測できなかった軸」)。
 2. **全 oracle が `not_applicable` → `error`** (※ ADR-0018 で `inconclusive` に変更)。観測対象がゼロ (戻り値なし・副作用なし・例外なし・DOM 変化なし) では等価を主張できない = 観測失敗扱い。
 3. **`not_equal` がなく、`not_applicable` 以外がすべて `equal` → `equal`** (※ ADR-0018 で「positive-evidence oracle = `{C1,C4,C6}` のいずれかが non-N/A」を追加要件にし、満たさなければ `inconclusive`)。
 4. **上記以外 (`not_equal` はないが `error` が混じる) → `error`** (または report 上は `inconclusive` として扱い手動レビューに回す ← ADR-0018 でこの「report 上 inconclusive」を first-class な `inconclusive` verdict に昇格)。
@@ -103,7 +103,7 @@ C5 (exception) → C1 (return) → C6 (interaction trace) → C2 (DOM) → C4 (m
 - 「等価」の意味が固定され、自動判定が成立する。RQ (C1〜C4 の ablation、事前分析の 10 パターン自動導出) の主張が「この operational definition の下で」と書ける
 - threats to validity に「等価性検証器の観測範囲は 戻り値 / DOM mutation / object・array mutation / 新規 global key / console 呼出列 / 例外 に限定される (timing・memory・stack・同期後の非同期タスクは非観測)」と 1〜2 行で明記できる (`current-research.md` §妥当性の脅威 にも反映)
 
-**諦めるもの (= false negative の既知の穴、`ai-guide/code-map.md` §等価性検証器の穴 + Phase 1.0 の発見):**
+**諦めるもの (= false negative の既知の穴、`ai-guide/current-research.md` §妥当性の脅威 + Phase 1.0 の発見):**
 
 - setup で定義された **primitive 変数の最終値** (number / string / boolean): `executor.ts` は `typeof === "object"` の変数のみ追跡。カウンタ変数等の変化は見えない。Selakovic は collection 操作主体なので頻度低
 - **DOM 環境が無い実行 (server 系)** での DOM 変化: そもそも `document` が無いので O5 は N/A。server 系で DOM を触るパッチは本 dataset にはない想定

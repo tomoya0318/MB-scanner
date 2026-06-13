@@ -36,7 +36,7 @@ layers = [
     "mb_scanner.use_cases",
     "mb_scanner.domain",
 ]
-# adapters は infrastructure を参照する（CLI=composition root, repositories=ORM実装）
+# adapters は infrastructure を参照する（CLI=composition root）
 ignore_imports = [
     "mb_scanner.adapters.** -> mb_scanner.infrastructure.**",
 ]

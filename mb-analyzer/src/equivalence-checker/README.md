@@ -17,7 +17,7 @@
 
 公開 API は `index.ts` (package barrel) の `checkEquivalence(input: EquivalenceInput): Promise<EquivalenceCheckResult>` + verdict 合成ヘルパ (`deriveOverallVerdict` / `deriveVerdictReason` / `VERDICT_REASON`) + contract 型のみ。内部構成 (`selakovic/` の oracle 配線 / `common/` の sandbox・comparison) は外に出さない。
 
-`EquivalenceInput` / `EquivalenceCheckResult` (および `Verdict` / `OracleVerdict` / `Oracle` / `ExecutionEnvironment` 列挙) は `mb-analyzer/src/contracts/equivalence-contracts.ts` で定義され、Python 側 (`mb_scanner/domain/entities/equivalence.py`) と JSON シリアライゼーション互換を保つ (列挙値の文字列・フィールド名 snake_case を両言語で厳密に揃える。変更は paired-change)。oracle 選択は `environment` 1 軸 (vm/jsdom) で完結し、preprocess 由来の hint は受け取らない (ADR-0024 §決定)。CLI ラッパは `mb-analyzer/src/cli/check-equivalence.ts` (`check-equivalence` / `check-equivalence-batch` サブコマンド) で、stdin から JSON / JSONL を読んで純関数 `checkEquivalence()` を呼び、結果を stdout に出す薄い層 (CLI 固有の引数 / 終了コード / stderr 規約は [`cli/README.md`](../cli/README.md))。Python 側 `mb_scanner/adapters/cli/equivalence.py` (`mbs check-equivalence[-batch]`) と Gateway (`mb_scanner/adapters/gateways/equivalence/node_runner_gateway.py`) が subprocess 経由で起動し、batch は Python 側 `ThreadPoolExecutor` で並列化 (Node 側 1 subprocess = 逐次)。**入出力データの意味論はここ (本 README) と [code-map.md §等価性検証器](../../../ai-guide/code-map.md#等価性検証器) を一次ソースとし、CLI 側には CLI 固有の引数 / stderr 規約 / 終了コードのみ書く**方針。
+`EquivalenceInput` / `EquivalenceCheckResult` (および `Verdict` / `OracleVerdict` / `Oracle` / `ExecutionEnvironment` 列挙) は `mb-analyzer/src/contracts/equivalence-contracts.ts` で定義され、Python 側 (`mb_scanner/domain/entities/equivalence.py`) と JSON シリアライゼーション互換を保つ (列挙値の文字列・フィールド名 snake_case を両言語で厳密に揃える。変更は paired-change)。oracle 選択は `environment` 1 軸 (vm/jsdom) で完結し、preprocess 由来の hint は受け取らない (ADR-0024 §決定)。CLI ラッパは `mb-analyzer/src/cli/check-equivalence.ts` (`check-equivalence` / `check-equivalence-batch` サブコマンド) で、stdin から JSON / JSONL を読んで純関数 `checkEquivalence()` を呼び、結果を stdout に出す薄い層 (CLI 固有の引数 / 終了コード / stderr 規約は [`cli/README.md`](../cli/README.md))。Python 側 `mb_scanner/adapters/cli/equivalence.py` (`mbs check-equivalence[-batch]`) と Gateway (`mb_scanner/adapters/gateways/equivalence/node_runner_gateway.py`) が subprocess 経由で起動し、batch は Python 側 `ThreadPoolExecutor` で並列化 (Node 側 1 subprocess = 逐次)。**入出力データの意味論はここ (本 README) を一次ソースとし、CLI 側には CLI 固有の引数 / stderr 規約 / 終了コードのみ書く**方針。
 
 ### `EquivalenceInput`
 
@@ -60,7 +60,7 @@ interface OracleObservation {
 
 #### `verdict` の合成と `verdict_reason`
 
-`deriveOverallVerdict` は **`not_equal`/`error` 優先 → positive-evidence oracle (`return_value` / `argument_mutation` / `interaction_trace` / `dom_mutation`) が全て `not_applicable` なら `inconclusive` → それ以外は `equal`** の順で合成する (詳細・優先順位の正確な規則は [code-map.md §等価性検証器](../../../ai-guide/code-map.md#等価性検証器) と ADR-0018)。
+`deriveOverallVerdict` は **`not_equal`/`error` 優先 → positive-evidence oracle (`return_value` / `argument_mutation` / `interaction_trace` / `dom_mutation`) が全て `not_applicable` なら `inconclusive` → それ以外は `equal`** の順で合成する (詳細・優先順位の正確な規則は ADR-0018 と `common/comparison/verdict.ts`)。
 
 | `verdict` | `verdict_reason` |
 |---|---|
@@ -68,7 +68,7 @@ interface OracleObservation {
 | `inconclusive` | `"no-observable-channel"` (oracle が 1 つも適用できない) / `"both-sides-threw"` (`exception` oracle が `equal` = 両側同じ例外) / `"no-positive-evidence"` (それ以外) |
 | `error` | `"executor-error"` (executor crash / setup throw / serialize 失敗、加えて Python Gateway 側の spawn/JSON/timeout 失敗・batch CLI の行パース失敗もこれに揃える) |
 
-各 oracle (C1〜C6) の責務分担・排他ルール (例外時は `return_value` が `not_applicable` に身を引く 等) は [code-map.md §等価性検証器](../../../ai-guide/code-map.md#等価性検証器)。
+各 oracle (C1〜C6) の責務分担・排他ルール (例外時は `return_value` が `not_applicable` に身を引く 等) は ADR-0013 / ADR-0015 と `common/comparison/oracles/` の各実装を参照。
 
 ## ファイル index
 

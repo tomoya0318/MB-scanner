@@ -8,7 +8,7 @@
 |---|---|
 | 必ず守ってほしいルール (契約) | `architecture/` |
 | 手順 / 検証方法 | `quality-check/` |
-| 実装の意味論・データフロー | `code-map.md` |
+| 実装の意味論・データフロー | 保存しない — in-tree README / アプローチ仕様書を skill で必要時に生成 (判断: [ADR-0029](0029-generated-reference-docs.md)) |
 | 設計判断の採用理由と却下した選択肢 | **`adr/` ← ここ** |
 | 日付軸のマイルストーン | `TODO.md` |
 
@@ -32,6 +32,8 @@
 
 連番は **merge 順** で採番する。同時期に複数 ADR を書いている場合、先に merge された方が若い番号を取る。競合したら renumber。
 
+欠番 0019-0021 / 0026 は意図的: ADR 採番を tmp 作業ディレクトリ採番と揃えており、判断を伴わなかった作業番号はスキップしている。
+
 ## ステータス
 
 | Status | 意味 |
@@ -41,7 +43,7 @@
 | `deprecated` | 古い判断。コード上はまだ残っているが新規コードには適用しない |
 | `superseded by ADR-NNNN` | 新しい ADR に置き換えられた |
 
-ステータス変更時は旧 ADR の先頭行を書き換えるだけで、本文は履歴として残す。
+ステータス変更時は旧 ADR の先頭行を書き換えるだけで、本文は履歴として残す。`archived/` のような退避ディレクトリは採用しない (Status 行書き換えのみで運用する)。
 
 ## コード側からの参照
 
@@ -85,7 +87,7 @@ export function collectSubtreeHashes(file: File): Set<string> { ... }
 | [0016](0016-equivalence-sandbox-sut-dependency-resolution.md) | Selakovic dataset が宣言しない SUT lib の npm dep を、fork (`tomoya0318/selakovic-2016-issues`) に `package.json` + `pnpm-lock.yaml` で宣言して解決する (`node_modules` は commit せず `pnpm install` で再生成 / checker 側の解決ロジックは追加なし — `createRequire(moduleBaseDir)` のまま / issue 内容は無改変) | accepted (fork の dep 宣言 + submodule 付け替え実装済 — PR #10) | `data/selakovic-2016-issues/` (fork submodule) |
 | [0017](0017-equivalence-sandbox-pre-execution-transforms.md) | 等価検証 sandbox の実行前 transform = 非決定性 API の固定 + iteration-cap (loop bound の AST clamp、preprocess には焼き込まず `{N\|null}` で parameterize) | accepted (実コード = AST pass 化は Phase 2b) | `mb-analyzer/src/equivalence-checker/` |
 | [0018](0018-equivalence-verdict-conservative.md) | 等価判定の保守化 — `inconclusive` verdict を追加し、`equal` は positive-evidence oracle (`{return_value, argument_mutation, interaction_trace}` のいずれかが non-N/A) があるときだけ。verdict 合成を旧 4 規則 → 新 5 規則に。ADR-0013 §「verdict の合成規則」を上書き | accepted (Phase A で実装 — `verdict.ts` ↔ `equivalence_verification.py` + 契約 paired change) | `mb-analyzer/src/equivalence-checker/`, `mb-analyzer/src/pruning/`, `mb_scanner/` |
-| [0022](0022-preprocess-workload-reachability.md) | preprocess を workload-reachability ベースに再設計し `candidate_kind: changed-fn` を追加 (v1) | accepted (`superseded by 0023` 予定) | `mb-analyzer/src/preprocessing/` |
+| [0022](0022-preprocess-workload-reachability.md) | preprocess を workload-reachability ベースに再設計し `candidate_kind: changed-fn` を追加 (v1) | superseded by ADR-0023 | `mb-analyzer/src/preprocessing/` |
 | [0023](0023-preprocess-placeholder-substitution.md) | preprocess を placeholder substitution + 4 値契約に書き直す (v2) | accepted | `mb-analyzer/src/preprocessing/`, `mb-analyzer/src/contracts/` |
 | [0024](0024-preprocess-contract-base-adapter-split.md) | preprocess contract を base / adapter 分離 + issue 階層化に再設計する | accepted | `mb-analyzer/src/contracts/`, `mb_scanner/`, `mb-analyzer/src/preprocessing/` |
 | [0025](0025-server-strategy-commonjs.md) | server SUT を CommonJS-respecting holed lib + node:vm 直 eval で扱う | accepted (ローカル spike 3/3 equal: chalk-27a / chalk-28 / cheerio-386b) | `mb-analyzer/src/preprocessing/`, `mb-analyzer/src/equivalence-checker/` |

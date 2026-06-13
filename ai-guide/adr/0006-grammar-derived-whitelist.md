@@ -2,7 +2,7 @@
 
 - **Status**: accepted
 - **Date**: 2026-04-27
-- **Related**: ADR-0005 (blacklist 側の同方針), `mb-analyzer/src/pruning/rules/whitelist.ts`, `mb-analyzer/src/pruning/rules/replacement.ts`, `ai-guide/code-map.md` §Pruning エンジン, `ai-guide/current-research.md` §第 1 段階
+- **Related**: ADR-0005 (blacklist 側の同方針), `mb-analyzer/src/pruning/rules/whitelist.ts`, `mb-analyzer/src/pruning/rules/replacement.ts`, `ai-guide/current-research.md` §第 1 段階
 
 ## コンテキスト
 
