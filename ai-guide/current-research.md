@@ -145,7 +145,7 @@ function () {
 
 つまり pruning の出力は「**取りこぼしはないが，取りたいもの以上の木を含む**」上界 (over-approximation) になっている．これをそのまま検出パターンにすると，核と無関係な文脈 (ループの殻等) まで一致条件に入り，検出の汎化性が落ちる．
 
-→ **検出パターンにする前に，構造パターンから核を絞り込む段 ([1.5]) が必要**．設計は未定 (候補: fast 側との差分ノードを核の種にする / 文脈ノードを段階的にワイルドカード化して検出器側で吸収する 等)．`open-questions.md` に登録済み．
+→ **検出パターンにする前に，構造パターンから核を絞り込む段 ([1.5]) が必要**．設計は未定 (候補: fast 側との差分ノードを核の種にする / 文脈ノードを段階的にワイルドカード化して検出器側で吸収する 等)．設計候補は研究方針側 (ai-research-workspace) の open questions として管理する．
 
 ### 等価性検証器: 4 オラクル (O1〜O4)
 
@@ -254,7 +254,7 @@ for ($DECL $ITER in $TARGET) {
 **Unsoundness の緩和**:
 - 第 1 段階の AST 差分フィルタで「fast に対応物がない差分ノード」を必須として保護 (単一セットアップでの誤 prune を構造的に回避)
 - 共通ノードに潜む edge case (差分フィルタで救えないケース) は第 3 段階 C1〜C4 同値分割テストで代表値網羅性を確保する二段構造
-- pruning 候補の静的除外は **`@babel/types` の文法メタデータから自動導出する効率最適化** (ADR-0005) であり、正確性は Babel 型検査 / round-trip parse / 等価性検証器による多層防御で担保する (実装詳細は [`code-map.md` §Pruning エンジン](code-map.md#pruning-エンジン))
+- pruning 候補の静的除外は **`@babel/types` の文法メタデータから自動導出する効率最適化** (ADR-0005) であり、正確性は多層防御で担保する。候補置換が「文法的・意味論的に不正」になる経路は 4 層で段階的に排除される: L1 = 静的除外 (文法由来 blacklist、ADR-0005) / L2 = Babel 型検査 (AST ビルダーが型不整合を throw) / L3 = round-trip 検証 (mutate 後の AST を generate → parse で復元可能性を確認) / L4 = 等価性検証器による意味論的検証。**L1 は効率化最適化に過ぎず、正確性は L2〜L4 の積で担保される** — L1 が漏れていても誤 prune (unsound な縮小) は発生せず、未除外の試行が sandbox 実行まで到達して L4 で弾かれるだけ (コストが増えるのみ)。この分離により blacklist の網羅性は unsoundness の議論と独立に扱える
 
 ---
 
@@ -391,6 +391,7 @@ C1〜C4 の各軸で入力空間を有限クラスに分割し，各クラスの
 | Selakovic データの経年 (2016 年) | OSS ケーススタディで 2026 年時点の有効性を確認 |
 | **AST tree-match 評価は内包判定のみ** (大ゼミ質疑 #1, #3) | pruning 出力は等価性を崩さない範囲でしか削れず余分な枝を含むため，tree-match を通っても「パターンに落とし込めた」とは言い切れない | 核抽出 ([1.5]) の導入 + 過剰ノード量の指標を追加して両側 (取りこぼし・取りすぎ) を測る |
 | 検証器が一部の candidate を「中身まで実行できず判定不能 (`inconclusive`)」にする (dep 不在 / Ember の AMD loader / workload が薄い等) | `equal` = positive な等価エビデンスで確認・`not_equal` = 差を観測・`inconclusive` = 検証不能、と verdict を分け、「検証器が著者判断と一致した」の分母は `equal`+`not_equal` の確認済み分のみにし `inconclusive` は別途「検証カバレッジ」として報告する。`not_equal` のうち記録 Proxy 干渉等の checker artifact 由来のものは手動レビューで角に置く (= ADR-0018 / ADR-0013 §threats)。当面 ~67 件確認済 / ~6 件 not_equal (うち 4 件が genuine な検出、うち 1 件 = angular-10351 は著者判断との既知の不一致) / ~33 件 inconclusive |
+| **等価性検証器の観測範囲は object/array mutation・戻り値・例外・console 列 + global 変数 key に限定される**。観測対象外の 4 事象が偽陰性 (non-equivalent を equal と誤判定) のリスク源: ① setup で定義された primitive 変数の最終値 (post snapshot は object/array のみ追跡 — 影響度低: パターンは collection 操作主体) ② workload が新規作成した global 変数の**値** (key 集合のみ比較 — 影響度中) ③ workload 同期終了**後**の非同期タスクの副作用 (`setTimeout` / 未解決 Promise — 影響度低: 同期コード主体) ④ `null` 初期化変数の null → object 変化 (pre snapshot 対象外 — 影響度非常に低) | 本データセット (Selakovic 2016) では穴 ①〜④ が踏まれる頻度が低く、RQ1 と事前分析の主張を脅かさない (検証器は研究成果ではなく中間ツールであり、検出されるべき差異を取り逃さない限り研究は成立する)。論文には観測範囲の限定を明示する。検証器を他研究へ再利用する場合は拡張を検討 (①② は素直な拡張で塞げる、③ は sandbox の大規模改修が必要)。穴 ①〜④ を塞いだ一般化検証器は Future Work に予約 |
 
 ---
 
@@ -411,7 +412,7 @@ C1〜C4 の各軸で入力空間を有限クラスに分割し，各クラスの
 | 観測等価 (observational equivalence) 検証器 | 強 | 形式手法の既定義語なので結局同じ指摘を受けるリスク |
 | 差分検出器 / 振る舞い差分検証器 | 中弱 | 「差が無いことの確認」という実態には近いが，等価側の主張が消える |
 
-→ `open-questions.md` に登録．論文執筆前までに決定する．
+→ 研究方針側 (ai-research-workspace) の open questions として管理する．論文執筆前までに決定する．
 
 ---
 

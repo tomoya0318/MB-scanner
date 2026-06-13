@@ -119,7 +119,7 @@ IssueMeta = Annotated[SelakovicIssueMeta, Field(discriminator="adapter")]
 
 #### assemble 関数の組織 (実装側)
 
-`assemble/` 配下を 2 軸で組み直す (詳細は code-map.md 側で記述):
+`assemble/` 配下を 2 軸で組み直す:
 - `assemble/wrappers/<wrapper>.ts`: wrapper_kind 軸 (top-level / angular / 将来)
 - `assemble/strategies/<strategy>.ts`: 抽出戦略軸 (embedded / changed-fn / raw-stmt)
 

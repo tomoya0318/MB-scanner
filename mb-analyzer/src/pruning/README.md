@@ -28,7 +28,7 @@ interface PruningInput {
 }
 ```
 
-`setup` は単数 string (ADR-0004)。文字列長は `MAX_CODE_LENGTH = 10^6` で Python 側が validation。`timeout_ms × max_iterations` が pruning 全体の wall-time 上限になる ([code-map.md §試行回数と budget](../../../ai-guide/code-map.md#試行回数-iterations-と-budget-の関係))。
+`setup` は単数 string (ADR-0004)。文字列長は `MAX_CODE_LENGTH = 10^6` で Python 側が validation。`timeout_ms × max_iterations` が pruning 全体の wall-time 上限になる (ADR-0008 §試行回数と budget)。
 
 ### `PruningResult`
 

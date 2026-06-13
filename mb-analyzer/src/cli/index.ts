@@ -32,6 +32,7 @@ async function main(): Promise<number> {
  * 解決策: `drain` イベントを `await` して書き残しを掃いてから `process.exit(code)` を呼ぶ。
  *
  * preprocess-selakovic で 1 issue から 100KB+ の before/after を返すケースに対応。
+ * 大量 stdout が想定される新サブコマンドでも同パターン (exit 前に stdout/stderr の flush 待ち) を踏襲すること。
  */
 async function waitForFlush(stream: NodeJS.WriteStream): Promise<void> {
   return new Promise<void>((resolve) => {

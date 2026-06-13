@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## プロジェクト概要
-MB-Scanner: マイクロベンチマーク由来のパフォーマンスパターン導出の研究実装。Selakovic 前処理 → 等価性検証 (vm + 4 オラクル) → Pruning → 核抽出 → 条件抽出 → ts-eslint ルール生成のパイプラインを Python (オーケストレータ) + TypeScript (`mb-analyzer/`、解析本体) で構成する。旧 GitHub 検索 / CodeQL バッチプラットフォームは [MB-scanner-legacy](https://github.com/tomoya0318/MB-scanner-legacy) へ切り出し済み (2026-06 凍結)。
+MB-Scanner: マイクロベンチマーク由来のパフォーマンスパターン導出の研究実装。Selakovic 前処理 → 等価性検証 (vm/jsdom + 6 オラクル) → Pruning → 核抽出 → 条件抽出 → ts-eslint ルール生成のパイプラインを Python (オーケストレータ) + TypeScript (`mb-analyzer/`、解析本体) で構成する。旧 GitHub 検索 / CodeQL バッチプラットフォームは [MB-scanner-legacy](https://github.com/tomoya0318/MB-scanner-legacy) へ切り出し済み (2026-06 凍結)。
 
 ## アーキテクチャ
 Clean Architecture 4層構造を採用。依存は常に内側に向かう。

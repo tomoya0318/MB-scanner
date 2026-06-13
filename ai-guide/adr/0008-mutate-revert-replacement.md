@@ -2,7 +2,7 @@
 
 - **Status**: accepted
 - **Date**: 2026-04-30
-- **Related**: [`ADR-0001`](0001-pruning-ast-traversal.md), [`code-map.md` §pruning の正確性](../code-map.md#pruning-の正確性--多層防御)
+- **Related**: [`ADR-0001`](0001-pruning-ast-traversal.md)
 
 ## コンテキスト
 
@@ -114,3 +114,29 @@ for (const candidate of candidates) {
 ```
 
 `continue` も `return` も `finally` を経由するので、`succeeded` フラグ 1 個で「採用パスは revert しない / それ以外は必ず revert」が表現できる。
+
+## 更新 (2026-06-13): 試行回数 (iterations) と budget の関係 / 再列挙とクロスパス重複
+
+本 ADR の試行ループに付随する 2 つの設計判断 (旧 `code-map.md` から移管、ADR-0029)。
+
+### `iterations` は L4 (sandbox 実行) の回数だけを数える
+
+`iterations` は **`checkEquivalence` (= Hydra sandbox 実行) を呼んだ回数**を数え、安いフィルタ段階の skip (whitelist 外 / round-trip 失敗) は count しない。理由は budget 設計にある (`engine.ts:resolveBudget`):
+
+```ts
+total_budget_ms: timeout_ms * max_iterations
+```
+
+`timeout_ms` は 1 回の `checkEquivalence` の上限で、その `max_iterations` 倍が pruning 全体の wall-time 上限になる、という関係式。budget 制御に意味があるのは「sandbox 実行を何回回したか」だけなので、cheap fail を数えても意味がない。
+
+設計上の含意:
+
+- 候補が大量にあっても、ほとんどが安いフィルタで弾かれるケースでは `iterations` は小さく、wall-time も消費しない
+- 逆に少数の候補でも全て sandbox 実行まで到達すると `max_iterations` を消費しきる
+- `PruningResult.iterations` の値は「**sandbox 試行コストの実消費量**」を表し、ablation study で第 1 段階のコスト分析に使える
+
+### 再列挙とクロスパス重複は割り切る
+
+外側ループは prune 成功のたびに候補を**再列挙**する (AST が変わったため、size 順や差分判定がやり直しになる)。成功時は `parse(generate(...))` した reparsed AST に置き換えるので新 AST のノード参照は完全に置き換わり、**前パスで失敗した候補が次パスで再試行される可能性がある** (構造的に同型なら blacklist / diff も再度通過する)。
+
+これは単純さを優先した割り切りで、性能上のロスのみ (機能的問題なし — 失敗候補の再試行は等価性判定の結果を変えない)。本格的に dedup したい場合は canonical hash ベースの set を導入する余地がある (将来の最適化)。

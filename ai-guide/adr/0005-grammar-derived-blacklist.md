@@ -6,7 +6,7 @@
 
 ## コンテキスト
 
-第 1 段階 pruning の候補フィルタ L1 (親子位置 blacklist) をどう実装するかの判断 (`ai-guide/code-map.md` §Pruning エンジン)。L1 は **親 field validator が置換後の型を受理しない位置** — 例えば `ForInStatement.left` は LVal 位置なので `StringLiteral("$P0")` による Expression 置換は文法的に不正 — を候補から除外することで、L2〜L4 の試行コストを削減するのが役割。
+第 1 段階 pruning の候補フィルタ L1 (親子位置 blacklist) をどう実装するかの判断。L1 は **親 field validator が置換後の型を受理しない位置** — 例えば `ForInStatement.left` は LVal 位置なので `StringLiteral("$P0")` による Expression 置換は文法的に不正 — を候補から除外することで、L2〜L4 の試行コストを削減するのが役割。
 
 pruning engine 初期実装 (PR #8) では、この L1 blacklist を Selakovic 2016 の 10 パターンで出現する構文を見ながら親 × 子位置を Map で直接列挙する形で書き下していた。ただし以下 3 つの懸念が merge 後レビューで顕在化した:
 

@@ -11,7 +11,7 @@
 
 公開 API は `selakovic/index.ts` の re-export (`preprocess` / `detectLayout` / `loadLibPair` / `extractInlineScripts` + 型) のみ — 内部構成 (`io/` → `decompose/` → `route/` → `assemble/` → `pipeline.ts`) は外に出さない。Tier 1 (`common/`) は barrel を持たず Tier 2 から個別 import される (dataset 非依存 AST primitive 層、eslint で `common` → `selakovic` の逆 import 禁止)。
 
-`PreprocessingInput` / `PreprocessingResult` は `mb-analyzer/src/contracts/preprocessing-contracts.ts` で定義され、Python 側 (`mb_scanner/domain/entities/preprocessing.py`) と JSON シリアライゼーション互換を保つ (列挙値の文字列・フィールド名 snake_case を両言語で厳密に揃える。変更は paired-change)。CLI ラッパは `mb-analyzer/src/cli/preprocess-selakovic.ts` (`preprocess-selakovic` / `preprocess-selakovic-batch` サブコマンド) で、issue ディレクトリのファイル I/O とレイアウト判定をして純関数 `preprocess()` を呼び、結果を **常に JSONL** で stdout に出す薄い層。Python 側 `mb_scanner/adapters/cli/preprocessing.py` (`mbs preprocess-selakovic[-batch]`) が subprocess 経由で起動し、batch は Python 側 `ThreadPoolExecutor` で並列化 (Node 側 1 subprocess = 逐次)。**入出力データの意味論はここ (本 README) と [code-map.md §Selakovic 前処理器](../../../ai-guide/code-map.md#selakovic-前処理器) を一次ソースとし、CLI 側には CLI 固有の引数 / stderr 規約 / 終了コードのみ書く**方針。
+`PreprocessingInput` / `PreprocessingResult` は `mb-analyzer/src/contracts/preprocessing-contracts.ts` で定義され、Python 側 (`mb_scanner/domain/entities/preprocessing.py`) と JSON シリアライゼーション互換を保つ (列挙値の文字列・フィールド名 snake_case を両言語で厳密に揃える。変更は paired-change)。CLI ラッパは `mb-analyzer/src/cli/preprocess-selakovic.ts` (`preprocess-selakovic` / `preprocess-selakovic-batch` サブコマンド) で、issue ディレクトリのファイル I/O とレイアウト判定をして純関数 `preprocess()` を呼び、結果を **常に JSONL** で stdout に出す薄い層。Python 側 `mb_scanner/adapters/cli/preprocessing.py` (`mbs preprocess-selakovic[-batch]`) が subprocess 経由で起動し、batch は Python 側 `ThreadPoolExecutor` で並列化 (Node 側 1 subprocess = 逐次)。**入出力データの意味論はここ (本 README) を一次ソースとし、CLI 側には CLI 固有の引数 / stderr 規約 / 終了コードのみ書く**方針。
 
 ### `PreprocessingInput`
 
@@ -125,7 +125,7 @@ src/preprocessing/
 2. **段2 (作用点ルーティング)** — `route/`: ①② の実コード差で **A** (lib のみ) / **B** (body のみ) / **A+B** (両方) / **fallback** に振り分け。A/B → candidate 1 個。A+B → ADR-0014 の identifier 交差判定で independent なら 2 candidate (`lib` / `body`)、co-evolution の疑いなら 1 candidate。fallback → `assemble/fallback.ts` の Tier 1 素の top-level diff。
 3. **組み立て** — `assemble/`: 作用点 × wrapper kind で `(setup, before, after)` を作る (Angular controller-wrapper / top-level f1 / server test_case / fallback)。
 
-詳細 (enclosure の 3 段優先順位 / setup 構築規約 / レイアウト判定 / 除外理由の意味論) は [code-map.md §Selakovic 前処理器](../../../ai-guide/code-map.md#selakovic-前処理器)。
+詳細は ADR-0010 (enclosure の 3 段優先順位 — fallback 経路専用) / ADR-0011 (二層化・レイアウト判定) / ADR-0023 (setup 構築・4 値契約) / ADR-0024 (除外理由の意味論・契約分離) を参照。
 
 ## 依存方向
 

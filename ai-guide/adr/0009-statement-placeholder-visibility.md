@@ -2,7 +2,7 @@
 
 - **Status**: accepted
 - **Date**: 2026-05-01
-- **Related**: [`ADR-0006`](0006-grammar-derived-whitelist.md), [`ADR-0008`](0008-mutate-revert-replacement.md), [`code-map.md` §置換操作の粒度](../code-map.md#置換操作の粒度-3-カテゴリ統一のワイルドカード化)
+- **Related**: [`ADR-0006`](0006-grammar-derived-whitelist.md), [`ADR-0008`](0008-mutate-revert-replacement.md)
 
 ## コンテキスト
 

@@ -2,7 +2,7 @@
 
 - **Status**: accepted
 - **Date**: 2026-05-11
-- **Related**: ADR-0013 (等価の operational definition + 旧 verdict 合成 4 規則 — 本 ADR が verdict 合成 § を上書き), ADR-0015 (oracle 層構造 + DOM/interaction-trace oracle), ADR-0012 (実行環境 — `inconclusive` の主要因 = SUT dep 不在 / Ember AMD loader), ADR-0017 (iteration-cap), `mb-analyzer/src/equivalence-checker/common/comparison/verdict.ts`, `mb-analyzer/src/pruning/engine.ts`, `mb_scanner/use_cases/equivalence_verification.py`, `mb_scanner/domain/entities/equivalence.py` ↔ `mb-analyzer/src/contracts/equivalence-contracts.ts`, `ai-guide/code-map.md` §等価性検証器, `tmp/0006_phase2b-equivalence-checker/verify-97-crosscheck.md` §1.5
+- **Related**: ADR-0013 (等価の operational definition + 旧 verdict 合成 4 規則 — 本 ADR が verdict 合成 § を上書き), ADR-0015 (oracle 層構造 + DOM/interaction-trace oracle), ADR-0012 (実行環境 — `inconclusive` の主要因 = SUT dep 不在 / Ember AMD loader), ADR-0017 (iteration-cap), `mb-analyzer/src/equivalence-checker/common/comparison/verdict.ts`, `mb-analyzer/src/pruning/engine.ts`, `mb_scanner/use_cases/equivalence_verification.py`, `mb_scanner/domain/entities/equivalence.py` ↔ `mb-analyzer/src/contracts/equivalence-contracts.ts`, `tmp/0006_phase2b-equivalence-checker/verify-97-crosscheck.md` §1.5
 
 ## コンテキスト
 

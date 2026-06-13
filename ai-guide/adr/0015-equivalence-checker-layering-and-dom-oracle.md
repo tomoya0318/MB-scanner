@@ -2,7 +2,7 @@
 
 - **Status**: accepted。前提の実証ステータスは `tmp/phase2b-adr-assumption-audit.md` §D 参照（二層化パターンと adapter config の形は妥当 = §D-1/§D-4、C6 の汎用記録 Proxy wrap = §D-3 を spike で実証 — 結論と Proxy の機構・「包む対象」の詳細は `tmp/0005_phase2b-c6-proxy-spike/spike-results.md`、DOM 正規化プロファイルの中身 = §D-2 は実装中に 97 件再走で詰める性質）。本 ADR の再配置・C2/C6 oracle 追加の実コード移動は Phase 2b。
 - **Date**: 2026-05-10
-- **Related**: ADR-0011 (preprocess の対称な二層化 — 段1 の SUT 特定が interaction-trace の「包む対象」を決める), ADR-0012 (実行環境 — DOM/interaction-trace の生成経路は executor 側), ADR-0013 (等価の operational definition — C2・C6 を等価の構成要素に含める / verdict 合成規則), ADR-0016 (SUT lib の npm dep 解決 — dataset fork に lockfile で宣言するので adapter は dep を渡さない / 本 ADR の adapter config から vendor リスト行が消える), ADR-0017 (実行前 transform — iteration-cap の既定 N・on/off は adapter config), `mb-analyzer/src/equivalence-checker/`, `mb-analyzer/src/equivalence-checker/README.md`, `mb-analyzer/src/contracts/equivalence-contracts.ts`, `ai-guide/code-map.md` §等価性検証器, `tmp/oracle-mapping.md` §5, `tmp/phase2b-adr-assumption-audit.md` §D, `tmp/0002_phase1-adr-and-spike/spike-results.md` §5/§5.1
+- **Related**: ADR-0011 (preprocess の対称な二層化 — 段1 の SUT 特定が interaction-trace の「包む対象」を決める), ADR-0012 (実行環境 — DOM/interaction-trace の生成経路は executor 側), ADR-0013 (等価の operational definition — C2・C6 を等価の構成要素に含める / verdict 合成規則), ADR-0016 (SUT lib の npm dep 解決 — dataset fork に lockfile で宣言するので adapter は dep を渡さない / 本 ADR の adapter config から vendor リスト行が消える), ADR-0017 (実行前 transform — iteration-cap の既定 N・on/off は adapter config), `mb-analyzer/src/equivalence-checker/`, `mb-analyzer/src/equivalence-checker/README.md`, `mb-analyzer/src/contracts/equivalence-contracts.ts`, `tmp/oracle-mapping.md` §5, `tmp/phase2b-adr-assumption-audit.md` §D, `tmp/0002_phase1-adr-and-spike/spike-results.md` §5/§5.1
 
 ## このADRの守備範囲
 
@@ -152,7 +152,7 @@ equivalence-checker/
 ## 補足
 
 - 「`common/oracles/` をサブディレクトリのまま維持する (preprocess の `common/` はフラットだが oracle は今 6 本ファミリーなのでディレクトリにする)」「DOM oracle primitive を `common/` に置き正規化プロファイルだけ `selakovic/` から注入する」「当初案の ADR 0016 は新設せず本 ADR に統合する」は 2026-05-10 にユーザ確認済 (`tmp/0002_phase1-adr-and-spike/prompt.md` フィードバック 2)。interaction-trace oracle (C6) も同じ思想で `common/oracles/interaction-trace.ts` (primitive) + `selakovic/` adapter (包む対象・正規化) に分ける — 2026-05-10 ユーザ確認済 (`spike-results.md` §5.1 の原理合意)。
-- 現状の oracle 実装の意味論 (O1〜O4 が何を `not_applicable` にするか、O3 が stack を比較しない理由など) は `ai-guide/code-map.md` §等価性検証器 と `mb-analyzer/src/equivalence-checker/README.md` を参照。本 ADR はそれらを移動・拡張するだけで既存 oracle の意味論は変えない (C2・C6 を*足す*)。
+- 現状の oracle 実装の意味論 (O1〜O4 が何を `not_applicable` にするか、O3 が stack を比較しない理由など) は `mb-analyzer/src/equivalence-checker/README.md` と ADR-0013 を参照。本 ADR はそれらを移動・拡張するだけで既存 oracle の意味論は変えない (C2・C6 を*足す*)。
 - 前提の実証ステータスは `tmp/phase2b-adr-assumption-audit.md` §D にソース付き。要点: 二層化の手本となる preprocess の `common`/`selakovic` 構造は Phase 2a で commit 済・機能している / DOM oracle primitive が jsdom で成立 (react-808 で C2 取得、`tmp/0002_phase1-adr-and-spike/spike-results.md` §5) / interaction-trace の必要性を deep probe で実証 (#10351、同 §5.1) / **C6 の「SUT を汎用記録 Proxy で包む」機構も Phase 2b 着手前 spike で実証済** (`tmp/0005_phase2b-c6-proxy-spike/spike-results.md` — Proxy は `get`/`set`/`apply`/`construct` トラップ + traced call/construct の戻り値の再帰 wrap の形、angular/chalk/cheerio/node-lru-cache/moment/jQuery/underscore = 7 SUT で完走 & 内部ノイズなし。「包む対象」は server なら `init`/`setupTest` 戻り値、client なら注入 service + workload が叩く framework global)。DOM 正規化プロファイルの具体値は実装中に 97 件再走で詰める性質 (監査 §D-2)。
 
 ### 2026-05-15 更新 (ADR-0024 で oracle 選択 hint を廃止)

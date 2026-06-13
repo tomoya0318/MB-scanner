@@ -16,8 +16,7 @@
  *  5. `substituteBody`: 2. / 3. の出力の `$BODY$` を裸 body 断片で差し替える
  *
  * 呼び出し側はこれらを組み合わせて 4 値契約 `{setup, workload, before, after}` を構築する。
- * 中身の構成 (= `setup = (let __OBS__ 宣言) + libs + preWorkload` 等) は ADR-0023 §4 値契約の具体形
- * + code-map §setup 構築規約。
+ * 中身の構成 (= `setup = (let __OBS__ 宣言) + libs + preWorkload` 等) は ADR-0023 §4 値契約の具体形。
  *
  * 命名規則 (architecture/mb-analyzer.md §Magic 識別子の命名規則):
  *  - 置換マーカー `$BODY$`: テキスト置換専用、`substituteBody` で sandbox 投入前に消える
