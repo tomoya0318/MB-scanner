@@ -20,7 +20,6 @@
   "dependencies": {
     "@babel/generator": "^7.25.0",
     "@babel/parser": "^7.25.0",
-    "@babel/traverse": "^7.25.0",
     "@babel/types": "^7.25.0"
   },
   "devDependencies": {
