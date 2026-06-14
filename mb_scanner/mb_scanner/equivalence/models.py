@@ -9,6 +9,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from mb_scanner._runner import BatchItemModel
+
 # Selakovic preprocess は作用点 A の clientIssue で bundled ライブラリ (AngularJS 665KB / Ember 2MB 等)
 # を before/after に丸ごと埋め込むので、上限は大きめに取る (ADR-0011)。
 MAX_CODE_LENGTH = 20_000_000
@@ -64,11 +66,8 @@ class ExecutionEnvironment(StrEnum):
     JSDOM = "jsdom"
 
 
-class EquivalenceInput(BaseModel):
+class EquivalenceInput(BatchItemModel):
     """Node ランナーへ送る入力
-
-    ``id`` はバッチ API で Python ↔ Node 間の順序暗黙依存を避けるための optional マーカー。
-    単発 API では ``None`` のままで後方互換。
 
     ``environment`` 省略時は ``vm``。``module_base_dir`` は ``jsdom`` 環境で相対 ``require('./x')``
     を解決する基準ディレクトリ (通常 issue ディレクトリの絶対パス)。
@@ -84,7 +83,6 @@ class EquivalenceInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str | None = None
     setup: str = Field(default="", max_length=MAX_CODE_LENGTH)
     before: str = Field(max_length=MAX_CODE_LENGTH)
     after: str = Field(max_length=MAX_CODE_LENGTH)
@@ -107,7 +105,7 @@ class OracleObservation(BaseModel):
     detail: str | None = None
 
 
-class EquivalenceCheckResult(BaseModel):
+class EquivalenceCheckResult(BatchItemModel):
     """(setup, before, after) の 1 トリプルに対する最終判定
 
     ``effective_timeout_ms`` は Node の checker が実際に使った timeout_ms のエコーバック。
@@ -116,7 +114,6 @@ class EquivalenceCheckResult(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    id: str | None = None
     verdict: Verdict
     observations: list[OracleObservation] = Field(default_factory=list[OracleObservation])
     # verdict == INCONCLUSIVE のときの理由分類 ("no-observable-channel" / "both-sides-threw" /

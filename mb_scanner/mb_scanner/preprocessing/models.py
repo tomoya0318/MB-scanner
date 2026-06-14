@@ -17,6 +17,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from mb_scanner._runner import BatchItemModel
+
 
 class ExclusionReasonBase(StrEnum):
     """全 dataset で意味を持つ汎用の除外理由
@@ -31,16 +33,14 @@ class ExclusionReasonBase(StrEnum):
     MISSING_FILES = "missing-files"
 
 
-class PreprocessingInput(BaseModel):
+class PreprocessingInput(BatchItemModel):
     """Node ランナーへ送る preprocessing 入力 (1 issue 分)
 
-    ``id`` はバッチ API で Python ↔ Node 間の順序暗黙依存を避ける optional マーカー。
     ``issue_dir`` は絶対パスで、Node 側 CLI がファイル読み込み + レイアウト判定を行う。
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str | None = None
     issue_dir: str
 
 
@@ -164,7 +164,7 @@ class PreprocessingCandidate(BaseModel):
     candidate_meta: CandidateMeta
 
 
-class PreprocessingIssueResult(BaseModel):
+class PreprocessingIssueResult(BatchItemModel):
     """1 issue = jsonl の 1 行
 
     ``issue_excluded`` が指定されている場合 ``candidates`` は空配列でよい (= issue 全体が
@@ -174,7 +174,6 @@ class PreprocessingIssueResult(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    id: str | None = None
     issue_excluded: ExclusionReasonAny | None = None
     issue_excluded_detail: str | None = None
     candidates: list[PreprocessingCandidate] = Field(default_factory=lambda: [])
