@@ -11,19 +11,19 @@ cd "${REPO_ROOT}"
 
 FAILED=0
 
-echo "== Check 1: mb_scanner/domain/ に @dataclass / dataclasses 混入がないか =="
-# ai-guide/architecture/mb-scanner.md: ドメイン層は Pydantic BaseModel のみで構成する規約。
-if [[ -d mb_scanner/domain ]]; then
-  HITS="$(grep -rnE "^\s*(from\s+dataclasses|import\s+dataclasses|@dataclass(\b|\())" mb_scanner/domain --include="*.py" || true)"
+echo "== Check 1: mb_scanner/mb_scanner/ に @dataclass / dataclasses 混入がないか =="
+# ai-guide/architecture/mb-scanner.md:135 — モデルは各段 models.py に Pydantic BaseModel で定義し dataclass は使わない。
+if [[ -d mb_scanner/mb_scanner ]]; then
+  HITS="$(grep -rnE "^\s*(from\s+dataclasses|import\s+dataclasses|@dataclass)" mb_scanner/mb_scanner --include="*.py" || true)"
   if [[ -n "${HITS}" ]]; then
-    echo "  VIOLATION (domain は Pydantic BaseModel のみ):"
+    echo "  VIOLATION (各段 models 等は Pydantic BaseModel のみ、dataclass 不使用):"
     echo "${HITS}" | sed 's/^/    /'
     FAILED=1
   else
     echo "  OK"
   fi
 else
-  echo "  SKIP (mb_scanner/domain/ が存在しない)"
+  echo "  SKIP (mb_scanner/mb_scanner/ が存在しない)"
 fi
 
 echo ""
@@ -46,7 +46,7 @@ fi
 echo ""
 echo "== Check 3: 横断 JSON 契約: EquivalenceInput の extra=\"forbid\" 維持 =="
 # ai-guide/architecture/index.md の JSON 契約節: 入力は厳格、出力は寛容の非対称設計。
-CONTRACT_FILE="mb_scanner/domain/entities/equivalence.py"
+CONTRACT_FILE="mb_scanner/mb_scanner/equivalence/models.py"
 if [[ -f "${CONTRACT_FILE}" ]]; then
   # EquivalenceInput クラスブロック内に extra="forbid" があるか
   INPUT_OK="$(awk '

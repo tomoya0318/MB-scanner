@@ -28,7 +28,7 @@ git diff --stat
 |---|---|---|
 | `mb_scanner/**`, `tests/**` (ただし `mb-analyzer/tests/` を除く) | Python | `ai-guide/architecture/index.md` + `ai-guide/architecture/mb-scanner.md` |
 | `mb-analyzer/**` | TypeScript | `ai-guide/architecture/index.md` + `ai-guide/architecture/mb-analyzer.md` |
-| `mb_scanner/domain/entities/equivalence.py` または `mb-analyzer/src/shared/types.ts` | 両方 (横断 JSON 契約) | 上記すべて + `index.md` の JSON 契約節 |
+| `mb_scanner/mb_scanner/equivalence/models.py` または `mb-analyzer/src/shared/types.ts` | 両方 (横断 JSON 契約) | 上記すべて + `index.md` の JSON 契約節 |
 | path 未指定 / 両側に変更あり | 全体 | 上記すべて |
 
 ### Step 3: 参照ドキュメントを Read して全項目を確認
@@ -51,10 +51,10 @@ bash .agents/skills/check-architecture/scripts/check-arch-conventions.sh
 ```
 
 検査内容 (いずれも ai-guide 側ルールを機械化したもの):
-- `mb_scanner/domain/` に `@dataclass` / `dataclasses` import が混入していないか (Pydantic BaseModel 限定)
+- `mb_scanner/mb_scanner/` に `@dataclass` / `dataclasses` import が混入していないか (各段 models 等は Pydantic BaseModel 限定)
 - `mb_scanner/` 配下で `rich` / `tqdm` が import されていないか (stderr 進捗表示規約)
-- `mb_scanner/domain/entities/equivalence.py` の `EquivalenceInput` が `extra="forbid"` を維持しているか
-- `mb_scanner/domain/entities/equivalence.py` の `EquivalenceCheckResult` が `extra="ignore"` を維持しているか
+- `mb_scanner/mb_scanner/equivalence/models.py` の `EquivalenceInput` が `extra="forbid"` を維持しているか
+- `mb_scanner/mb_scanner/equivalence/models.py` の `EquivalenceCheckResult` が `extra="ignore"` を維持しているか
 
 失敗があれば修正してから Step 5 へ進む。
 
