@@ -9,7 +9,7 @@ import { prune as prunePure } from "../common/engine";
  *
  * `pruning/common/engine.prune` は `(setup, before, after, timeout_ms)` の最小契約で `checkEquivalence` を
  * 呼ぶので、その 4 つは `common/` 側が毎 iteration ごとに渡す。`environment` / `module_base_dir` /
- * `mount_html` は候補ごとに不変なので、ここで closure に閉じ込めて毎回マージする。
+ * `mount_html` / `workload` は候補ごとに不変なので、ここで closure に閉じ込めて毎回マージする。
  * `common/` はこれらの存在を知らない (= pruning アルゴリズムは dataset 非依存)。
  */
 function buildEquivContext(input: PruningInput): Partial<EquivalenceInput> {
@@ -17,6 +17,7 @@ function buildEquivContext(input: PruningInput): Partial<EquivalenceInput> {
   if (input.environment !== undefined) ctx.environment = input.environment;
   if (input.module_base_dir !== undefined) ctx.module_base_dir = input.module_base_dir;
   if (input.mount_html !== undefined) ctx.mount_html = input.mount_html;
+  if (input.workload !== undefined) ctx.workload = input.workload;
   return ctx;
 }
 
@@ -40,7 +41,7 @@ if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
 
   describe("buildEquivContext (in-source)", () => {
-    it("等価検証コンテキストの 3 フィールドだけを抽出する (before/after/setup/timeout_ms/max_iterations は含めない)", () => {
+    it("等価検証コンテキストの 4 フィールドだけを抽出する (before/after/setup/timeout_ms/max_iterations は含めない)", () => {
       const ctx = buildEquivContext({
         id: "x",
         before: "a",
@@ -51,11 +52,13 @@ if (import.meta.vitest) {
         environment: "jsdom",
         module_base_dir: "/abs/issue",
         mount_html: "<div></div>",
+        workload: "el.click()",
       });
       expect(ctx).toStrictEqual({
         environment: "jsdom",
         module_base_dir: "/abs/issue",
         mount_html: "<div></div>",
+        workload: "el.click()",
       });
     });
 
@@ -63,6 +66,9 @@ if (import.meta.vitest) {
       expect(buildEquivContext({ before: "a", after: "b" })).toStrictEqual({});
       expect(buildEquivContext({ before: "a", after: "b", environment: "vm" })).toStrictEqual({
         environment: "vm",
+      });
+      expect(buildEquivContext({ before: "a", after: "b", workload: "el.click()" })).toStrictEqual({
+        workload: "el.click()",
       });
     });
   });
