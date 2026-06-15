@@ -115,11 +115,9 @@ JSONL (1 行 1 結果、**入力順**)。行単位の parse 失敗は `{"verdict
 | `timeout_ms` | optional、**整数** かつ `[1, 60000]` (`prune.ts:17-18`, `prune.ts:22-30`, `prune.ts:102-106`) |
 | `max_iterations` | optional、**整数** かつ `[1, 100000]` (`prune.ts:19-20`, `prune.ts:32-40`, `prune.ts:107-111`) |
 | `environment` | optional、`"vm"` \| `"jsdom"`。`null` は未指定扱い (`prune.ts:42`, `prune.ts:57-65`) |
-| `module_base_dir` / `mount_html` | optional、string。`null` は未指定扱い (`prune.ts:43`, `prune.ts:66-71`) |
+| `module_base_dir` / `mount_html` / `workload` | optional、string。`null` は未指定扱い (`prune.ts:43`, `prune.ts:66-71`) |
 
-値域チェックは Python 側 contract (`mb_scanner.domain.entities.pruning`) との整合用 — 弾かないと 0 / 負 / 小数の `max_iterations` で engine がループをスキップして silently `pruned` を返す (`prune.ts:14-16`)。`environment` / `module_base_dir` / `mount_html` は pruning 本体が解釈しない pass-through で、内部の等価検証にそのまま渡る (`prune.ts:45-55`)。
-
-契約型 `PruningInput` には `workload` フィールドが定義されているが (`../contracts/pruning-contracts.ts:51-57`)、prune CLI の parse (`prune.ts:83-115`, `prune.ts:137-179`) は **`workload` を転記しない** (受理フィールドは上表が全て)。
+値域チェックは Python 側 contract (`mb_scanner.domain.entities.pruning`) との整合用 — 弾かないと 0 / 負 / 小数の `max_iterations` で engine がループをスキップして silently `pruned` を返す (`prune.ts:14-16`)。`environment` / `module_base_dir` / `mount_html` / `workload` は pruning 本体が解釈しない pass-through で、内部の等価検証にそのまま渡る (`prune.ts:45-55`)。`workload` は ADR-0023 D-β の契約フィールド (`../contracts/pruning-contracts.ts:51-57`) で、他の context フィールドと同様に転記する。
 
 `id` は単発モードでは受理しない。
 
@@ -157,9 +155,9 @@ JSONL (1 行 1 トリプル、空行は無視)。
 | `max_iterations` | optional、整数 `[1, 100000]` (engine が default を解決、`prune.ts:171-175`) |
 | `id` | optional、string。あれば出力行にエコーバック (`prune.ts:151`, `prune.ts:166`) |
 | `setup` | optional、string (`prune.ts:167-170`) |
-| `environment` / `module_base_dir` / `mount_html` | optional (単発と同じ、`prune.ts:176-177`) |
+| `environment` / `module_base_dir` / `mount_html` / `workload` | optional (単発と同じ、`prune.ts:176-177`) |
 
-`timeout_ms` 必須化の理由は check-equivalence-batch と同じ (`prune.ts:133-136`)。`workload` は転記しない (単発と同じ)。
+`timeout_ms` 必須化の理由は check-equivalence-batch と同じ (`prune.ts:133-136`)。`workload` も単発と同じく転記する。
 
 ### stdout
 JSONL (1 行 1 結果、**入力順**)。行単位の parse 失敗は `{"verdict": "error", "error_message": ...}` 行にして処理を継続する (`prune.ts:181-188`, `prune.ts:200-212`)。

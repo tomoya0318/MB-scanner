@@ -57,8 +57,8 @@ cli/prune.ts (composition root)
 | `setup?` | 両側共通の事前定義コード。単数 string (ADR-0004)。省略時 `""` (`engine.ts:197`) |
 | `timeout_ms?` | `checkEquivalence` 1 回あたりの上限。default 5_000 (`engine.ts:186`) |
 | `max_iterations?` | 等価検証の試行回数上限。default 1_000 (`engine.ts:187`) |
-| `environment?` / `module_base_dir?` / `mount_html?` | 後段の等価検証にそのまま渡す実行コンテキスト。`common/` は解釈せず `selakovic/` が closure に積む (`pruner.ts:15-21`) |
-| `workload?` | ADR-0023 D-β の 4 値契約フィールド (changed-fn 経路のみ非 null)。契約上は同様に通過させる宣言 (`pruning-contracts.ts:51-57`) だが、現行の `buildEquivContext` の抽出対象 3 フィールドには含まれていない (`pruner.ts:16-19`) |
+| `environment?` / `module_base_dir?` / `mount_html?` | 後段の等価検証にそのまま渡す実行コンテキスト。`common/` は解釈せず `selakovic/` が closure に積む (`pruner.ts:15-22`) |
+| `workload?` | ADR-0023 D-β の 4 値契約フィールド (changed-fn 経路のみ非 null)。`environment` 等と同様に `selakovic/` が後段の等価検証へ pass-through する (`pruner.ts:15-22`) |
 
 budget の関係: `total_budget_ms = timeout_ms × max_iterations` (`engine.ts:193-204`)。ループは「iterations が `max_iterations` 未満」かつ「経過 wall-time が `total_budget_ms` 未満」の間だけ回る (`engine.ts:139-140`)。`iterations` は `checkEquivalence` を実際に呼んだ回数で消費される (`engine.ts:261`)。
 
