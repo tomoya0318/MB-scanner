@@ -40,10 +40,10 @@ function validateMaxIterations(value: unknown): number | string {
 }
 
 const ENVIRONMENT_VALUES = ["vm", "jsdom"] as const;
-const EQUIV_CONTEXT_STRING_KEYS = ["module_base_dir", "mount_html"] as const;
+const EQUIV_CONTEXT_STRING_KEYS = ["module_base_dir", "mount_html", "workload"] as const;
 
 /**
- * `PruningInput` 由来の等価検証コンテキスト (`environment` / `module_base_dir` / `mount_html`) を
+ * `PruningInput` 由来の等価検証コンテキスト (`environment` / `module_base_dir` / `mount_html` / `workload`) を
  * `obj` から `input` へ転記する。
  * pruning 本体は解釈しない pass-through (selakovic/pruner が checkEquivalence にそのまま渡す) なので
  * 最小限の型チェックのみ — `environment` は `"vm" | "jsdom"`、残りは string。
@@ -212,4 +212,51 @@ export async function runPruneBatch(): Promise<number> {
   }
 
   return EXIT_BATCH_OK;
+}
+
+// 判断: ai-guide/adr/0007-in-source-testing-internal-helpers.md
+if (import.meta.vitest) {
+  const { describe, it, expect } = import.meta.vitest;
+
+  describe("applyEquivalenceContext: workload 転記 (in-source)", () => {
+    it("workload を input へ転記する", () => {
+      const input: PruningInput = { before: "a", after: "b" };
+      expect(applyEquivalenceContext({ workload: "el.click()" }, input)).toBeNull();
+      expect(input.workload).toBe("el.click()");
+    });
+
+    it("workload が null / 未指定なら転記しない (= 未指定扱い)", () => {
+      const fromNull: PruningInput = { before: "a", after: "b" };
+      expect(applyEquivalenceContext({ workload: null }, fromNull)).toBeNull();
+      expect(fromNull.workload).toBeUndefined();
+
+      const fromMissing: PruningInput = { before: "a", after: "b" };
+      expect(applyEquivalenceContext({}, fromMissing)).toBeNull();
+      expect(fromMissing.workload).toBeUndefined();
+    });
+
+    it("workload が非 string ならエラーメッセージを返す", () => {
+      const input: PruningInput = { before: "a", after: "b" };
+      expect(applyEquivalenceContext({ workload: 123 }, input)).toBe(
+        "'workload' field must be a string when present",
+      );
+      expect(input.workload).toBeUndefined();
+    });
+  });
+
+  describe("workload の parse 経路伝播 (in-source)", () => {
+    it("single (parseInput): stdin の workload を input に載せる", () => {
+      const parsed = parseInput(JSON.stringify({ before: "a", after: "b", workload: "el.click()" }));
+      expect(typeof parsed).not.toBe("string");
+      expect((parsed as PruningInput).workload).toBe("el.click()");
+    });
+
+    it("batch (parseBatchLine): 行の workload を input に載せる", () => {
+      const parsed = parseBatchLine(
+        JSON.stringify({ id: "x", before: "a", after: "b", timeout_ms: 1000, workload: "el.click()" }),
+      );
+      expect("error" in parsed).toBe(false);
+      expect((parsed as PruningInput).workload).toBe("el.click()");
+    });
+  });
 }
