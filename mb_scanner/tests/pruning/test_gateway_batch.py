@@ -232,6 +232,19 @@ class TestPruneBatchMocked:
         with pytest.raises(ValueError, match="reserved prefix"):
             gw.prune_batch([PruningInput(id="__mb_prune_batch_idx__evil", before="1", after="1")])
 
+    def test_duplicate_user_id_raises(self, tmp_path: Path) -> None:
+        """重複したユーザー id は対応付け (result_by_key) を破壊するため早期に reject する。"""
+        fake_cli = tmp_path / "cli.js"
+        fake_cli.write_text("// stub")
+        gw = _gateway(fake_cli)
+        with pytest.raises(ValueError, match="Duplicate input id"):
+            gw.prune_batch(
+                [
+                    PruningInput(id="dup", before="1", after="1"),
+                    PruningInput(id="dup", before="2", after="2"),
+                ],
+            )
+
     def test_effective_timeout_ms_mismatch_is_warned(self, tmp_path: Path) -> None:
         """Node が異なる timeout_ms で実行していた場合に警告を error_message に注入する"""
         fake_cli = tmp_path / "cli.js"

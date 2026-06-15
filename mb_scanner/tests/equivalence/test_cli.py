@@ -8,6 +8,7 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from mb_scanner.cli import app
+from mb_scanner.equivalence.gateway import INTERNAL_KEY_PREFIX
 from mb_scanner.equivalence.models import (
     EquivalenceCheckResult,
     EquivalenceInput,
@@ -309,3 +310,26 @@ class TestCheckEquivalenceBatchCLI:
             )
         assert res.exit_code == 0, res.stdout + res.stderr
         assert [item.id for item in captured] == ["line-0001", "line-0002"]
+
+    def test_reserved_prefix_id_collision_exits_2(self, tmp_path: Path) -> None:
+        """Gateway 内部の予約 prefix と衝突する id は Gateway を呼ばずに exit 2 で拒否する。
+
+        従来は equivalence CLI に事前チェックが無く、衝突 id が Gateway まで進んで
+        ``ValueError`` が未処理 traceback で落ちていた (pruning/preprocessing CLI には
+        事前チェックがある)。本テストはその対称化を固定する。
+        """
+        input_path = self._write_jsonl(
+            tmp_path,
+            [
+                {"id": "ok", "before": "1", "after": "1"},
+                {"id": f"{INTERNAL_KEY_PREFIX}foo", "before": "1", "after": "1"},
+            ],
+        )
+        with patch(GATEWAY_CLS) as gw_cls:
+            res = self.runner.invoke(
+                app,
+                ["check-equivalence-batch", "--input", str(input_path)],
+            )
+        assert res.exit_code == 2
+        # Gateway は呼ばれずに拒否される
+        gw_cls.return_value.check_batch.assert_not_called()
