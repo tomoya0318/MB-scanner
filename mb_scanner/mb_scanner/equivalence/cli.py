@@ -21,7 +21,11 @@ import typer
 
 from mb_scanner._utils import resolve_workers
 from mb_scanner.config import settings
-from mb_scanner.equivalence.gateway import EquivalenceCheckerPort, NodeRunnerEquivalenceGateway
+from mb_scanner.equivalence.gateway import (
+    INTERNAL_KEY_PREFIX,
+    EquivalenceCheckerPort,
+    NodeRunnerEquivalenceGateway,
+)
 from mb_scanner.equivalence.models import (
     DEFAULT_TIMEOUT_MS,
     EquivalenceCheckResult,
@@ -103,6 +107,7 @@ def _load_batch_inputs(input_path: Path, default_timeout_ms: int) -> list[Equiva
         - JSONL 行に timeout_ms **なし** → ``default_timeout_ms`` (CLI デフォルト) で補う
 
     id が欠落している場合は ``line-NNNN`` で自動補完する (Gateway でのマッピング用)。
+    Gateway の予約 prefix と衝突する id は事前条件違反として ``BadParameter`` にする。
     """
     inputs: list[EquivalenceInput] = []
     text = input_path.read_text()
@@ -124,9 +129,16 @@ def _load_batch_inputs(input_path: Path, default_timeout_ms: int) -> list[Equiva
         line_payload.setdefault("id", f"line-{idx + 1:04d}")
 
         try:
-            inputs.append(EquivalenceInput.model_validate(line_payload))
+            parsed_input = EquivalenceInput.model_validate(line_payload)
         except ValidationError as e:
             raise typer.BadParameter(f"{input_path}:{idx + 1}: invalid input: {e}") from e
+
+        if parsed_input.id is not None and parsed_input.id.startswith(INTERNAL_KEY_PREFIX):
+            raise typer.BadParameter(
+                f"{input_path}:{idx + 1}: id {parsed_input.id!r} collides with internal "
+                f"reserved prefix {INTERNAL_KEY_PREFIX!r}",
+            )
+        inputs.append(parsed_input)
 
     return inputs
 

@@ -46,8 +46,8 @@ class PrunerPort(Protocol):
         突き合わせる責務を持つ）。受理された各トリプルの処理失敗は他 item の結果に
         波及してはならない。
 
-        ただし、実装が内部で利用する予約プレフィックスに ``PruningInput.id`` が衝突
-        するなど、バッチ全体の前提を満たさない入力は事前条件違反として扱われ、
+        ただし、``id`` の重複や、実装が内部で利用する予約プレフィックスに ``PruningInput.id``
+        が衝突するなど、バッチ全体の前提を満たさない入力は事前条件違反として扱われ、
         ``ValueError`` を送出してバッチ全体を拒否してよい。
         """
         ...
@@ -148,6 +148,7 @@ class NodeRunnerPrunerGateway:
         # ユーザー id との衝突を避けるため、呼び出しごとにランダム suffix を生成する。
         invocation_salt = secrets.token_hex(8)
         indexed: list[tuple[str, str | None, PruningInput]] = []
+        seen_user_ids: set[str] = set()
         for idx, item in enumerate(items):
             original_id = item.id
             if item.id is not None:
@@ -157,6 +158,14 @@ class NodeRunnerPrunerGateway:
                         f"Input id {item.id!r} collides with internal reserved prefix "
                         f"{INTERNAL_KEY_PREFIX!r}. Use a different id scheme.",
                     )
+                # 重複 id はバッチ内で対応付けを破壊する (result_by_key で後勝ち上書きされ、
+                # 出力が同じ result で埋まる)。入力数 == 出力数の対応 (ADR-0024) を守るため reject。
+                if item.id in seen_user_ids:
+                    raise ValueError(
+                        f"Duplicate input id {item.id!r}: ids must be unique within a batch "
+                        "to preserve input-order correspondence (ADR-0024).",
+                    )
+                seen_user_ids.add(item.id)
                 key = item.id
                 sent_item = item
             else:
