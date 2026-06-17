@@ -29,13 +29,11 @@ uv sync --dev
 """
 
 [tasks.setup]
-description = "submodule + Python + mb-analyzer の依存をまとめて入れる (clone / worktree 直後用)"
-depends = ["python-deps"]
+description = "submodule + Python + mb-analyzer の依存とビルド (dist/cli.js) をまとめて用意する (clone / worktree 直後用)"
+depends = ["python-deps", "build-analyzer"]
 run = """
 echo "Updating git submodules (remote tip を追従)..."
 git submodule update --init --recursive --remote
-echo "Installing mb-analyzer dependencies..."
-pnpm --prefix mb-analyzer install --prefer-offline
 """
 
 [tasks.setup-dataset]

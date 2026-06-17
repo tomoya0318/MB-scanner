@@ -42,7 +42,7 @@ JSONから `worktree_dir` / `original_dir` / `branch` を取得する。
 .claude/skills/start-worktree/open-in-terminal.sh "<worktree_dir>" "<original_dir>"
 ```
 
-- **tmux 内**: `open-in-tmux.sh` に委譲し、新しい window（`claude <branch>` 命名・`-d` でバックグラウンド作成）で `SETUP_COMMANDS`（`mise run setup-dataset`。setup に depends するので submodule update + Python/mb-analyzer 依存も内包し、加えて dataset vendor の node_modules を再生成する。これを欠くと integration テストが setup-failure → error になる）実行後に Claude を起動する。window ID は worktree の `.tmux-window` に保存され finish-worktree が利用する
+- **tmux 内**: `open-in-tmux.sh` に委譲し、新しい window（`claude <branch>` 命名・`-d` でバックグラウンド作成）で `SETUP_COMMANDS`（`mise run setup-dataset`。setup に depends するので submodule update + Python/mb-analyzer 依存 + mb-analyzer のビルド (dist/cli.js) も内包し、加えて dataset vendor の node_modules を再生成する。dist は worktree に持ち越されず未ビルドだと Python 側が `node mb-analyzer/dist/cli.js` を起動できない。vendor deps を欠くと integration テストが setup-failure → error になる）実行後に Claude を起動する。window ID は worktree の `.tmux-window` に保存され finish-worktree が利用する
 - **tmux 外**: 新しいペインで実行すべきコマンド（`cd "<worktree>" && <setup> && claude`）を表示する（macOS ならクリップボードにもコピーする）。スキルはこの出力をそのままユーザーに見せる
 - `WORKTREE_TERMINAL=tmux|manual` を環境変数で渡すと判別を上書きできる
 - 起動後のセッションで `/start-implementation` を使って計画・実装を行う

@@ -23,9 +23,11 @@
 # 例（セットアップ不要な場合）:
 #   SETUP_COMMANDS=""
 # ──────────────────────────────────────────────────────────────────────────
-# setup-dataset は setup に depends するので submodule update + Python/mb-analyzer 依存も内包する
-# (.mise.toml [tasks.setup-dataset] → [tasks.setup])。dataset vendor の node_modules を再生成しないと
-# integration テスト (server-changed-fn 等) が setup-failure → error になるため worktree 新設時から含める。
+# setup-dataset は setup に depends するので submodule update + Python/mb-analyzer 依存 + mb-analyzer
+# のビルド (dist/cli.js) も内包する (.mise.toml [tasks.setup-dataset] → [tasks.setup] → [tasks.build-analyzer])。
+# dist は gitignore で worktree に持ち越されず、Python 側が node mb-analyzer/dist/cli.js を起動するため
+# 未ビルドだと実行不能。また dataset vendor の node_modules を再生成しないと integration テスト
+# (server-changed-fn 等) が setup-failure → error になる。両方とも worktree 新設時から含める。
 SETUP_COMMANDS="${SETUP_COMMANDS-mise run setup-dataset}"
 
 set -euo pipefail
