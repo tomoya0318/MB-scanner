@@ -87,7 +87,7 @@ echo "$RESULT" | jq -r '.saved_dirs[]'
 - 連番でないファイル/ディレクトリが残っていれば、まとめて新しい `NNNN_<SLUG>/` に `mv` する
 - 出力 JSON は常に `{"saved_dirs": [...]}` 形式
 
-### Step 3: worktree 削除 + ベストエフォート pane close
+### Step 3: worktree 削除 + ベストエフォート tmux window close
 
 `cleanup-worktree.sh` を **単一の Bash 呼び出しで** 実行する。
 削除後は worktree のディレクトリが消えるため、複数ステップに分けない。
@@ -98,17 +98,17 @@ echo "$RESULT" | jq -r '.saved_dirs[]'
 ```
 
 スクリプトの挙動:
-1. `.cmux-surface` を読み取り（worktree 削除前に）
+1. `.tmux-window` を読み取り（worktree 削除前に）
 2. `cd $ORIGINAL_REPO_DIR` で cwd を退避
 3. `git worktree remove $WORKTREE_DIR`
-4. ベストエフォートで `cmux close-surface` を試行
-   - 成功 → pane が閉じてセッション終了
-   - 失敗 / `.cmux-surface` 無し → 「完了しました。この pane は手動で閉じてください。」を出力
+4. ベストエフォートで `tmux kill-window` を試行
+   - 成功 → 数秒後に window（＝この worktree セッション）が閉じる。自 window を即時 kill すると出力が途切れるため遅延バックグラウンドで閉じる
+   - 失敗 / `.tmux-window` 無し → 「完了しました。この window は手動で閉じてください。」を出力
 
 ## 完了後
 
 - `$ORIGINAL_REPO_DIR/tmp/` 以下に作業内容が連番で保存される
 - worktree ディレクトリが削除される
-- pane が自動 close されたか、ユーザーが手動で閉じる
+- tmux window が自動 close されたか、ユーザーが手動で閉じる
 
-**注意**: pane を手動で閉じる場合、Claude を `/exit` で抜けると親 shell が削除済みディレクトリに取り残される（`pwd` が無効）。pane ごと閉じるのが最もきれいです。
+**注意**: window を手動で閉じる場合、Claude を `/exit` で抜けると親 shell が削除済みディレクトリに取り残される（`pwd` が無効）。window ごと閉じる（`prefix &`）のが最もきれいです。

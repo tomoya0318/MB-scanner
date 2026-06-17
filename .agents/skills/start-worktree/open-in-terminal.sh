@@ -1,7 +1,7 @@
 #!/bin/bash
 # worktree 用に新しい Claude セッションを起動する（または起動コマンドを案内する）。
-# cmux 環境では右ペインを開いて自動起動する。それ以外（Warp など）では、
-# 「別のターミナルで実行するコマンド」を表示する（ペイン操作はしない）。
+# tmux 内では新しい window を開いて自動起動する。それ以外（tmux 外）では、
+# 「別のターミナルで実行するコマンド」を表示する（window 操作はしない）。
 # Usage: open-in-terminal.sh <worktree-dir> <original-dir> [ai-agent]
 #
 # ── プロジェクトごとのカスタマイズ ────────────────────────────────────────
@@ -45,18 +45,18 @@ else
   LAUNCH_CMD="cd \"$WORKTREE_ABS\" && ORIGINAL_REPO_DIR=\"$ORIGINAL_DIR\" $AI_AGENT"
 fi
 
-# 端末判別（WORKTREE_TERMINAL=cmux|manual で上書き可能）
+# 端末判別（WORKTREE_TERMINAL=tmux|manual で上書き可能）
 TERMINAL="${WORKTREE_TERMINAL:-}"
 if [ -z "$TERMINAL" ]; then
-  if command -v cmux >/dev/null 2>&1; then
-    TERMINAL=cmux
+  if [ -n "${TMUX:-}" ]; then
+    TERMINAL=tmux
   else
     TERMINAL=manual
   fi
 fi
 
-if [ "$TERMINAL" = "cmux" ]; then
-  exec "$SCRIPT_DIR/open-in-cmux.sh" "$WORKTREE_ABS" "$ORIGINAL_DIR" "$AI_AGENT"
+if [ "$TERMINAL" = "tmux" ]; then
+  exec "$SCRIPT_DIR/open-in-tmux.sh" "$WORKTREE_ABS" "$ORIGINAL_DIR" "$AI_AGENT"
 fi
 
 # manual: worktree は作成済み。あとはユーザーが自分で新しいペイン/タブ/ウィンドウへ移動して実行する。

@@ -1,5 +1,5 @@
 #!/bin/bash
-# git worktreeを作成する（cmuxは起動しない）
+# git worktreeを作成する（AI agent / tmux window は起動しない）
 # Usage: create-worktree.sh <ブランチ名>
 # Output: JSON { worktree_dir, original_dir, branch }
 

@@ -41,7 +41,7 @@ mb-analyzer/coverage/
 # Editor / local tooling
 .vscode/
 .mise/
-.cmux-surface
+.tmux-window
 research/src/research/*/inputs/
 
 # research 配下の実走 artifact (extracted/equiv-input/equiv-results/prune-* など) は

@@ -1,13 +1,13 @@
 #!/bin/bash
-# worktree を削除し、可能なら cmux pane も close する
+# worktree を削除し、可能なら tmux window も閉じる
 #
 # 動作:
-# 1. .cmux-surface を事前読み取り（worktree 削除後は読めなくなるため）
+# 1. .tmux-window を事前読み取り（worktree 削除後は読めなくなるため）
 # 2. cwd を ORIGINAL_DIR に退避
 # 3. git worktree remove
-# 4. ベストエフォートで cmux close-surface
-#    - 成功 → このプロセスごと消える
-#    - 失敗 / .cmux-surface 無し → 完了メッセージを出して正常終了
+# 4. ベストエフォートで tmux kill-window
+#    - 成功 → window（＝このセッション）ごと消える
+#    - 失敗 / .tmux-window 無し → 完了メッセージを出して正常終了
 #
 # Usage: cleanup-worktree.sh <worktree-dir> <original-dir>
 
@@ -39,10 +39,10 @@ if [[ ! -d "$ORIGINAL_DIR" ]]; then
   exit 1
 fi
 
-# Step 1: surface ID を削除前に読み取り
-SURFACE=""
-if [[ -f "$WORKTREE_DIR/.cmux-surface" ]]; then
-  SURFACE=$(cat "$WORKTREE_DIR/.cmux-surface" 2>/dev/null || true)
+# Step 1: tmux window ID を削除前に読み取り
+TMUX_WINDOW=""
+if [[ -f "$WORKTREE_DIR/.tmux-window" ]]; then
+  TMUX_WINDOW=$(cat "$WORKTREE_DIR/.tmux-window" 2>/dev/null || true)
 fi
 
 # Step 2: cwd を退避（呼び出し元の cwd 状態に依存しないため）
@@ -55,17 +55,21 @@ cd "$ORIGINAL_DIR"
 # 呼び出し元の cwd が宙に浮く事故になるため必ず --force を付ける。
 git worktree remove --force "$WORKTREE_DIR"
 
-# Step 4: ベストエフォート pane close
-PANE_CLOSED=0
-if [[ -n "$SURFACE" ]]; then
-  if command -v cmux >/dev/null 2>&1; then
-    if cmux close-surface --surface "$SURFACE" 2>/dev/null; then
-      PANE_CLOSED=1
-    fi
-  fi
+# Step 4: ベストエフォート tmux window close
+# 通常 finish-worktree は worktree の window 内（＝このセッション）から走るため、
+# 対象 window はこのスクリプト自身が動いている window になる。同期 kill すると
+# 出力が途切れて呼び出し元が結果を受け取れないので、わずかに遅延させて
+# バックグラウンドで kill する。
+WINDOW_CLOSED=0
+if [[ -n "$TMUX_WINDOW" ]] && command -v tmux >/dev/null 2>&1 \
+   && tmux list-windows -a -F '#{window_id}' 2>/dev/null | grep -qx "$TMUX_WINDOW"; then
+  echo "完了しました。tmux window ($TMUX_WINDOW) を閉じます。"
+  ( sleep 2; tmux kill-window -t "$TMUX_WINDOW" 2>/dev/null ) >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+  WINDOW_CLOSED=1
 fi
 
-# ここまで来た = pane が閉じなかった or surface 情報なし
-if (( PANE_CLOSED == 0 )); then
-  echo "完了しました。この pane は手動で閉じてください。"
+# ここまで来た = window が見つからない or tmux 外
+if (( WINDOW_CLOSED == 0 )); then
+  echo "完了しました。この window は手動で閉じてください。"
 fi

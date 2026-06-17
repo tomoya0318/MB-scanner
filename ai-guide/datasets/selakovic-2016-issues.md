@@ -32,7 +32,7 @@ git clone --recurse-submodules <this-repo-url>
 git submodule update --init --recursive
 ```
 
-`start-worktree` skill の `SETUP_COMMANDS` ([`open-in-cmux.sh`](../../.agents/skills/start-worktree/open-in-cmux.sh)) に組み込み済みのため、新 worktree では自動展開される。
+`start-worktree` skill の `SETUP_COMMANDS` ([`open-in-tmux.sh`](../../.agents/skills/start-worktree/open-in-tmux.sh)) に組み込み済みのため、新 worktree では自動展開される。
 
 ### vendor deps の install (ADR-0016)
 
