@@ -12,6 +12,10 @@
 #     spawn 元（main）の cwd を引き継いだ別 Claude を起動する。
 #   - 起動形は `claude "/<skill> <arg> [mode]"`。結論はファイル（review.md /
 #     consult-*.md）に書かれ、main はそれだけを読む（会話本体は main に載らない）。
+#   - ペインは「対話シェルを PID1 で起動 → send-keys で claude を投入」する。
+#     claude をペインの直接コマンドにすると、起動失敗・即終了時に remain-on-exit=off で
+#     ペインが痕跡なく消える（= 起動しなかったように見える）。シェルを噛ませることで
+#     失敗してもエラーがペインに残り、プロンプトに戻って再実行・調査できる。
 
 set -euo pipefail
 
@@ -36,15 +40,21 @@ fi
 
 REPO="$(pwd)"
 
-# spawn 先で実行する slash 起動。引数は %q で shell-safe な単一トークンにする。
+# spawn 先で実行する slash 起動。slash command 全体を 1 引数として claude に渡す。
 INVOKE="/$SKILL $ARG"
 [ -n "$MODE" ] && INVOKE="$INVOKE $MODE"
-SHCMD="claude $(printf '%q' "$INVOKE")"
 
-# 横分割で別ペインを作り、フォーカスを移す（ユーザがそのまま同期作業に入れる）。
+# 対話シェルへ送り込むコマンド行。INVOKE をシングルクォートで括り、
+# 内部の ' は '\'' エスケープして 1 トークンに保つ。
+INVOKE_Q="${INVOKE//\'/\'\\\'\'}"
+SHCMD="claude '$INVOKE_Q'"
+
+# 横分割で別ペインを作る。ペインの PID1 は default-shell（ログイン対話シェル）。
+# claude を直接コマンドにせず、シェル起動後に send-keys で投入する（失敗痕跡を残すため）。
 read -r PANE_ID < <(
-  tmux split-window -h -P -F '#{pane_id}' -c "$REPO" "$SHCMD"
+  tmux split-window -h -P -F '#{pane_id}' -c "$REPO"
 )
+tmux send-keys -t "$PANE_ID" "$SHCMD" Enter
 
 echo "分割ペイン ($PANE_ID) で $SKILL を起動しました。"
 case "$SKILL" in
